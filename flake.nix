@@ -12,7 +12,7 @@
   # paredit-cli provides structural S-expression tooling for this repo's
   # Lisp sources: a dev-shell binary for agent-driven refactors and a
   # structural-parse lint gate reused in `checks`.
-  inputs.paredit-cli.url = "github:nerima-lisp/paredit-cli/v0.7.0";
+  inputs.paredit-cli.url = "github:nerima-lisp/paredit-cli/v0.8.0";
   inputs.paredit-cli.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs =
