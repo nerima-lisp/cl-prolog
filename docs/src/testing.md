@@ -7,7 +7,7 @@ cases, per-query cases, fixtures, and generated relational properties.
 ## Run the suite
 
 The Nix runner is self-contained and is the authoritative path on supported
-systems (`x86_64-linux`, `aarch64-linux`, `aarch64-darwin`):
+systems (`x86_64-linux`, `aarch64-darwin`):
 
 ```sh
 nix run .
