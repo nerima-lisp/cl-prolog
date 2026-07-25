@@ -55,14 +55,29 @@ literal with \" and \\ escaped for writeq/write_canonical."
         (write-char #\" stream))
       (write-string string stream)))
 
+(defun %unquoted-prolog-atom-name-p (name)
+  "True when NAME reads back as this atom without quotes, per ISO 13211-1 6.4.2.
+
+Besides a plain atom name, that covers a graphic token -- a non-empty run of
+graphic characters, so `+', `=..' and `\\+' print bare -- and the solo chars
+`!' and `;'.  Deliberately excluded: `,' and `|', which would be read back as
+separators; `{}', which this parser does not yet read as an atom; and a lone
+`.', which ISO 6.4.8 makes the end token when layout or end of input follows
+it, so it has no bare reading at all (a longer run such as `..' does)."
+  (or (%plain-prolog-atom-name-p name)
+      (string= name "!")
+      (string= name ";")
+      (and (plusp (length name))
+           (not (string= name "."))
+           (every #'%prolog-graphic-character-p name))))
+
 (defun %write-prolog-atom (atom stream quotedp)
   ;; %ATOM-TEXT, not SYMBOL-NAME: an atom interned verbatim carries its text
   ;; as-is, so downcasing here would print `'FooBar'' as `foobar' -- and the
   ;; result would then read back as a different atom.
   (let ((name (%atom-text atom)))
     (cond
-      ((eq atom '|!|) (write-char #\! stream))
-      ((%plain-prolog-atom-name-p name) (write-string name stream))
+      ((%unquoted-prolog-atom-name-p name) (write-string name stream))
       (quotedp (%write-quoted-prolog-atom name stream))
       (t (write-string name stream)))))
 
@@ -180,8 +195,23 @@ argument one below that so a bare `->'/`*->' on the left needs no parens."
                         quotedp numbervarsp ignore-opsp)
     (when parenthesize (write-char #\) stream))))
 
+(defun %write-prolog-functor (atom stream quotedp)
+  "Write ATOM as a compound term's functor, quoting anything but a plain atom
+name.
+
+Stricter than %WRITE-PROLOG-ATOM on purpose: this reader does not yet apply ISO
+6.3.3's rule that a name is a functor only when `(' follows it with no layout
+between, so it reads a bare `+(1,2)' as the prefix operator `+' applied to
+`(1,2)'.  Emitting `'+'(1,2)' keeps write_canonical/1 output re-readable, which
+ISO 8.14.2 requires of it."
+  (let ((name (%atom-text atom)))
+    (cond
+      ((%plain-prolog-atom-name-p name) (write-string name stream))
+      (quotedp (%write-quoted-prolog-atom name stream))
+      (t (write-string name stream)))))
+
 (defun %write-prolog-compound (term stream quotedp numbervarsp ignore-opsp)
-  (%write-prolog-atom (first term) stream quotedp)
+  (%write-prolog-functor (first term) stream quotedp)
   (write-char #\( stream)
   (loop for argument in (rest term)
         for firstp = t then nil

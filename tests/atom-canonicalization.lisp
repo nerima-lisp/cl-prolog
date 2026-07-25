@@ -76,9 +76,16 @@
 
 ;;; The writer must emit text that reads back as the same atom.
 
+(defparameter +round-trip-atom-texts+
+  '("foo" "fooBar" "FooBar" "FOO" "A" "a" "foo bar" "Hello world" "foo_Bar"
+    "abc" "ABC" "[]" "" "?x" "?X" "it's" "$VAR"
+    ;; symbolic spellings, including the three the writer must keep quoted
+    "+" "-" "*" "/" "\\" "=.." "@<" "\\+" ":-" "-->" "?-" "^" "@" "#$&" ".."
+    "!" ";" "," "|" "{}" ".")
+  "Atom texts covering every shape the writer decides quoting by.")
+
 (deftest writeq-round-trips-every-atom-spelling ()
-  (dolist (text '("foo" "fooBar" "FooBar" "FOO" "A" "a" "foo bar" "Hello world"
-                  "foo_Bar" "abc" "ABC" "[]" "+" "" "?x" "?X" "it's" "$VAR"))
+  (dolist (text +round-trip-atom-texts+)
     (let* ((atom (prolog-atom text))
            (rendered (prolog-term-string atom)))
       (is-equal text (prolog-atom-text atom)
@@ -86,6 +93,40 @@
       (is (eq atom (read-prolog-term rendered))
           (format nil "writeq of ~S rendered ~S, which read back as a ~
                        different atom" text rendered)))))
+
+(defun term-contains-atom-p (term atom)
+  (cond ((eq term atom) t)
+        ((consp term) (or (term-contains-atom-p (car term) atom)
+                          (term-contains-atom-p (cdr term) atom)))
+        (t nil)))
+
+(deftest writeq-output-reads-back-in-every-term-position ()
+  "Rendering an atom at top level is not enough: the reader's treatment of an
+unquoted symbolic atom depends on what follows it, so the output has to read
+back as the same atom as an argument, a list element, and a list tail too."
+  (dolist (text +round-trip-atom-texts+)
+    (let* ((atom (prolog-atom text))
+           (rendered (prolog-term-string atom)))
+      (dolist (source (list rendered
+                            (format nil "f(~A)" rendered)
+                            (format nil "f(~A, 1)" rendered)
+                            (format nil "f(1, ~A)" rendered)
+                            (format nil "[~A]" rendered)
+                            (format nil "[a|~A]" rendered)))
+        (is (term-contains-atom-p (read-prolog-term source) atom)
+            (format nil "~S rendered as ~S, which did not read back as that ~
+                         atom in ~S" text rendered source))))))
+
+(deftest writeq-quotes-only-what-cannot-read-back-bare ()
+  "ISO 13211-1 6.4.2: a graphic token and the solo chars `!' and `;' are name
+tokens, so quoting them would be noise.  The exceptions each have a reason —
+`,' and `|' would read back as separators, `{}' is not yet read as an atom, and
+a lone `.' is the end token."
+  (dolist (bare '("+" "-" "=.." "@<" "\\+" ":-" "-->" "#$&" ".." "!" ";"))
+    (is-equal bare (prolog-term-string (prolog-atom bare))))
+  (dolist (text '("," "|" "{}" "."))
+    (is-equal (format nil "'~A'" text)
+              (prolog-term-string (prolog-atom text)))))
 
 (deftest writeq-quotes-exactly-the-atoms-that-need-it ()
   ;; A name that is already a plain atom name needs no quotes; anything else
