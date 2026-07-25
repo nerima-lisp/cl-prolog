@@ -191,15 +191,24 @@
             '';
         in
         {
-          # The complete suite is an ASDF system.  cl-weave is exposed through
-          # CL_SOURCE_REGISTRY, so no project-local test runner is required.
-          default = mkSbclCheck {
-            name = "cl-prolog-weave-tests";
-            extraEnv = ''
-              export CL_SOURCE_REGISTRY="${cl-weave.packages.${system}.default}/share/common-lisp/source//:$PWD//:"
-            '';
-            operation = "(asdf:test-system :cl-prolog/test)";
-          };
+          # Runs run-tests.lisp, the same file a developer runs by hand, rather
+          # than re-spelling the ASDF invocation here: the local command and the
+          # CI gate cannot then drift apart.  cl-weave is exposed through
+          # CL_SOURCE_REGISTRY.
+          #
+          # -k sends SIGKILL 30s after the SIGTERM deadline: SBCL defers
+          # signals to safepoints, so a tight compiled loop (a runaway Prolog
+          # backtracking bug is exactly this) can outlive a bare SIGTERM and
+          # fall through to the enclosing CI job timeout instead of failing
+          # here with an attributable error.
+          default =
+            pkgs.runCommand "cl-prolog-weave-tests" { nativeBuildInputs = [ pkgs.sbcl ]; }
+              ''
+                ${sbclCheckPrelude}
+                export CL_SOURCE_REGISTRY="${cl-weave.packages.${system}.default}/share/common-lisp/source//:$PWD//:"
+                timeout -k 30 600 sbcl --script run-tests.lisp
+                touch $out
+              '';
 
           # Structural parse gate over every tracked Lisp source: fails if
           # any .lisp/.asd file is not a balanced S-expression document.

@@ -1,6 +1,6 @@
 # Testing
 
-cl-prolog's regression suite is the `cl-prolog/tests` ASDF system. It depends on
+cl-prolog's regression suite is the `cl-prolog/test` ASDF system. It depends on
 [cl-weave](https://github.com/nerima-lisp/cl-weave) and covers isolated table
 cases, per-query cases, fixtures, and generated relational properties.
 
@@ -32,18 +32,16 @@ nix flake check
     suite directly:
 
     ```sh
-    sbcl --non-interactive \
-      --eval '(require :asdf)' \
-      --load cl-prolog.asd \
-      --eval '(asdf:test-system :cl-prolog)'
+    sbcl --script run-tests.lisp
     ```
 
     Then rely on CI for the Nix `nix flake check` path.
 
 ## What `nix flake check` runs
 
-- **`checks.default`** — the ASDF/cl-weave regression suite, via a plain SBCL
-  invocation with the compiled-in default dynamic space.
+- **`checks.default`** — the cl-weave regression suite, run through
+  `run-tests.lisp` under a plain SBCL with the compiled-in default dynamic
+  space.
 - **`checks.paredit-lint`** — a structural parse gate over every tracked
   `.lisp`/`.asd` file, failing if any is not a balanced S-expression document.
 - **`checks.examples`** — loads every shipped example through ASDF
