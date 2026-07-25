@@ -136,7 +136,10 @@ The macro expands each case into two DEFTEST-QUERIES specs."
           (number-codes-error-type
            (map 'list #'char-code
                 (format nil "1e~A" (make-string 40 :initial-element #\9)))))
-  (:equal 'prolog-resource-error
+  ;; An exponent within the magnitude bound but beyond what a double can hold is
+  ;; rejected by the reader as an ill-formed number token.  The bound above is
+  ;; what stops unbounded work; this one only has to be refused, not classified.
+  (:equal 'prolog-syntax-error
           (number-codes-error-type
            (map 'list #'char-code "1.0e4095"))))
 

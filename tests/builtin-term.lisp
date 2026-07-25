@@ -42,8 +42,9 @@
   ((cl-prolog::@>= 2 2) :succeeds)
   ((cl-prolog::@>= atom (node)) :fails)
   ((cl-prolog::compare ?order 1 2) :ordered (((?order . <))))
-  ((cl-prolog::compare ?order 1 1.0) :ordered (((?order . <))))
-  ((cl-prolog::compare ?order 1.0 1) :ordered (((?order . >))))
+  ;; ISO 13211-1 7.2.1: a Float precedes an Integer it compares equal to.
+  ((cl-prolog::compare ?order 1 1.0) :ordered (((?order . >))))
+  ((cl-prolog::compare ?order 1.0 1) :ordered (((?order . <))))
   ((cl-prolog::compare ?order value value) :ordered (((?order . =))))
   ((cl-prolog::compare ?order (node) value) :ordered (((?order . >))))
   ((cl-prolog::compare ?order (a p) (a q)) :ordered (((?order . <))))

@@ -199,10 +199,60 @@
     ;; syntax_error, the same class the reader raises for it.
     (%raise-syntax-error-for culprit-text environment operation)))
 
+(defun %read-number-token (text environment operation)
+  "Read TEXT as one Prolog number token, per ISO 13211-1 8.16.7/8.16.8.
+
+The standard says the characters are read as a *number token*, which is the
+reader's own grammar: leading layout, a sign, and the `0'c'/`0x'/`0o'/`0b'
+notations all belong to it.  Delegating to the reader is what keeps this
+agreeing with what the same text means in source."
+  ;; The exponent-magnitude bound is this engine's own guard against a short
+  ;; text that would demand an enormous float; it has to run before the reader
+  ;; sees the text, since the reader would simply fail on it.
+  (let ((exponent (position-if (lambda (character)
+                                 (member character '(#\e #\E) :test #'char=))
+                               text)))
+    (when exponent
+      (let ((digits (count-if #'digit-char-p text :start exponent)))
+        (when (> digits (length (princ-to-string
+                                 *max-prolog-arithmetic-exponent-magnitude*)))
+          (%raise-resource-error
+           "EXPONENT_MAGNITUDE" environment operation
+           "numeric exponent exceeds the configured magnitude limit"))
+        (let ((value (ignore-errors
+                      (parse-integer text :start (1+ exponent) :junk-allowed t))))
+          (when (and value
+                     (> (abs value) *max-prolog-arithmetic-exponent-magnitude*))
+            (%raise-resource-error
+             "EXPONENT_MAGNITUDE" environment operation
+             "numeric exponent exceeds the configured magnitude limit"))))))
+  (let ((tokens (handler-case (%tokenize-prolog text)
+                  (prolog-parser-resource-error (condition)
+                    (%raise-parser-resource-error condition environment operation))
+                  (error ()
+                    (%raise-syntax-error-for text environment operation)))))
+    ;; Exactly one number token, optionally signed, and nothing else.  Reading
+    ;; the text as a *term* instead would also accept `1.', which is a number
+    ;; followed by an end token rather than a number token.
+    (let* ((index 0)
+           (sign (let ((token (aref tokens 0)))
+                   (when (and (eq :operator (%token-kind token))
+                              (member (%token-value token) '("+" "-")
+                                      :test #'string=))
+                     (incf index)
+                     (if (string= (%token-value token) "-") -1 1)))))
+      (let ((number (aref tokens index))
+            (end (aref tokens (min (1+ index) (1- (length tokens))))))
+        (unless (and (eq :number (%token-kind number))
+                     (eq :eof (%token-kind end)))
+          (%raise-syntax-error-for text environment operation))
+        (if (eql sign -1) (- (%token-value number)) (%token-value number))))))
+
 (defun %text-number (text environment operation)
   (%check-text-resource-limit
    text *max-prolog-numeric-lexeme-length* "NUMBER_TEXT_LENGTH"
    environment operation "numeric text exceeds the configured length limit")
+  (return-from %text-number (%read-number-token text environment operation))
   (let* ((length (length text))
          (position 0)
          (sign 1)

@@ -90,6 +90,10 @@ false for a pair `X = Y' unifies, and `sort/2' would keep both copies."
      (cond
        ((< left right) -1)
        ((> left right) 1)
+       ;; ISO 13211-1 7.2.1: numbers order by value, and a Float precedes an
+       ;; Integer it compares equal to -- so 1.0 @< 1 holds.
+       ((and (floatp left) (integerp right)) -1)
+       ((and (integerp left) (floatp right)) 1)
        (t (%compare-strings (prin1-to-string left)
                             (prin1-to-string right)))))
     (t (%compare-strings (prin1-to-string left)
