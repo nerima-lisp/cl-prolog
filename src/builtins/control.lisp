@@ -368,14 +368,43 @@ still shares the caller's cut barrier."
                          "halt/1 requires an integer exit code"))
     (error 'prolog-halt :code resolved)))
 
-(define-builtin (and &rest goals) (rulebase environment depth emit)
+(define-builtin ((and |,|) &rest goals) (rulebase environment depth emit)
   ;; GOALS is always a list of goals; normalize each element so a leading
   ;; bare atom is not mistaken for a compound goal's functor.
   (%prove-transparent/k (mapcar #'%ensure-goal-form goals)
                         rulebase environment depth emit))
 
-(define-builtin (or &rest alternatives) (rulebase environment depth emit)
+(defun %if-then-arrow-goal (term)
+  "Return (VALUES CONDITION THEN SOLVER) when TERM is an `->'/2 or `*->'/2 goal.
+
+ISO 7.8.8 defines if-then-else as `;'/2 whose left argument is an arrow, so the
+disjunction has to look inside its first alternative rather than treat the arrow
+as an ordinary goal.  The parser folds the infix spelling into one term, but the
+functional notation `;(->(C,T), E)' the standard also admits arrives here."
+  (when (and (%proper-list-p term) (= 3 (length term)) (symbolp (first term)))
+    (let ((text (%atom-text (first term))))
+      (cond
+        ((string= text "->") (values (second term) (third term)
+                                     #'%solve-if-then-else))
+        ((string= text "*->") (values (second term) (third term)
+                                      #'%solve-soft-if-then-else))))))
+
+(define-builtin ((or |;|) &rest alternatives) (rulebase environment depth emit)
   (let ((caller-cut-tag *caller-cut-tag*))
-    (dolist (alternative alternatives)
-      (%prove-with-cut-tag/k alternative rulebase environment depth
-                             caller-cut-tag emit))))
+    (multiple-value-bind (condition then solver)
+        (and (= 2 (length alternatives)) (%if-then-arrow-goal (first alternatives)))
+      (if solver
+          (funcall solver condition then (second alternatives)
+                   rulebase environment depth caller-cut-tag emit
+                   (%iso-atom "IF_THEN_ELSE"))
+          (dolist (alternative alternatives)
+            (%prove-with-cut-tag/k alternative rulebase environment depth
+                                   caller-cut-tag emit))))))
+
+(define-builtin (^ existential goal) (rulebase environment depth emit)
+  ;; ISO 8.10.2: `^'/2 marks a variable existential inside bagof/setof; called
+  ;; as an ordinary goal it is simply its right argument.
+  (declare (ignore existential))
+  (%prove-with-cut-tag/k (%resolve-callable-goal goal environment
+                                                 (%iso-atom "^"))
+                         rulebase environment depth *caller-cut-tag* emit))
