@@ -65,8 +65,8 @@ nix run github:nerima-lisp/cl-prolog
 ```
 
 !!! info "Supported systems"
-    The flake defines outputs for `x86_64-linux`, `aarch64-linux`, and
-    `aarch64-darwin`. On other platforms (e.g. Intel Mac, Windows), use the
+    The flake defines outputs for `x86_64-linux` and `aarch64-linux`.
+    On other platforms (macOS, Windows), use the
     ASDF workflow above instead. See [Development](development.md) for
     details.
 
