@@ -2,11 +2,23 @@
 
 All notable changes to `cl-prolog` are recorded in this file.
 
-The format follows a simple Keep a Changelog style.  Unreleased work
-accumulates in an `Unreleased` section at the top of the file, which is renamed
-to the version being cut at release time.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 1.0.1 - 2026-07-26
+<!--
+Heading format is fixed across the org:
+
+    ## [X.Y.Z] - YYYY-MM-DD
+
+The version is bracketed, the separator is an ASCII hyphen (not an em dash),
+and the date is ISO 8601. release.yml extracts the section matching the pushed
+tag as the GitHub Release body, so a heading that deviates makes the release
+fail. Keep `## [Unreleased]` at the top at all times.
+-->
+
+## [Unreleased]
+
+## [1.0.1] - 2026-07-26
 
 ### Fixed
 
@@ -38,7 +50,7 @@ dynamic-database.lisp` now covers all three, asserting the specific condition
 class — a bare "signals something" expectation accepts the Lisp `UNBOUND-VARIABLE`
 just as readily as the ISO error and would not have caught the original defect.
 
-## 1.0.0 - 2026-07-25
+## [1.0.0] - 2026-07-25
 
 First stable release: the exported surface is now considered stable.
 
@@ -244,7 +256,7 @@ ordinary Prolog source text, and each now covered by
 - all in-repo `github.com/takeokunn/cl-prolog` references now point at
   `github.com/nerima-lisp/cl-prolog`, the project's current org
 
-## 0.8.0 - 2026-07-25
+## [0.8.0] - 2026-07-25
 
 ### Added
 
@@ -344,7 +356,7 @@ ordinary Prolog source text, and each now covered by
 - `char_type/2`/`code_type/2` `graphic` now denotes the Prolog symbol-char
   class (distinct from `graph`)
 
-## 0.7.0 - 2026-07-24
+## [0.7.0] - 2026-07-24
 
 ### Added
 
@@ -379,7 +391,7 @@ ordinary Prolog source text, and each now covered by
   semantics, development, troubleshooting) synced with the module split and
   the new tabling and benchmarking surfaces
 
-## 0.6.0 - 2026-07-19
+## [0.6.0] - 2026-07-19
 
 ### Added
 
@@ -428,7 +440,7 @@ ordinary Prolog source text, and each now covered by
 - finite-domain arithmetic expressions no longer raise program errors from
   an outdated internal call site
 
-## 0.5.0 - 2026-07-13
+## [0.5.0] - 2026-07-13
 
 ### Added
 
@@ -458,7 +470,7 @@ ordinary Prolog source text, and each now covered by
   `read_term/3` singleton reporting, and end-of-stream transitions now follow
   their intended relational or ISO semantics
 
-## 0.4.1 - 2026-07-12
+## [0.4.1] - 2026-07-12
 
 ### Changed
 
@@ -482,7 +494,7 @@ ordinary Prolog source text, and each now covered by
 - a regression test that `read_term/2` rejects unsupported read options
   with an ISO domain error
 
-## 0.4.0 - 2026-07-12
+## [0.4.0] - 2026-07-12
 
 ### Added
 
@@ -546,7 +558,7 @@ ordinary Prolog source text, and each now covered by
 - `(and true !)`-style conjunctions whose first goal is a bare atom are no
   longer misread as a single compound goal
 
-## 0.2.0 - 2026-07-10
+## [0.2.0] - 2026-07-10
 
 Engine and API overhaul. The public surface was re-cut to the ideal API;
 compatibility aliases were removed rather than deprecated.
@@ -603,7 +615,7 @@ compatibility aliases were removed rather than deprecated.
 - runtime evaluation of `(:when EXPR)` goals in query data: `:when` now
   requires a function object; expression guards belong in the DSL macros
 
-## 0.1.0 - 2026-07-09
+## [0.1.0] - 2026-07-09
 
 Initial release: macro-first rulebase DSL, CPS proof search, builtin goals,
 DCG support, examples, benchmark scenarios, Nix packaging, and repository policy files
