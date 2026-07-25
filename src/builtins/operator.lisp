@@ -88,7 +88,7 @@
        (or (logic-var-p specifier)
            (eq specifier (operator-definition-specifier definition)))
        (or (logic-var-p name)
-           (eq name (operator-definition-name definition)))))
+           (%same-atom-text-p name (operator-definition-name definition)))))
 
 (defun %emit-operator-definition (definition priority specifier name environment emit)
   (%unify-emit
@@ -102,7 +102,6 @@
                      specifier-environment emit))))))
 
 (define-builtin (op priority specifier names) (rulebase environment depth emit)
-  (declare (ignore depth))
   (let* ((operation (%iso-atom "OP"))
          (resolved-priority (%operator-priority priority environment operation))
          (resolved-specifier (%operator-specifier specifier environment operation))
@@ -114,7 +113,6 @@
     (funcall emit environment)))
 
 (define-builtin (current_op priority specifier name) (rulebase environment depth emit)
-  (declare (ignore depth))
   (let* ((operation (%iso-atom "CURRENT_OP"))
          (resolved-priority
            (%operator-priority priority environment operation :allow-variable t))
@@ -133,16 +131,15 @@
     (when (logic-var-p resolved)
       (%raise-instantiation-error environment operation
                                   "char_conversion requires character atoms"))
-    (unless (and (symbolp resolved) (= 1 (length (symbol-name resolved))))
+    (unless (and (symbolp resolved) (= 1 (%atom-text-length resolved)))
       (%raise-type-error "CHARACTER" resolved environment operation
                          "char_conversion requires one-char atoms"))
-    (char (symbol-name resolved) 0)))
+    (char (%atom-text resolved) 0)))
 
 (defun %character-atom (character)
-  (%prolog-atom-symbol (string character) :preserve-case t))
+  (%prolog-atom-symbol (string character)))
 
 (define-builtin (char_conversion from to) (rulebase environment depth emit)
-  (declare (ignore depth))
   (let* ((operation (%iso-atom "CHAR_CONVERSION"))
          (from-character (%conversion-character from environment operation))
          (to-character (%conversion-character to environment operation))
@@ -154,7 +151,6 @@
     (funcall emit environment)))
 
 (define-builtin (current_char_conversion from to) (rulebase environment depth emit)
-  (declare (ignore depth))
   (let ((pairs '()))
     (maphash (lambda (from-character to-character)
                (push (cons from-character to-character) pairs))

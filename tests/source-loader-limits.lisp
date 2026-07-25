@@ -127,8 +127,7 @@
         (is (prolog-succeeds-p rulebase query)))))))
 
 (deftest source-loader-rejects-cyclic-source-lists ()
-  (let ((sources (list (cl-prolog::%prolog-atom-symbol "cycle.pl"
-                                                       :preserve-case t))))
+  (let ((sources (list (prolog-atom "cycle.pl"))))
     (setf (cdr sources) sources)
     (signals-error
      (cl-prolog::%source-file-pathnames sources nil 'cl-prolog::consult))))

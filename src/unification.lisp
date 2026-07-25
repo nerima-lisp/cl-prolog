@@ -3,265 +3,15 @@
 ;;;; Environments are association lists mapping logic variables to terms.
 ;;;; They are persistent: UNIFY never mutates an environment, it extends it,
 ;;;; so backtracking is simply "keep using the older environment".
+;;;; Variable identity lives in logic-variable.lisp and the environment
+;;;; index it unifies against lives in environment-index.lisp.
+
 (in-package #:cl-prolog)
 
-(defvar *logic-variable-ordinals* nil)
-
-(defvar *next-logic-variable-ordinal* 0)
-
-(progn
-  (defvar *rule-program-variable-names* nil)
-  (defvar *rule-program-variable-name-ordinals* nil)
-  (defvar *rule-program-private-variables* nil)
-
-  (defmacro %with-logic-variable-order (&body body)
-    "Run BODY inside a variable-creation-order context.
-
-An enclosing context is reused so nested queries (e.g. a builtin proving a
-sub-query) keep the ordinals of variables created by their caller."
-    `(if *logic-variable-ordinals* (progn
-        ,@body)
-      (let ((*logic-variable-ordinals* (make-hash-table :test #'eq))
-            (*next-logic-variable-ordinal* 0)
-            (*rule-program-private-variables*
-              (make-array (length *rule-program-variable-names*)
-                          :initial-element nil)))
-        ,@body))))
-
-(progn
-  (defun %current-private-rule-variable-ordinal (variable)
-    "Return VARIABLE's current-context private ordinal and true, or NIL and false."
-    (if (and *rule-program-private-variables*
-             (null (symbol-package variable)))
-        (multiple-value-bind (ordinal present-p)
-            (gethash (symbol-name variable)
-                     *rule-program-variable-name-ordinals*)
-          (if (and present-p
-                   (eq variable
-                       (svref *rule-program-private-variables* ordinal)))
-              (values ordinal t)
-              (values nil nil)))
-        (values nil nil)))
-
-  (defun %register-logic-variable (variable)
-    "Assign VARIABLE its stable creation ordinal and return VARIABLE."
-    (unless *logic-variable-ordinals*
-      (error "Logic variables require an active ordering context."))
-    (multiple-value-bind (private-ordinal private-p)
-        (%current-private-rule-variable-ordinal variable)
-      (declare (ignore private-ordinal))
-      (unless private-p
-        (multiple-value-bind (ordinal present-p)
-            (gethash variable *logic-variable-ordinals*)
-          (declare (ignore ordinal))
-          (unless present-p
-            (setf (gethash variable *logic-variable-ordinals*)
-                  (prog1
-                      *next-logic-variable-ordinal*
-                    (incf *next-logic-variable-ordinal*)))))))
-    variable))
-
-(defun %logic-variable-ordinal (variable)
-  "Return VARIABLE's registered ordinal."
-  (multiple-value-bind (ordinal present-p)
-      (gethash variable *logic-variable-ordinals*)
-    (if present-p
-        ordinal
-        (multiple-value-bind (private-ordinal private-p)
-            (%current-private-rule-variable-ordinal variable)
-          (if private-p
-              private-ordinal
-              (error "Unregistered logic variable ~S." variable))))))
-
-(defun logic-var-p (term)
-  "Return true when TERM is a logic variable rather than a dedicated Prolog atom."
-  (and
-    (symbolp term)
-    (not (keywordp term))
-    (not (eq (symbol-package term) (find-package '#:cl-prolog.user-atoms)))
-    (plusp (length (symbol-name term)))
-    (char= (char (symbol-name term) 0) #\?)))
-
-(progn
-  (defun fresh-logic-variable (&optional (prefix "?VAR"))
-    "Return a fresh, never-before-seen logic variable."
-    (let ((variable (gensym prefix)))
-      (if *logic-variable-ordinals* (%register-logic-variable variable)
-        variable)))
-
-  (defparameter *rule-program-variable-names*
-    (let ((names (make-array 256)))
-      (dotimes (index (length names) names)
-        (setf (svref names index)
-              (format nil "?RULE-PROGRAM-~D" index)))))
-
-  (defparameter *rule-program-variable-name-ordinals*
-    (let ((ordinals
-            (make-hash-table
-              :test #'equal
-              :size (length *rule-program-variable-names*))))
-      (dotimes (index (length *rule-program-variable-names*) ordinals)
-        (setf (gethash (svref *rule-program-variable-names* index) ordinals)
-              index))))
-
-  (declaim (inline %fresh-rule-program-variable))
-  (defun %fresh-rule-program-variable ()
-    "Return a registered fresh variable with a cached printable name."
-    (let ((ordinal *next-logic-variable-ordinal*))
-      (if (and *logic-variable-ordinals*
-               (< ordinal (length *rule-program-variable-names*)))
-          (let ((variable
-                  (make-symbol
-                    (svref *rule-program-variable-names* ordinal))))
-            (setf (svref *rule-program-private-variables* ordinal) variable)
-            (incf *next-logic-variable-ordinal*)
-            variable)
-          (fresh-logic-variable "?RULE-PROGRAM-")))))
-
-(progn
-  (defconstant +environment-index-overlay-threshold+ 8)
-  (defstruct (%environment-index
-      (:constructor %make-environment-index-object
-        (table overlay overlay-length next-binding-rank)))
-    (table (make-hash-table :test (function eq)) :type hash-table)
-    (overlay nil :type list)
-    (overlay-length 0 :type (integer 0 *))
-    (next-binding-rank -1 :type integer))
-  (defun %environment-index-entry (variable index)
-    "Return the newest entry for VARIABLE from INDEX."
-    (dolist (binding (%environment-index-overlay index)
-             (gethash variable (%environment-index-table index)))
-      (when (eq variable (car binding))
-        (return (values (cdr binding) t)))))
-  (defun %make-environment-index (environment &optional (additional-capacity 0))
-    "Index ENVIRONMENT by variable identity while preserving first-binding wins."
-    (check-type additional-capacity (integer 0 *))
-    (let ((table
-            (make-hash-table
-              :test
-              (function eq)
-              :size
-              (+ (length environment) additional-capacity)))
-          (rank 0))
-      (dolist (binding environment)
-        (multiple-value-bind (entry present-p)
-            (gethash (car binding) table)
-          (declare (ignore entry))
-          (unless present-p
-            (setf (gethash (car binding) table)
-                  (cons (cdr binding) rank))))
-        (incf rank))
-      (%make-environment-index-object table nil 0 -1)))
-  (defun %copy-environment-index (index)
-    "Return a writable index object sharing the immutable contents of INDEX."
-    (%make-environment-index-object
-      (%environment-index-table index)
-      (%environment-index-overlay index)
-      (%environment-index-overlay-length index)
-      (%environment-index-next-binding-rank index)))
-  (defun %compact-environment-index (index)
-    "Merge the bounded overlay into a new immutable base table."
-    (if (zerop (%environment-index-overlay-length index))
-        index
-        (let ((table
-                (make-hash-table
-                  :test
-                  (function eq)
-                  :size
-                  (+ (hash-table-count (%environment-index-table index))
-                     (%environment-index-overlay-length index)))))
-          (maphash
-            (lambda (variable entry)
-              (setf (gethash variable table) entry))
-            (%environment-index-table index))
-          (labels ((install-oldest-first (overlay)
-                     (when overlay
-                       (install-oldest-first (cdr overlay))
-                       (let ((binding (car overlay)))
-                         (setf (gethash (car binding) table)
-                               (cdr binding))))))
-            (install-oldest-first (%environment-index-overlay index)))
-          (%make-environment-index-object
-            table
-            nil
-            0
-            (%environment-index-next-binding-rank index)))))
-  (defun %extend-environment-index (index bindings)
-    "Return INDEX extended by BINDINGS ordered oldest to newest."
-    (let ((extended (%copy-environment-index index)))
-      (dolist (binding bindings extended)
-        (push
-          (cons
-            (car binding)
-            (cons
-              (cdr binding)
-              (%environment-index-next-binding-rank extended)))
-          (%environment-index-overlay extended))
-        (incf (%environment-index-overlay-length extended))
-        (decf (%environment-index-next-binding-rank extended))
-        (when (= (%environment-index-overlay-length extended)
-                 +environment-index-overlay-threshold+)
-          (setf extended (%compact-environment-index extended))))))
-  (defun %environment-index-after-bindings
-      (bindings parent-bindings parent-index)
-    "Reuse PARENT-INDEX for an unchanged environment or extend a prepended prefix."
-    (if (eq bindings parent-bindings)
-        parent-index
-        (let ((reversed-prefix (quote ()))
-              (tail bindings))
-          (loop until (eq tail parent-bindings)
-                do (unless (consp tail)
-                     (return-from
-                       %environment-index-after-bindings
-                       (%make-environment-index bindings)))
-                   (push (car tail) reversed-prefix)
-                   (setf tail (cdr tail)))
-          (%extend-environment-index parent-index reversed-prefix))))
-  (defun %alias-cycle-representative (start index)
-    "Choose the earliest effective binding in the alias cycle containing START."
-    (let* ((entry (%environment-index-entry start index))
-           (representative start)
-           (best-rank (cdr entry))
-           (term (car entry)))
-      (loop until (eq term start)
-            for term-entry = (%environment-index-entry term index)
-            when (< (cdr term-entry) best-rank)
-              do (setf representative term
-                       best-rank (cdr term-entry))
-            do (setf term (car term-entry))
-            finally (return representative))))
-  (defun %walk-term-indexed (term index seen)
-    (declare (ignore seen))
-    (when (not (logic-var-p term))
-      (return-from %walk-term-indexed term))
-    (let ((checkpoint term)
-          (cursor term)
-          (power 1)
-          (distance 0))
-      (loop
-        (multiple-value-bind (entry present-p)
-            (%environment-index-entry cursor index)
-          (unless present-p
-            (return cursor))
-          (setf cursor (car entry)))
-        (unless (logic-var-p cursor)
-          (return cursor))
-        (incf distance)
-        (when (eq checkpoint cursor)
-          (return (%alias-cycle-representative cursor index)))
-        (when (= distance power)
-          (setf checkpoint cursor
-                power (* 2 power)
-                distance 0)))))
-  (defun %walk-term (term env)
-    "Chase TERM through ENV until it is unbound or not a variable."
-    (%walk-term-indexed term (%make-environment-index env) nil)))
-
-(progn
-  (defun %occurs-p-indexed (var term index walk-seen)
+(defun %occurs-p-indexed (var term index)
     (let ((seen nil))
       (labels ((occurs-p (node)
-                 (let ((resolved (%walk-term-indexed node index walk-seen)))
+                 (let ((resolved (%walk-term-indexed node index)))
               (cond
                 ((eq var resolved) t)
                 ((not (consp resolved)) nil)
@@ -273,10 +23,9 @@ sub-query) keep the ordinals of variables created by their caller."
                   (or (occurs-p (car resolved)) (occurs-p (cdr resolved))))))))
         (occurs-p term))))
   (defun %occurs-p (var term env)
-    (%occurs-p-indexed var term (%make-environment-index env) nil)))
+    (%occurs-p-indexed var term (%make-environment-index env)))
 
-(progn
-  (defconstant +unification-scratch-inline-pair-capacity+ 32)
+(defconstant +unification-scratch-inline-pair-capacity+ 32)
   (defstruct
       (%unification-scratch
         (:constructor %make-unification-scratch ()))
@@ -368,11 +117,12 @@ sub-query) keep the ordinals of variables created by their caller."
     (setf (%unification-scratch-pair-count scratch) 0
           (%unification-scratch-hash-mode-p scratch) nil
           (%unification-scratch-active-p scratch) nil))
-  nil))
+  nil)
 
 (defun %unify-indexed (left right env base-index
                        &optional index-owned-p (occurs-check t))
-  "Unify using BASE-INDEX, returning environment, success flag, and new index. INDEX-OWNED-P permits in-place extension of a caller-owned transient index.
+  "Unify using BASE-INDEX, returning environment, success flag, and new index.
+INDEX-OWNED-P permits in-place extension of a caller-owned transient index.
 When OCCURS-CHECK is NIL the occurs check is skipped, so a variable may bind to
 a term containing it (producing a rational/cyclic term)."
   (let* ((candidate *unification-scratch*)
@@ -385,8 +135,7 @@ a term containing it (producing a rational/cyclic term)."
       (setf (%unification-scratch-active-p scratch) t)
       (unwind-protect
           (let ((index base-index)
-                (copied-p index-owned-p)
-                (walk-seen nil))
+                (copied-p index-owned-p))
             (labels ((ensure-writable-index ()
                        (unless copied-p
                          (setf index (%copy-environment-index index)
@@ -407,13 +156,13 @@ a term containing it (producing a rational/cyclic term)."
                          (setf index (%compact-environment-index index)))
                        (acons variable term environment))
                      (unify-terms (left right environment)
-                       (setf left (%walk-term-indexed left index walk-seen)
-                             right (%walk-term-indexed right index walk-seen))
+                       (setf left (%walk-term-indexed left index)
+                             right (%walk-term-indexed right index))
                        (cond
                          ((eq left right) (values environment t))
                          ((logic-var-p left)
                           (if (and occurs-check
-                                   (%occurs-p-indexed left right index walk-seen))
+                                   (%occurs-p-indexed left right index))
                               (values nil nil)
                               (values
                                 (extend-environment left right environment)
@@ -438,9 +187,7 @@ a term containing it (producing a rational/cyclic term)."
                          ((and
                             (symbolp left)
                             (symbolp right)
-                            (string=
-                              (symbol-name left)
-                              (symbol-name right)))
+                            (%same-atom-text-p left right))
                           (values environment t))
                          ((equal left right) (values environment t))
                          (t (values nil nil)))))
@@ -467,7 +214,7 @@ clause-resolution path pays no keyword-dispatch cost."
 
 (defun %logic-substitute-indexed (template index)
   "Apply INDEX to TEMPLATE while preserving dotted and cyclic structure."
-  (let ((root (%walk-term-indexed template index nil)))
+  (let ((root (%walk-term-indexed template index)))
     (if (not (consp root))
         root
         (let ((copies (make-hash-table :test (function eq))))
@@ -484,7 +231,7 @@ clause-resolution path pays no keyword-dispatch cost."
                          resolved))
                    (substitute-term (term)
                      (copy-resolved-term
-                       (%walk-term-indexed term index nil))))
+                       (%walk-term-indexed term index))))
             (copy-resolved-term root))))))
 
 (defun logic-substitute (template env)
@@ -512,8 +259,7 @@ clause-resolution path pays no keyword-dispatch cost."
       (walk term))
     (nreverse variables)))
 
-(progn
-  (defconstant +freshening-map-threshold+ 12)
+(defconstant +freshening-map-threshold+ 12)
   (defstruct (%freshening-map (:constructor %make-freshening-map ()))
     (entries (make-array (* 2 +freshening-map-threshold+) :initial-element nil))
     (count 0 :type fixnum)
@@ -581,7 +327,7 @@ COPIES preserves cons identity and cycles across calls that share it."
                                 (cdr copy) (freshen (cdr node)))
                           copy))))
                  (t node))))
-      (freshen term))))
+      (freshen term)))
 
 (defun %term-has-variables-p (term)
   "True when TERM contains at least one logic variable."

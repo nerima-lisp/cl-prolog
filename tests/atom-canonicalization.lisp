@@ -1,0 +1,167 @@
+;;;; The atom text/symbol bijection (src/atom-name.lisp).
+;;;;
+;;;; Every assertion here is about one invariant: a Prolog atom IS its text.
+;;;; Quoting it changes nothing (ISO 13211-1 6.4.2), case changes everything,
+;;;; and the representation the engine picks -- an upcased CL-PROLOG symbol, a
+;;;; verbatim CL-PROLOG.VERBATIM-ATOMS symbol, or NIL for `[]' -- must never be
+;;;; observable through unification, `==/2', the standard order, the writer, or
+;;;; the text-conversion builtins.
+
+(in-package #:cl-prolog.tests)
+
+;;; Quoting is invisible: ISO 13211-1 6.4.2 makes a quoted token and the
+;;; equivalent name token the same atom.
+
+(deftest-prolog-goals quoting-does-not-change-an-atom
+  "hello == 'hello'"
+  "foo_bar == 'foo_bar'"
+  "abc123 == 'abc123'"
+  ;; An operator atom needs brackets to be an operand (ISO 6.3.4.3), but it is
+  ;; still the same atom its quoted spelling denotes.
+  "(+) == '+'"
+  "(:-) == ':-'"
+  "[] == '[]'"
+  "f(a, 'b') == f('a', b)"
+  ;; The predicate of a goal is an atom too, so a quoted head and an unquoted
+  ;; call have to meet.
+  "assertz('quoted_head'), quoted_head")
+
+;;; Case is part of the name, so these are genuinely different atoms.
+
+(deftest-prolog-goals atom-case-is-significant
+  "'FooBar' \\== foobar"
+  "'fooBar' \\== foobar"
+  "'ABC' \\== abc"
+  "'A' \\== a"
+  "'Hello world' \\== 'hello world'"
+  ;; ...and unification agrees with \==, which is the property that makes the
+  ;; standard order below well defined.
+  "\\+ 'ABC' = abc"
+  "'ABC' = 'ABC'")
+
+;;; The standard order of terms ranks atoms by the characters of their text
+;;; (ISO 13211-1 7.2.3), not by the internal symbol name.
+
+(deftest-prolog-goals standard-order-follows-atom-text
+  ;; 'B' is code 66 and a is 97, so the upper-case atom sorts first -- the
+  ;; reverse of what comparing upcased symbol names would give.
+  "compare(<, 'B', a)"
+  "compare(>, a, 'B')"
+  "compare(=, hello, 'hello')"
+  "msort([b, 'A', a], ['A', a, b])"
+  ;; sort/2 removes duplicates by the standard order, so two spellings of one
+  ;; atom must collapse to one element.
+  "sort([b, 'hello', hello, a], [a, b, hello])")
+
+;;; Text conversion reports the atom's text, not its representation.
+
+(deftest-prolog-goals text-conversion-uses-atom-text
+  "atom_codes(abc, [97, 98, 99])"
+  "atom_chars(abc, [a, b, c])"
+  "char_code(a, 97)"
+  "char_code('A', 65)"
+  "atom_length('FooBar', 6)"
+  "atom_length([], 2)"
+  "atom([])"
+  "atomic([])"
+  "upcase_atom(abc, 'ABC')"
+  "downcase_atom('ABC', abc)"
+  "atom_concat('Foo', 'Bar', 'FooBar')"
+  "sub_atom('FooBar', 0, 3, _, 'Foo')"
+  "read_term_from_atom('f(''Ab'')', T, []), T == f('Ab')"
+  ;; Round trips through every text representation.
+  "atom_codes('FooBar', C), atom_codes(A, C), A == 'FooBar'"
+  "atom_chars('FooBar', C), atom_chars(A, C), A == 'FooBar'"
+  "term_to_atom(f('Ab', b), A), term_to_atom(T, A), T == f('Ab', b)")
+
+;;; The writer must emit text that reads back as the same atom.
+
+(deftest writeq-round-trips-every-atom-spelling ()
+  (dolist (text '("foo" "fooBar" "FooBar" "FOO" "A" "a" "foo bar" "Hello world"
+                  "foo_Bar" "abc" "ABC" "[]" "+" "" "?x" "?X" "it's" "$VAR"))
+    (let* ((atom (prolog-atom text))
+           (rendered (prolog-term-string atom)))
+      (is-equal text (prolog-atom-text atom)
+                "PROLOG-ATOM-TEXT must invert PROLOG-ATOM")
+      (is (eq atom (read-prolog-term rendered))
+          (format nil "writeq of ~S rendered ~S, which read back as a ~
+                       different atom" text rendered)))))
+
+(deftest writeq-quotes-exactly-the-atoms-that-need-it ()
+  ;; A name that is already a plain atom name needs no quotes; anything else
+  ;; does, or the output would read back as a different term.
+  (is-equal "foo" (prolog-term-string (prolog-atom "foo")))
+  (is-equal "fooBar" (prolog-term-string (prolog-atom "fooBar")))
+  (is-equal "foo_bar" (prolog-term-string (prolog-atom "foo_bar")))
+  (is-equal "'FooBar'" (prolog-term-string (prolog-atom "FooBar")))
+  (is-equal "'ABC'" (prolog-term-string (prolog-atom "ABC")))
+  (is-equal "'A'" (prolog-term-string (prolog-atom "A")))
+  (is-equal "'foo bar'" (prolog-term-string (prolog-atom "foo bar")))
+  ;; write/1 is unquoted, so it shows the bare text either way.
+  (is-equal "FooBar"
+            (with-output-to-string (stream)
+              (cl-prolog::%write-prolog-term-with-options
+               (prolog-atom "FooBar") stream :quoted nil))))
+
+(deftest numbervars-functor-is-the-upper-case-dollar-var ()
+  "ISO 8.14.2's numbervars functor is `'$VAR'', so the distinct lower-case atom
+`'$var'' must be written as an ordinary compound instead of as a variable name."
+  (is-equal "A"
+            (with-output-to-string (stream)
+              (cl-prolog::%write-prolog-term-with-options
+               (list (prolog-atom "$VAR") 0) stream :numbervars t)))
+  (is-equal "'$var'(0)"
+            (with-output-to-string (stream)
+              (cl-prolog::%write-prolog-term-with-options
+               (list (prolog-atom "$var") 0) stream :numbervars t))))
+
+;;; Representation details the rest of the engine must not leak.
+
+(deftest a-quoted-question-mark-atom-is-not-a-variable ()
+  "A `?'-prefixed name is how this engine spells a logic variable internally, so
+a quoted atom that starts with `?' must stay an atom in both encodings."
+  (dolist (text '("?x" "?X" "?rule-program-0"))
+    (let ((atom (prolog-atom text)))
+      (is (not (logic-var-p atom))
+          (format nil "~S must be an atom, not a variable" text))
+      (is-equal text (prolog-atom-text atom)))))
+
+(deftest uninterned-atoms-keep-their-text ()
+  "The engine represents untrusted text -- a missing source's pathname, say --
+as an uninterned symbol so the text is never interned.  Its text must still be
+the text, or the culprit in a raised error would not match the term the program
+passed in."
+  (let ((culprit (make-symbol "/Users/Someone/Data.pl")))
+    (is-equal "/Users/Someone/Data.pl" (prolog-atom-text culprit))
+    (is (cl-prolog::%same-atom-text-p
+         culprit (prolog-atom "/Users/Someone/Data.pl")))))
+
+(deftest equal-text-atoms-agree-across-unify-identity-and-order ()
+  "The three ways to ask whether two atoms are the same must never disagree."
+  (dolist (pair (list (list (prolog-atom "hello") 'cl-prolog::hello)
+                      (list (intern "LIST" '#:cl-prolog.user-atoms) 'cl:list)
+                      (list (make-symbol "SHARED") (make-symbol "SHARED"))))
+    (destructuring-bind (left right) pair
+      (is (nth-value 1 (unify left right)))
+      (is (cl-prolog::%term-identical-p left right))
+      (is (= 0 (cl-prolog::%compare-terms left right)))))
+  (dolist (pair (list (list (prolog-atom "ABC") 'cl-prolog::abc)
+                      (list (prolog-atom "fooBar") 'cl-prolog::foobar)))
+    (destructuring-bind (left right) pair
+      (is (not (nth-value 1 (unify left right))))
+      (is (not (cl-prolog::%term-identical-p left right)))
+      (is (not (= 0 (cl-prolog::%compare-terms left right)))))))
+
+(cl-weave:it-property
+    "an atom's text survives PROLOG-ATOM and a writeq/read round trip"
+    ((text (cl-weave:gen-string
+            :min-length 1 :max-length 12
+            ;; Both cases, digits, and the two characters the writer has to
+            ;; escape or quote around.
+            :alphabet "abzABZ09_ '")))
+  (cl-weave:expect-has-assertions)
+  (let ((atom (prolog-atom text)))
+    (is-equal text (prolog-atom-text atom))
+    (is (eq atom (read-prolog-term (prolog-term-string atom))))
+    ;; Same text in, same atom out -- interning is a function of the text only.
+    (is (eq atom (prolog-atom (copy-seq text))))))

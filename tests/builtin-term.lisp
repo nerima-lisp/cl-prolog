@@ -117,13 +117,16 @@
             (cl-prolog::var ?copy)
             (= ?result preserved)))
    :ordered (((?x . ?x) (?copy . ?copy) (?result . preserved))))
+  ;; numbervars/3 binds each variable to the ISO 8.14.2 functor `'$VAR''.  Its
+  ;; text is upper case, so it has no bare symbol spelling; these specs are
+  ;; quoted, so PROLOG-ATOM is called at read time.
   ((cl-prolog:numbervars (pair ?x ?x ?y) 3 ?end)
-   :ordered (((?x cl-prolog::$var 3)
-        (?y cl-prolog::$var 4)
+   :ordered (((?x #.(cl-prolog:prolog-atom "$VAR") 3)
+        (?y #.(cl-prolog:prolog-atom "$VAR") 4)
         (?end . 5))))
   ((and (= ?x bound)
         (cl-prolog:numbervars (pair ?x ?y) 0 ?end))
-   :ordered (((?x . bound) (?y cl-prolog::$var 0) (?end . 1))))
+   :ordered (((?x . bound) (?y #.(cl-prolog:prolog-atom "$VAR") 0) (?end . 1))))
   ((or (and (cl-prolog:numbervars (pair ?x ?y) 0 1)
             (= ?result leaked))
        (and (cl-prolog::var ?x)
@@ -237,23 +240,38 @@
   (is (not (cl-prolog::%term-variant-p 'cl-prolog::foo '?x)))
   (is (not (cl-prolog::%term-variant-p '(cl-prolog::foo cl-prolog::a) 'cl-prolog::bar))))
 
-(deftest term-order-distinguishes-packages-for-equal-symbol-names ()
+(deftest term-order-identifies-equal-text-atoms-across-packages ()
+  "An atom is its text, so two symbols spelling the same atom are one atom
+however they were interned -- the parser puts a name inherited from COMMON-LISP
+in USER-ATOMS while the Lisp reader leaves it in COMMON-LISP.  The standard
+order must therefore agree with unification instead of ranking them by package,
+or `X = Y' and `X @< Y' could both hold."
   (let* ((name "PACKAGE-SENSITIVE-ATOM")
          (left (intern name (find-package '#:cl-prolog)))
-         (right (intern name (find-package '#:cl-prolog.tests)))
-         (forward (cl-prolog::%compare-terms left right))
-         (reverse (cl-prolog::%compare-terms right left)))
-    (is (member forward '(-1 1)))
-    (is (= forward (- reverse)))))
+         (right (intern name (find-package '#:cl-prolog.tests))))
+    (is (not (eq left right)))
+    (is (= 0 (cl-prolog::%compare-terms left right)))
+    (is (= 0 (cl-prolog::%compare-terms right left)))
+    (is (cl-prolog::%term-identical-p left right))
+    (is (nth-value 1 (unify left right)))))
 
-(deftest term-order-distinguishes-uninterned-equal-name-atoms ()
-  (let* ((left (make-symbol "SAME-NAME-ATOM"))
-         (right (make-symbol "SAME-NAME-ATOM"))
-         (forward (cl-prolog::%compare-terms left right))
-         (reverse (cl-prolog::%compare-terms right left)))
-    (is (member forward '(-1 1)))
-    (is (= forward (- reverse)))
-    (is (= forward (cl-prolog::%compare-terms left right)))))
+(deftest term-order-identifies-uninterned-equal-text-atoms ()
+  (let ((left (make-symbol "SAME-NAME-ATOM"))
+        (right (make-symbol "SAME-NAME-ATOM")))
+    (is (not (eq left right)))
+    (is (= 0 (cl-prolog::%compare-terms left right)))
+    (is (= 0 (cl-prolog::%compare-terms right left)))))
+
+(deftest term-order-ranks-atoms-by-character-code-of-their-text ()
+  "ISO 13211-1 7.2.3 orders atoms by their characters, so the upper-case `'B''
+precedes the lower-case `a' -- the reverse of the order their internal symbol
+names would give."
+  (let ((upper (prolog-atom "B"))
+        (lower 'cl-prolog::a))
+    (is (= -1 (cl-prolog::%compare-terms upper lower)))
+    (is (= 1 (cl-prolog::%compare-terms lower upper)))
+    (is (not (= 0 (cl-prolog::%compare-terms (prolog-atom "ABC")
+                                             'cl-prolog::abc))))))
 
 (deftest term-order-uses-variable-creation-order ()
   (cl-prolog::%with-logic-variable-order

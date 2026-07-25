@@ -7,6 +7,26 @@
 
 (in-package #:cl-prolog.tests)
 
+(defun prolog-goal-holds-p (source)
+  "True when the goal SOURCE, read as Prolog source text, has a proof.
+
+Lets a case be written the way a user would type it, so an assertion about ISO
+conformance does not have to spell the engine's internal term shapes."
+  (prolog-succeeds-p (make-rulebase) (read-prolog-term source)))
+
+(defmacro deftest-prolog-goals (name &body sources)
+  "Define one cl-weave case per Prolog goal SOURCE, each asserting it succeeds.
+
+Each case is independent and labelled with its own source text, so a failure
+names the goal that failed rather than the whole group."
+  `(cl-weave:describe-sequential ,(string name)
+     ,@(mapcar
+        (lambda (source)
+          `(cl-weave:it ,source
+             (cl-weave:expect-has-assertions)
+             (is (prolog-goal-holds-p ,source))))
+        sources)))
+
 (defmacro with-single-query-solution ((solution solutions rulebase query &rest options)
                                       &body body)
   "Execute QUERY once, assert that it yields exactly one solution, and bind it.

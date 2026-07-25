@@ -67,13 +67,15 @@ The macro expands each case into two DEFTEST-QUERIES specs."
    (((?chars cl-prolog::a cl-prolog::b cl-prolog::c)))
    ?atom (cl-prolog::a cl-prolog::b cl-prolog::c)
    (((?atom . cl-prolog::abc))))
+  ;; The codes of the atom's text, `abc', not of the upcased symbol name that
+  ;; happens to represent it: ISO 13211-1 8.16.5.
   (cl-prolog::atom_codes cl-prolog::abc ?codes
-   (((?codes 65 66 67)))
-   ?atom (65 66 67)
+   (((?codes 97 98 99)))
+   ?atom (97 98 99)
    (((?atom . cl-prolog::abc))))
   (cl-prolog::char_code cl-prolog::a ?code
-   (((?code . 65)))
-   ?character 65
+   (((?code . 97)))
+   ?character 97
    (((?character . cl-prolog::a))))
   (cl-prolog::number_chars 42 ?chars
    (((?chars cl-prolog::|4| cl-prolog::|2|)))

@@ -14,10 +14,10 @@ current-output equals EXPECTED."
 
 (deftest format-renders-basic-directives ()
   (assert-format-output "int=~w atom=~a q=~q" (42 hello (foo bar))
-                        "int=42 atom=HELLO q=foo(bar)")
+                        "int=42 atom=hello q=foo(bar)")
   (assert-format-output "~d and ~d" (1 2) "1 and 2")
   (assert-format-output "literal ~~ tilde" () "literal ~ tilde")
-  (assert-format-output "~a" (plain) "PLAIN"))
+  (assert-format-output "~a" (plain) "plain"))
 
 (deftest format-renders-numeric-directives ()
   (assert-format-output "~2f" (3.14159d0) "3.14")
@@ -31,7 +31,7 @@ current-output equals EXPECTED."
 (deftest format-renders-newlines-and-strings ()
   (assert-format-output "a~nb" () (format nil "a~%b"))
   (assert-format-output "~s" ((104 105)) "hi")
-  (assert-format-output "~s" (abc) "ABC"))
+  (assert-format-output "~s" (abc) "abc"))
 
 (deftest format-column-control-fills-and-aligns ()
   ;; ~t marks a fill point; ~N| sets an absolute column.  The segment "[hi"
@@ -40,6 +40,9 @@ current-output equals EXPECTED."
     (assert-format-output "[~t~w~10|]" (hi)
                           (concatenate 'string "[" gap "hi]"))
     (assert-format-output "[~w~t~10|]" (hi)
+                          (concatenate 'string "[hi" gap "]"))
+    ;; With no ~t fill point the segment is written as-is and padded right.
+    (assert-format-output "[~w~10|]" (hi)
                           (concatenate 'string "[hi" gap "]")))
   (assert-format-output "~`-t~10|" () (make-string 10 :initial-element #\-)))
 

@@ -56,17 +56,26 @@ literal with \" and \\ escaped for writeq/write_canonical."
       (write-string string stream)))
 
 (defun %write-prolog-atom (atom stream quotedp)
-  (let ((name (string-downcase (symbol-name atom))))
+  ;; %ATOM-TEXT, not SYMBOL-NAME: an atom interned verbatim carries its text
+  ;; as-is, so downcasing here would print `'FooBar'' as `foobar' -- and the
+  ;; result would then read back as a different atom.
+  (let ((name (%atom-text atom)))
     (cond
       ((eq atom '|!|) (write-char #\! stream))
       ((%plain-prolog-atom-name-p name) (write-string name stream))
-      (quotedp (%write-quoted-prolog-atom (symbol-name atom) stream))
-      (t (write-string (symbol-name atom) stream)))))
+      (quotedp (%write-quoted-prolog-atom name stream))
+      (t (write-string name stream)))))
+
+(defparameter +numbervars-functor+ (%intern-prolog-atom "$VAR")
+  "The ISO 8.14.2 numbervars functor: the atom whose text is `$VAR'.  Its text
+is upper case, so it is a verbatim atom and a different atom from `$var'.")
 
 (defun %numbered-variable-index (term)
+  ;; Compared on text rather than symbol name, so the distinct lower-case atom
+  ;; `'$var'(0)' is written as itself instead of as a numbered variable.
   (when (and (consp term)
              (symbolp (first term))
-             (string= "$VAR" (symbol-name (first term)))
+             (%same-atom-text-p (first term) +numbervars-functor+)
              (consp (rest term))
              (null (cddr term))
              (typep (second term) '(integer 0)))

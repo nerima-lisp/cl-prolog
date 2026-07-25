@@ -7,28 +7,25 @@
 
 (deftest operator-declaration-and-removal ()
   (let ((rulebase (make-rulebase)))
-    (is (prolog-succeeds-p
-         rulebase '(cl-prolog::op 450 cl-prolog::yfx custom-operator)))
-    (is (prolog-succeeds-p
-         rulebase '(cl-prolog::current_op 450 cl-prolog::yfx custom-operator)))
-    (is (prolog-succeeds-p
-         rulebase '(cl-prolog::op 0 cl-prolog::yfx custom-operator)))
-    (is (not (prolog-succeeds-p
-              rulebase
-              '(cl-prolog::current_op 450 cl-prolog::yfx custom-operator))))))
+    (assert-query rulebase
+                  (cl-prolog::op 450 cl-prolog::yfx custom-operator) :succeeds)
+    (assert-query rulebase
+                  (cl-prolog::current_op 450 cl-prolog::yfx custom-operator)
+                  :succeeds)
+    (assert-query rulebase
+                  (cl-prolog::op 0 cl-prolog::yfx custom-operator) :succeeds)
+    (assert-query rulebase
+                  (cl-prolog::current_op 450 cl-prolog::yfx custom-operator)
+                  :fails)))
 
 (deftest operator-list-update-is-transactional ()
   (let ((rulebase (make-rulebase)))
-    (is (eq 'prolog-type-error
-            (handler-case
-                (progn
-                  (query-prolog
-                   rulebase
-                   '(cl-prolog::op 450 cl-prolog::yfx (valid-name 7)))
-                  nil)
-              (prolog-runtime-error (condition) (type-of condition)))))
-    (is (not (prolog-succeeds-p
-              rulebase '(cl-prolog::current_op 450 cl-prolog::yfx valid-name))))))
+    (assert-query rulebase
+                  (cl-prolog::op 450 cl-prolog::yfx (valid-name 7))
+                  :signals prolog-type-error)
+    (assert-query rulebase
+                  (cl-prolog::current_op 450 cl-prolog::yfx valid-name)
+                  :fails)))
 
 (progn
   (deftest current-op-enumerates-with-cps-backtracking ()
@@ -83,26 +80,26 @@
 
 (deftest-queries char-conversion-builtins ((make-rulebase))
   ((cl-prolog::current_char_conversion ?from ?to) :fails)
-  ((cl-prolog::char_conversion cl-prolog::|a| cl-prolog::|b|) :succeeds)
-  ((cl-prolog::char_conversion cl-prolog::|x| cl-prolog::|y|) :succeeds)
-  ((cl-prolog::current_char_conversion cl-prolog::|b| ?to) :fails)
+  ((cl-prolog::char_conversion cl-prolog::a cl-prolog::b) :succeeds)
+  ((cl-prolog::char_conversion cl-prolog::x cl-prolog::y) :succeeds)
+  ((cl-prolog::current_char_conversion cl-prolog::b ?to) :fails)
   ;; Mapping a character to itself removes its conversion.
-  ((cl-prolog::char_conversion cl-prolog::|a| cl-prolog::|a|) :succeeds)
-  ((cl-prolog::current_char_conversion cl-prolog::|a| ?to) :fails)
-  ((cl-prolog::char_conversion ?from cl-prolog::|b|) :signals)
-  ((cl-prolog::char_conversion ab cl-prolog::|b|) :signals)
-  ((cl-prolog::char_conversion cl-prolog::|a| 7) :signals))
+  ((cl-prolog::char_conversion cl-prolog::a cl-prolog::a) :succeeds)
+  ((cl-prolog::current_char_conversion cl-prolog::a ?to) :fails)
+  ((cl-prolog::char_conversion ?from cl-prolog::b) :signals)
+  ((cl-prolog::char_conversion ab cl-prolog::b) :signals)
+  ((cl-prolog::char_conversion cl-prolog::a 7) :signals))
 
 (deftest char-conversion-enumeration-reflects-one-rulebase ()
   (let ((rulebase (make-rulebase)))
     (assert-query rulebase
-                  (cl-prolog::char_conversion cl-prolog::|a| cl-prolog::|b|)
+                  (cl-prolog::char_conversion cl-prolog::a cl-prolog::b)
                   :succeeds)
     (assert-query rulebase
-                  (cl-prolog::char_conversion cl-prolog::|x| cl-prolog::|y|)
+                  (cl-prolog::char_conversion cl-prolog::x cl-prolog::y)
                   :succeeds)
     (assert-query rulebase (cl-prolog::current_char_conversion ?from ?to)
-                  :ordered (((?from . cl-prolog::|a|) (?to . cl-prolog::|b|))
-                      ((?from . cl-prolog::|x|) (?to . cl-prolog::|y|))))
-    (assert-query rulebase (cl-prolog::current_char_conversion cl-prolog::|a| ?to)
-                  :ordered (((?to . cl-prolog::|b|))))))
+                  :ordered (((?from . cl-prolog::a) (?to . cl-prolog::b))
+                      ((?from . cl-prolog::x) (?to . cl-prolog::y))))
+    (assert-query rulebase (cl-prolog::current_char_conversion cl-prolog::a ?to)
+                  :ordered (((?to . cl-prolog::b))))))

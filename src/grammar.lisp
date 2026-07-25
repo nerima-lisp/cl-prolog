@@ -4,29 +4,26 @@
 
 (in-package #:cl-prolog)
 
-(defun %prolog-symbol (name &key preserve-case (position 0) track-resource-p)
-  (let ((canonical-name (if preserve-case name (string-upcase name)))
+(defun %prolog-symbol (name &key (position 0) track-resource-p)
+  "Intern NAME as an engine-internal CL-PROLOG symbol (an operator or control
+functor), which is always the upcased spelling."
+  (let ((canonical-name (string-upcase name))
         (package (find-package '#:cl-prolog)))
     (if track-resource-p
         (%intern-parser-symbol canonical-name package position)
         (intern canonical-name package))))
 
-(defun %prolog-atom-symbol
-    (name &key preserve-case (position 0) track-resource-p)
-  (let* ((canonical-name (if preserve-case name (string-upcase name)))
-         (package (find-package '#:cl-prolog)))
-    (flet ((intern-name (symbol-name target-package)
-             (if track-resource-p
-                 (%intern-parser-symbol symbol-name target-package position)
-                 (intern symbol-name target-package))))
-      (multiple-value-bind (symbol status) (find-symbol canonical-name package)
-        (if (or (eq status :inherited)
-                (and (plusp (length canonical-name))
-                     (char= (char canonical-name 0) #\?)))
-            (intern-name canonical-name
-                         (find-package '#:cl-prolog.user-atoms))
-            (or symbol
-                (intern-name canonical-name package)))))))
+(defun %prolog-atom-symbol (name &key (position 0) track-resource-p)
+  "Return the Prolog atom whose text is NAME, accounting the interning against
+the parser's symbol budget when TRACK-RESOURCE-P.  See src/atom-name.lisp for
+the text/symbol mapping this uses; quoting is not part of it, so `'foo'' and
+`foo' return the same atom."
+  (%intern-prolog-atom
+   name
+   (if track-resource-p
+       (lambda (symbol-name target-package)
+         (%intern-parser-symbol symbol-name target-package position))
+       #'intern)))
 
 (defun %variable-symbol (name variables &key (position 0))
   (if (string= name "_")
@@ -88,11 +85,10 @@ the direct reader APIs default to :codes.")
     (:codes (map 'list #'char-code text))
     (:chars (map 'list
                  (lambda (character)
-                   (%prolog-atom-symbol (string character)
-                                        :preserve-case t :position position))
+                   (%prolog-atom-symbol (string character) :position position))
                  text))
-    (:atom (%prolog-atom-symbol text :preserve-case t :position position
-                                     :track-resource-p t))
+    (:atom (%prolog-atom-symbol text :position position
+                                :track-resource-p t))
     (:string text)))
 
 (defun %parse-primary (parser variables minimum-precedence)
@@ -146,7 +142,6 @@ the direct reader APIs default to :codes.")
        (incf (%parser-position parser))
        (let ((atom (%prolog-atom-symbol
                     (%token-value token)
-                    :preserve-case (eq :quoted-atom (%token-kind token))
                     :position (%token-position token)
                     :track-resource-p t)))
          (if (%accept-token parser :operator "(")

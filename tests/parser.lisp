@@ -3,7 +3,7 @@
 (in-package #:cl-prolog.tests)
 
 (deftest prolog-term-parser ()
-  (is-equal '(cl-prolog::person cl-prolog::|Mary Jane| 12 1.5d0)
+  (is-equal (list 'cl-prolog::person (cl-prolog:prolog-atom "Mary Jane") 12 1.5d0)
             (read-prolog-term "person('Mary Jane', 12, 1.5)."))
   (is-equal '(cl-prolog::a cl-prolog::b cl-prolog::c)
             (read-prolog-term "[a,b,c]"))
@@ -18,17 +18,23 @@
   (let ((nil-atom (read-prolog-term "nil"))
         (car-atom (read-prolog-term "car")))
     (is (not (null nil-atom)))
-    (is (eq nil-atom (read-prolog-term "'NIL'")))
+    ;; Quoting an atom cannot change which atom it is (ISO 13211-1 6.4.2), but
+    ;; case is part of the name, so `'NIL'' denotes a different atom.
+    (is (eq nil-atom (read-prolog-term "'nil'")))
+    (is (not (eq nil-atom (read-prolog-term "'NIL'"))))
     (is (eq (symbol-package nil-atom)
             (find-package '#:cl-prolog.user-atoms)))
     (is (not (eq car-atom 'cl:car)))
-    (is-equal '() (read-prolog-term "[]"))))
+    (is-equal '() (read-prolog-term "[]"))
+    ;; ISO 6.3.5 makes `[]' an atom, which this engine represents as NIL, so
+    ;; its quoted spelling denotes the same atom.
+    (is-equal '() (read-prolog-term "'[]'"))))
 
 (deftest prolog-stream-term-reader-is-incremental ()
   (with-input-from-string
       (stream (format nil
                       "first(1.5, 'not.a.term'). % between terms~%second([a,b])."))
-    (is-equal '(cl-prolog.user-atoms::first 1.5d0 cl-prolog::|not.a.term|)
+    (is-equal '(cl-prolog.user-atoms::first 1.5d0 cl-prolog::not.a.term)
               (read-prolog-term stream))
     (is-equal '(cl-prolog.user-atoms::second (cl-prolog::a cl-prolog::b))
               (read-prolog-term stream)))
@@ -125,15 +131,17 @@
     (is (not (prolog-succeeds-p rulebase other-query))))))
 
 (deftest quoted-atoms-decode-escape-sequences ()
-  (is-equal "it's" (symbol-name (read-prolog-term "'it''s'.")))
-  (is-equal "anb" (symbol-name (read-prolog-term "'a\\nb'."))))
+  (is-equal "it's" (prolog-atom-text (read-prolog-term "'it''s'.")))
+  (is-equal "anb" (prolog-atom-text (read-prolog-term "'a\\nb'."))))
 
 (deftest raw-term-source-reader-tracks-comments-quotes-and-decimal-points ()
   (dolist (text (list "X is 4/2."
                        "foo /* comment */ bar."
                        "X is 3.14."
                        "'a\\b'."
-                       "'it''s'."))
+                       "'it''s'."
+                       "\"a\\b\"."
+                       "\"it\"\"s\"."))
     (is-equal text
               (with-input-from-string (stream text)
                 (cl-prolog::%read-prolog-term-source stream)))))
@@ -237,7 +245,7 @@ against its :OBSERVED/:LIMIT/:POSITION, which vary per resource kind."
   (let ((source (format nil "~Cabc~C" (code-char 39) (code-char 39))))
     (let ((*max-prolog-quoted-lexeme-length* 3))
       (let ((term (read-prolog-term source)))
-        (is-equal "abc" (symbol-name term))
+        (is-equal "abc" (prolog-atom-text term))
         (is (eq (find-package "CL-PROLOG")
                 (symbol-package term)))))
     (let* ((*max-prolog-quoted-lexeme-length* 2)

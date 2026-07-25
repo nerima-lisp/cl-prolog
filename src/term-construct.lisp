@@ -6,14 +6,12 @@
 (in-package #:cl-prolog)
 
 (define-builtin (term_variables term variables) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%unify-emit variables
                (%collect-variables (%term-resolve term environment))
                environment emit))
 
 (define-builtin (term_variables term variables tail)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%unify-emit variables
                (append (%collect-variables (%term-resolve term environment))
                        tail)
@@ -74,7 +72,7 @@
       "functor/3 term must be a Prolog term"))))
 
 (define-iso-builtin (arg index term (argument :raw)) "ARG"
-  (%require-non-negative-integer resolved-index environment operation "arg/3" "index")
+  (%require-bounded-integer resolved-index environment operation "arg/3 index")
   (cond
       ((logic-var-p resolved-term)
        (%raise-instantiation-error
@@ -94,13 +92,13 @@
                environment emit))
 
 (define-iso-builtin (numbervars term start (end :raw)) "NUMBERVARS"
-  (%require-non-negative-integer resolved-start environment operation "numbervars/3" "start")
+  (%require-bounded-integer resolved-start environment operation "numbervars/3 start")
   (let ((variables (%collect-variables resolved-term)))
     (%term-unify-sequence
      (append
       (loop for variable in variables
             for index from resolved-start
-            collect (cons variable (list '$var index)))
+            collect (cons variable (list +numbervars-functor+ index)))
       (list (cons end (+ resolved-start (length variables)))))
      environment emit)))
 

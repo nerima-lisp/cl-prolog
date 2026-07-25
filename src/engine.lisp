@@ -33,18 +33,46 @@ resource_error.  NIL disables the bound.")
 (define-condition prolog-runtime-error (prolog-exception) ()
   (:documentation "Base condition for engine-generated ISO Prolog errors."))
 
-(defmacro define-prolog-runtime-error-conditions (&rest names)
-  "Define each of NAMES as an empty PROLOG-RUNTIME-ERROR subtype, one per
-ISO error category (instantiation, type, domain, permission, existence,
-evaluation, resource, syntax)."
-  `(progn
-     ,@(mapcar (lambda (name) `(define-condition ,name (prolog-runtime-error) ()))
-               names)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter +prolog-runtime-error-specifications+
+    '((prolog-instantiation-error %raise-instantiation-error
+       (environment operation message)
+       (%iso-atom "INSTANTIATION_ERROR"))
+      (prolog-type-error %raise-type-error
+       (expected culprit environment operation message)
+       (%iso-term "TYPE_ERROR" (%iso-atom expected) culprit))
+      (prolog-domain-error %raise-domain-error
+       (domain culprit environment operation message)
+       (%iso-term "DOMAIN_ERROR" (%iso-atom domain) culprit))
+      (prolog-permission-error %raise-permission-error
+       (operation permission-type culprit environment context message)
+       (%iso-term "PERMISSION_ERROR" (%iso-atom operation)
+                  (%iso-atom permission-type) culprit))
+      (prolog-existence-error %raise-existence-error
+       (object-type culprit environment operation message)
+       (%iso-term "EXISTENCE_ERROR" (%iso-atom object-type) culprit))
+      (prolog-evaluation-error %raise-evaluation-error
+       (reason environment operation message)
+       (%iso-term "EVALUATION_ERROR" (%iso-atom reason)))
+      ;; Resource and syntax errors are raised through hand-written entry
+      ;; points that carry extra slots, so they contribute a condition only.
+      (prolog-resource-error nil nil nil)
+      (prolog-syntax-error nil nil nil))
+    "The ISO error categories, each as (CONDITION RAISER PARAMETERS FORMAL).
 
-(define-prolog-runtime-error-conditions
-  prolog-instantiation-error prolog-type-error prolog-domain-error
-  prolog-permission-error prolog-existence-error prolog-evaluation-error
-  prolog-resource-error prolog-syntax-error)
+PARAMETERS ends with the environment, operation and message forwarded to
+%RAISE-ISO-ERROR; FORMAL builds the ISO formal term from the parameters
+preceding them.  DEFINE-PROLOG-RUNTIME-ERROR-CONDITIONS and
+DEFINE-PROLOG-RUNTIME-ERROR-RAISERS both read this table, so a category can
+never gain a condition without its raiser or vice versa."))
+
+(defmacro define-prolog-runtime-error-conditions ()
+  "Define an empty PROLOG-RUNTIME-ERROR subtype per ISO error category."
+  `(progn
+     ,@(loop for (condition) in +prolog-runtime-error-specifications+
+             collect `(define-condition ,condition (prolog-runtime-error) ()))))
+
+(define-prolog-runtime-error-conditions)
 
 (define-condition invalid-max-depth-error (error)
   ((value :initarg :value :reader invalid-max-depth-error-value))
@@ -112,36 +140,18 @@ Deliberately not a PROLOG-EXCEPTION: catch/3 must not intercept it."))
          :term (%iso-error-term formal operation message)
          :environment environment))
 
-(defun %raise-instantiation-error (environment operation message)
-  (%raise-iso-error 'prolog-instantiation-error
-                    (%iso-atom "INSTANTIATION_ERROR")
-                    environment operation message))
+(defmacro define-prolog-runtime-error-raisers ()
+  "Define the %RAISE-<CATEGORY>-ERROR wrapper for every ISO error category that
+declares one in +PROLOG-RUNTIME-ERROR-SPECIFICATIONS+."
+  `(progn
+     ,@(loop for (condition raiser parameters formal)
+               in +prolog-runtime-error-specifications+
+             when raiser
+               collect `(defun ,raiser ,parameters
+                          (%raise-iso-error ',condition ,formal
+                                            ,@(last parameters 3))))))
 
-(defun %raise-type-error (expected culprit environment operation message)
-  (%raise-iso-error 'prolog-type-error
-                    (%iso-term "TYPE_ERROR" (%iso-atom expected) culprit)
-                    environment operation message))
-
-(defun %raise-domain-error (domain culprit environment operation message)
-  (%raise-iso-error 'prolog-domain-error
-                    (%iso-term "DOMAIN_ERROR" (%iso-atom domain) culprit)
-                    environment operation message))
-
-(defun %raise-permission-error (operation permission-type culprit environment context message)
-  (%raise-iso-error 'prolog-permission-error
-                    (%iso-term "PERMISSION_ERROR" (%iso-atom operation)
-                               (%iso-atom permission-type) culprit)
-                    environment context message))
-
-(defun %raise-existence-error (object-type culprit environment operation message)
-  (%raise-iso-error 'prolog-existence-error
-                    (%iso-term "EXISTENCE_ERROR" (%iso-atom object-type) culprit)
-                    environment operation message))
-
-(defun %raise-evaluation-error (reason environment operation message)
-  (%raise-iso-error 'prolog-evaluation-error
-                    (%iso-term "EVALUATION_ERROR" (%iso-atom reason))
-                    environment operation message))
+(define-prolog-runtime-error-raisers)
 
 (progn
   (defun %raise-resource-error
@@ -172,6 +182,52 @@ Deliberately not a PROLOG-EXCEPTION: catch/3 must not intercept it."))
      'prolog-syntax-error
      (%iso-term "SYNTAX_ERROR" (make-symbol description))
      environment operation description)))
+
+(defmacro define-term-guard (name (value &rest extra-parameters)
+                             &key documentation resolve instantiation
+                                  accept type type-message result)
+  "Define NAME as a guard over one goal argument.
+
+The generated function takes (VALUE ENVIRONMENT OPERATION . EXTRA-PARAMETERS).
+It resolves VALUE against ENVIRONMENT when RESOLVE is true, raises
+instantiation_error carrying INSTANTIATION while VALUE is still unbound, raises
+type_error(TYPE) carrying TYPE-MESSAGE unless ACCEPT holds, and returns RESULT
+\(VALUE itself by default).  INSTANTIATION, ACCEPT, TYPE-MESSAGE and RESULT are
+forms evaluated with VALUE and EXTRA-PARAMETERS in scope."
+  `(defun ,name (,value environment operation ,@extra-parameters)
+     ,@(when documentation (list documentation))
+     (let ((,value ,(if resolve `(logic-substitute ,value environment) value)))
+       (when (logic-var-p ,value)
+         (%raise-instantiation-error environment operation ,instantiation))
+       ,@(when accept
+           `((unless ,accept
+               (%raise-type-error ,type ,value environment operation
+                                  ,type-message))))
+       ,(or result value))))
+
+(defun %require-bounded-integer (value environment operation argument
+                                 &key (minimum 0) allow-variable)
+  "Validate VALUE as an integer of at least MINIMUM, naming it ARGUMENT in the
+ISO error messages.  MINIMUM selects the domain reported for an out-of-range
+value: not_less_than_zero for 0, not_less_than_one for 1.  An unbound VALUE is
+returned unchanged when ALLOW-VARIABLE, and otherwise raises
+instantiation_error.  Returns VALUE when it is valid."
+  (cond
+    ((logic-var-p value)
+     (unless allow-variable
+       (%raise-instantiation-error
+        environment operation
+        (format nil "~A must be instantiated" argument)))
+     value)
+    ((not (integerp value))
+     (%raise-type-error "INTEGER" value environment operation
+                        (format nil "~A must be an integer" argument)))
+    ((< value minimum)
+     (%raise-domain-error
+      (if (plusp minimum) "NOT_LESS_THAN_ONE" "NOT_LESS_THAN_ZERO")
+      value environment operation
+      (format nil "~A must not be less than ~D" argument minimum)))
+    (t value)))
 
 (defun %raise-prolog-exception (term environment)
   "Raise TERM together with the binding environment active at THROW/1.
@@ -205,8 +261,7 @@ Callers must have already rejected an unbound TERM."
   ;; parsed and Lisp-authored goals dispatch identically.
   (dolist (alias (remove-duplicates
                   (list predicate
-                        (%prolog-atom-symbol (symbol-name predicate)
-                                             :preserve-case t))
+                        (%prolog-atom-symbol (%atom-text predicate)))
                   :test #'eq))
     (if maximum
         (setf (gethash (cons alias maximum) *fixed-builtin-solvers*) solver)
@@ -237,32 +292,7 @@ BODY must call EMIT with one extended environment per solution."
   (multiple-value-bind (minimum maximum)
       (%argument-list-arity argument-list)
     (let* ((goal (gensym "GOAL"))
-           (names (if (listp name) name (list name)))
-           (context-variables (list rulebase environment depth emit))
-           (sanitized-body
-             (loop for form in body
-                   append
-                   (if (and (consp form) (eq (first form) (quote declare)))
-                       (let ((specifiers
-                               (loop for specifier in (rest form)
-                                     for declaration = (and (consp specifier)
-                                                            (first specifier))
-                                     for variables = (if (member declaration
-                                                                   (quote (ignore ignorable)))
-                                                         (remove-if
-                                                          (lambda (variable)
-                                                            (and (member variable context-variables)
-     (not (member variable argument-list))))
-                                                          (rest specifier))
-                                                         (rest specifier))
-                                     when (or (not (member declaration
-                                                           (quote (ignore ignorable))))
-                                              variables)
-                                       collect (cons declaration variables))))
-                         (if specifiers
-                             (list (cons (quote declare) specifiers))
-                             nil))
-                       (list form)))))
+           (names (if (listp name) name (list name))))
       `(progn
          ,@(mapcar
             (lambda (builtin-name)
@@ -275,7 +305,7 @@ BODY must call EMIT with one extended environment per solution."
                     ;; are keyed by their exact indicator, variadic ones only
                     ;; receive goals at or above their required arity.
                     (destructuring-bind ,argument-list (rest ,goal)
-                      ,@sanitized-body)))))
+                      ,@body)))))
             names)
          (quote ,(first names))))))
 

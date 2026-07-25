@@ -21,9 +21,10 @@
     text)
 
   (defun %check-atom-text-limit (atom environment operation)
-    (%check-text-resource-limit
-     (%atom-text atom) *max-prolog-quoted-lexeme-length* "ATOM_LENGTH"
-     environment operation "atom text exceeds the configured length limit"))
+    (%check-resource-limit
+     (%atom-text-length atom) *max-prolog-quoted-lexeme-length* "ATOM_LENGTH"
+     environment operation "atom text exceeds the configured length limit")
+    (%atom-text atom))
 
   (defun %integer-within-decimal-digit-limit-p (integer digit-limit)
     (let* ((magnitude (abs integer))
@@ -42,38 +43,22 @@
         (%raise-resource-error
          "INTEGER_SIZE" environment operation
          "integer decimal representation exceeds the configured length limit")))
-    integer)
-
-  (defun %atom-text (atom)
-    (symbol-name atom)))
+    integer))
 
 (defun %text-atom (text &optional environment (operation (%iso-atom "ATOM")))
   (%check-text-resource-limit
    text *max-prolog-quoted-lexeme-length* "ATOM_LENGTH" environment operation
    "atom text exceeds the configured length limit")
-  (%prolog-atom-symbol text :preserve-case t))
+  (%intern-prolog-atom text))
 
 (defun %character-atom-p (term)
-  (and (%term-atom-p term) (= 1 (length (%atom-text term)))))
+  (and (%term-atom-p term) (= 1 (%atom-text-length term))))
 
-(defun %ensure-atom-value (value environment operation argument)
-  (when (logic-var-p value)
-    (%raise-instantiation-error environment operation
-                                (format nil "~A must be instantiated" argument)))
-  (unless (%term-atom-p value)
-    (%raise-type-error "ATOM" value environment operation
-                       (format nil "~A must be an atom" argument)))
-  value)
-
-(defun %ensure-nonnegative-integer-or-variable (value environment operation argument)
-  (unless (logic-var-p value)
-    (unless (integerp value)
-      (%raise-type-error "INTEGER" value environment operation
-                         (format nil "~A must be an integer" argument)))
-    (when (minusp value)
-      (%raise-domain-error "NOT_LESS_THAN_ZERO" value environment operation
-                           (format nil "~A must not be negative" argument))))
-  value)
+(define-term-guard %ensure-atom-value (value argument)
+  :instantiation (format nil "~A must be instantiated" argument)
+  :accept (%term-atom-p value)
+  :type "ATOM"
+  :type-message (format nil "~A must be an atom" argument))
 
 (defun %ensure-proper-instantiated-list
     (value environment operation argument
@@ -298,21 +283,34 @@
               (coerce scaled 'double-float)))
           (* sign integer-part)))))
 
-(defun %text-of (value environment operation)
-  "Return the text (a CL string) of an atomic-or-text VALUE: a string, atom,
-number, code list, or character list.  Shared by the string builtins and the
-text-accepting builtins (atom_string, number_string, term_string, ...)."
-  (cond
-    ((logic-var-p value)
-     (%raise-instantiation-error environment operation
-                                 "text argument must be instantiated"))
-    ((stringp value) value)
-    ((%term-atom-p value) (%atom-text value))
-    ((or (integerp value) (floatp value)) (%number-text value environment operation))
-    ((null value) "")
-    ((consp value)
-     (if (every #'integerp value)
-         (%code-list-text value environment operation)
-         (%character-list-text value environment operation)))
-    (t (%raise-type-error "ATOM" value environment operation
-                          "expected an atom, string, number, or char/code list"))))
+(defun %text-of (value environment operation
+                 &key (accept :any)
+                      (instantiation "text argument must be instantiated")
+                      (type "ATOM")
+                      (type-message
+                       "expected an atom, string, number, or char/code list"))
+  "Return the text (a CL string) of an atomic-or-text VALUE.
+
+ACCEPT selects the admissible shapes beyond a string or atom: :ATOMIC also
+accepts a number, :TEXT also accepts a code or character list, and :ANY (the
+default) accepts both.  A NIL INSTANTIATION lets an unbound VALUE fall through
+to the TYPE-MESSAGE type_error instead of raising instantiation_error.  Shared
+by the string builtins, the text-accepting conversions (atom_string,
+number_string, term_string, ...), format/1,2,3 and the case-folding builtins."
+  (let ((numbers (member accept '(:atomic :any)))
+        (lists (member accept '(:text :any))))
+    (cond
+      ((logic-var-p value)
+       (if instantiation
+           (%raise-instantiation-error environment operation instantiation)
+           (%raise-type-error type value environment operation type-message)))
+      ((stringp value) value)
+      ((%term-atom-p value) (%atom-text value))
+      ((and numbers (or (integerp value) (floatp value)))
+       (%number-text value environment operation))
+      ((and lists (null value)) "")
+      ((and lists (consp value))
+       (if (every #'integerp value)
+           (%code-list-text value environment operation)
+           (%character-list-text value environment operation)))
+      (t (%raise-type-error type value environment operation type-message)))))
