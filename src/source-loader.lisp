@@ -36,7 +36,7 @@
       (multiple-value-bind (term present-p)
           (let ((*active-char-conversions*
                   (%rulebase-active-char-conversions rulebase)))
-            (%read-source-term stream (rulebase-operator-table rulebase)))
+            (%read-source-term stream rulebase))
         (unless present-p (return))
         (cond
           ((%prolog-query-term-p term)

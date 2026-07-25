@@ -18,6 +18,7 @@
              (setf (gethash right right-terms) t)
              (and (%term-identical-p (car left) (car right) seen)
                   (%term-identical-p (cdr left) (cdr right) seen))))))
+    ((and (stringp left) (stringp right)) (string= left right))
     (t (eql left right))))
 
 (defun %term-variant-p (left right)
@@ -53,16 +54,20 @@
                           (and (variants-p (car left-term) (car right-term))
                                (variants-p (cdr left-term) (cdr right-term)))))))
                  ((or (consp left-term) (consp right-term)) nil)
+                 ((and (stringp left-term) (stringp right-term))
+                  (string= left-term right-term))
                  (t (eql left-term right-term)))))
       (variants-p left right))))
 
 (defun %term-order-class (term)
+  ;; Standard order of terms: Var < Number < Atom < String < Compound.
   (cond
     ((logic-var-p term) 0)
     ((%prolog-number-p term) 1)
     ((%term-atom-p term) 2)
-    ((consp term) 3)
-    (t 4)))
+    ((stringp term) 3)
+    ((consp term) 4)
+    (t 5)))
 
 (defun %compare-strings (left right)
   (cond
@@ -165,7 +170,8 @@
           ((= left-class 0) (%compare-variables left right))
           ((= left-class 1) (%compare-numbers left right))
           ((= left-class 2) (%compare-atoms left right))
-          ((= left-class 3)
+          ((= left-class 3) (%compare-strings left right))
+          ((= left-class 4)
            (if (and (%proper-list-p left) (%proper-list-p right))
                (%compare-compound-terms left right seen)
                (%compare-cons-terms left right seen)))

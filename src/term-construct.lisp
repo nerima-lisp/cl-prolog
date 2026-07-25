@@ -30,7 +30,8 @@
         (%raise-instantiation-error
          environment operation "functor/3 requires an instantiated arity"))
        ((not (or (%term-atom-p resolved-name)
-                 (%prolog-number-p resolved-name)))
+                 (%prolog-number-p resolved-name)
+                 (stringp resolved-name)))
         (%raise-type-error
          "ATOMIC" resolved-name environment operation
          "functor/3 name must be atomic"))
@@ -58,7 +59,8 @@
                  (cons name resolved-name)
                  (cons arity resolved-arity))
            environment emit)))))
-    ((or (%term-atom-p resolved-term) (%prolog-number-p resolved-term))
+    ((or (%term-atom-p resolved-term) (%prolog-number-p resolved-term)
+         (stringp resolved-term))
      (%term-unify-sequence
       (list (cons name resolved-term) (cons arity 0)) environment emit))
     ((%term-compound-p resolved-term)
@@ -108,7 +110,8 @@
        (let ((decomposition
                (cond
                  ((or (%term-atom-p resolved-term)
-                      (%prolog-number-p resolved-term))
+                      (%prolog-number-p resolved-term)
+                      (stringp resolved-term))
                   (list resolved-term))
                  ((%term-compound-p resolved-term) resolved-term))))
          (if decomposition
@@ -139,7 +142,8 @@
              "ATOM" head environment operation
              "=../2 compound functor must be an atom"))
            ((and (null arguments)
-                 (not (or (%term-atom-p head) (%prolog-number-p head))))
+                 (not (or (%term-atom-p head) (%prolog-number-p head)
+                          (stringp head))))
             (%raise-type-error
              "ATOMIC" head environment operation
              "=../2 singleton list must contain an atomic term"))

@@ -55,6 +55,7 @@
                    (:code
                     (cond
                       ((char= character #\') (setf state :quoted))
+                      ((char= character #\") (setf state :dquoted))
                       ((char= character #\%) (setf state :line-comment))
                       ((and (char= character #\/)
                             (eql (peek-char nil stream nil nil) #\*))
@@ -83,6 +84,17 @@
                              (setf previous #\'))
                            (setf state :code)))))
                    (:quoted-escape (setf state :quoted))
+                   (:dquoted
+                    (cond
+                      ((char= character #\\)
+                       (setf state :dquoted-escape))
+                      ((char= character #\")
+                       (if (eql (peek-char nil stream nil nil) #\")
+                           (progn
+                             (record-character (read-char stream) out)
+                             (setf previous #\"))
+                           (setf state :code)))))
+                   (:dquoted-escape (setf state :dquoted))
                    (:line-comment
                     (when (char= character #\Newline)
                       (setf state :code)))
@@ -210,6 +222,39 @@
                                 (t
                                  (write-content character out))))))))
                  (setf raw-mode nil)))
+             (scan-string ()
+               ;; A "..." literal, mirroring SCAN-QUOTED but delimited by #\".
+               ;; A doubled "" is a literal quote; \\-escapes pass the next char.
+               (take)
+               (setf raw-mode t)
+               (unwind-protect
+                    (let ((content-length 0))
+                      (labels ((write-content (character out)
+                                 (incf content-length)
+                                 (%check-parser-limit
+                                  "QUOTED_LEXEME_LENGTH"
+                                  *max-prolog-quoted-lexeme-length*
+                                  content-length
+                                  position)
+                                 (write-char character out)))
+                        (with-output-to-string (out)
+                          (loop
+                            (unless (peek)
+                              (%parse-error "Unterminated Prolog string."))
+                            (let ((character (take)))
+                              (cond
+                                ((and (char= character #\")
+                                      (peek)
+                                      (char= (peek) #\"))
+                                 (take)
+                                 (write-content #\" out))
+                                ((char= character #\")
+                                 (return))
+                                ((and (char= character #\\) (peek))
+                                 (write-content (take) out))
+                                (t
+                                 (write-content character out))))))))
+                 (setf raw-mode nil)))
              (scan-number ()
                (let ((start position))
                  (labels ((take-number-character ()
@@ -256,6 +301,8 @@
                     (skip-block))
                    ((char= (peek) #\')
                     (emit :quoted-atom (scan-quoted) start))
+                   ((char= (peek) #\")
+                    (emit :string (scan-string) start))
                    ((digit-char-p (peek))
                     (emit :number (scan-number) start))
                    ((or (upper-case-p (peek)) (char= (peek) #\_))

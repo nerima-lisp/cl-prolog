@@ -14,6 +14,12 @@
 (defparameter *max-prolog-depth* nil
   "Default rule-resolution depth bound; NIL means unbounded search.")
 
+(defparameter *max-prolog-builtin-output-length* 1048576
+  "Maximum number of characters or list elements a single builtin call may
+materialize in one step (format fill/repeat runs, numlist ranges, and similar).
+Bounds attacker-controlled allocation; exceeding it raises a catchable
+resource_error.  NIL disables the bound.")
+
 ;;; Prolog exception data
 
 (define-condition prolog-exception (error)

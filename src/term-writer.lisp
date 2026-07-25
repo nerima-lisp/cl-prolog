@@ -4,6 +4,13 @@
 
 (defconstant +compound-argument-priority+ 999)
 
+(defvar *write-seen* nil
+  "When bound to an EQ hash-table, the term writer marks each cons on the
+current path and emits `...' on revisiting one, so a cyclic term (which the
+occurs_check=false flag lets a user build) prints in bounded time instead of
+recursing forever.  Path-scoped (marked on descent, unmarked on return), so a
+shared but acyclic subterm still prints in full.")
+
 (declaim (ftype function %write-prolog-term))
 
 (defun %writer-operator-name (functor)
@@ -34,6 +41,19 @@
              (write-char character stream))
            (write-char character stream))
   (write-char #\' stream))
+
+(defun %write-prolog-string (string stream quotedp)
+  "Write a Prolog string: raw characters for write/print, or a `\"...\"'
+literal with \" and \\ escaped for writeq/write_canonical."
+  (if quotedp
+      (progn
+        (write-char #\" stream)
+        (loop for character across string
+              do (when (member character '(#\" #\\) :test #'char=)
+                   (write-char #\\ stream))
+                 (write-char character stream))
+        (write-char #\" stream))
+      (write-string string stream)))
 
 (defun %write-prolog-atom (atom stream quotedp)
   (let ((name (string-downcase (symbol-name atom))))
@@ -71,19 +91,35 @@
 
 (defun %write-prolog-list (term stream quotedp numbervarsp ignore-opsp)
   (write-char #\[ stream)
-  (loop with tail = term
-        with firstp = t
-        while (consp tail)
-        do (unless firstp (write-char #\, stream))
-           (%write-prolog-term (car tail) stream +compound-argument-priority+
-                               quotedp numbervarsp ignore-opsp)
-           (setf firstp nil
-                 tail (cdr tail))
-        finally
-           (unless (null tail)
-             (write-char #\| stream)
-             (%write-prolog-term tail stream +compound-argument-priority+
-                                 quotedp numbervarsp ignore-opsp)))
+  ;; Mark each spine cons in *WRITE-SEEN* (path-scoped) so a cyclic list tail
+  ;; such as X = [a|X] emits `|...]' instead of looping forever.  The head cons
+  ;; is already marked by %WRITE-PROLOG-TERM; the ones we add here are removed
+  ;; on return to keep an acyclic shared tail printable in full.
+  (let ((marked '()))
+    (unwind-protect
+         (loop with tail = term
+               with firstp = t
+               do (cond
+                    ((null tail) (return))
+                    ((not (consp tail))
+                     (write-char #\| stream)
+                     (%write-prolog-term tail stream +compound-argument-priority+
+                                         quotedp numbervarsp ignore-opsp)
+                     (return))
+                    ((and (not firstp) *write-seen* (gethash tail *write-seen*))
+                     (write-string "|..." stream)
+                     (return))
+                    (t
+                     (unless firstp (write-char #\, stream))
+                     (when (and *write-seen* (not firstp))
+                       (setf (gethash tail *write-seen*) t)
+                       (push tail marked))
+                     (%write-prolog-term (car tail) stream
+                                         +compound-argument-priority+
+                                         quotedp numbervarsp ignore-opsp)
+                     (setf firstp nil
+                           tail (cdr tail)))))
+      (dolist (cell marked) (remhash cell *write-seen*))))
   (write-char #\] stream))
 
 (defun %write-prolog-prefix-operator
@@ -145,6 +181,46 @@ argument one below that so a bare `->'/`*->' on the left needs no parens."
                                quotedp numbervarsp ignore-opsp))
   (write-char #\) stream))
 
+(defun %write-prolog-cons
+    (term stream context-priority quotedp numbervarsp ignore-opsp)
+  "Write a cons (compound / list / operator / numbervar) TERM.  Operator and
+compound dispatch (which need the term's arity) is gated on %PROPER-LIST-P so a
+cyclic or partial list cannot hang `length'; such terms fall through to the
+cycle-safe list writer."
+  (cond
+    ((and numbervarsp (%numbered-variable-index term))
+     (%write-numbered-variable (%numbered-variable-index term) stream))
+    (t
+     (let ((properp (%proper-list-p term)))
+       (cond
+         ((and properp (not ignore-opsp)
+               (member (first term) '(if-then-else soft-if-then-else) :test #'eq)
+               (= (length term) 4))
+          (%write-prolog-conditional term stream context-priority
+                                     (eq (first term) 'soft-if-then-else)
+                                     quotedp numbervarsp ignore-opsp))
+         ((and properp (not ignore-opsp) (symbolp (first term))
+               (= (length term) 2))
+          (let ((definition (%writer-operator-definition (first term) 1)))
+            (if definition
+                (%write-prolog-prefix-operator term definition stream
+                                               context-priority
+                                               quotedp numbervarsp ignore-opsp)
+                (%write-prolog-compound term stream quotedp numbervarsp
+                                        ignore-opsp))))
+         ((and properp (not ignore-opsp) (symbolp (first term))
+               (= (length term) 3))
+          (let ((definition (%writer-operator-definition (first term) 2)))
+            (if definition
+                (%write-prolog-binary-operator term definition stream
+                                               context-priority
+                                               quotedp numbervarsp ignore-opsp)
+                (%write-prolog-compound term stream quotedp numbervarsp
+                                        ignore-opsp))))
+         ((and properp (symbolp (first term)))
+          (%write-prolog-compound term stream quotedp numbervarsp ignore-opsp))
+         (t (%write-prolog-list term stream quotedp numbervarsp ignore-opsp)))))))
+
 (defun %write-prolog-term
     (term stream context-priority quotedp numbervarsp ignore-opsp)
   (cond
@@ -152,35 +228,27 @@ argument one below that so a bare `->'/`*->' on the left needs no parens."
     ((logic-var-p term) (%write-prolog-variable term stream))
     ((numberp term) (%write-prolog-number term stream))
     ((symbolp term) (%write-prolog-atom term stream quotedp))
+    ((stringp term) (%write-prolog-string term stream quotedp))
     ((atom term) (error "Cannot write non-Prolog atomic value ~S." term))
-    ((and numbervarsp (%numbered-variable-index term))
-     (%write-numbered-variable (%numbered-variable-index term) stream))
-    ((and (not ignore-opsp)
-          (member (first term) '(if-then-else soft-if-then-else) :test #'eq)
-          (= (length term) 4))
-     (%write-prolog-conditional term stream context-priority
-                                (eq (first term) 'soft-if-then-else)
-                                quotedp numbervarsp ignore-opsp))
-    ((and (not ignore-opsp) (symbolp (first term)) (= (length term) 2))
-     (let ((definition (%writer-operator-definition (first term) 1)))
-       (if definition
-           (%write-prolog-prefix-operator term definition stream context-priority
-                                          quotedp numbervarsp ignore-opsp)
-           (%write-prolog-compound term stream quotedp numbervarsp ignore-opsp))))
-    ((and (not ignore-opsp) (symbolp (first term)) (= (length term) 3))
-     (let ((definition (%writer-operator-definition (first term) 2)))
-       (if definition
-           (%write-prolog-binary-operator term definition stream context-priority
-                                          quotedp numbervarsp ignore-opsp)
-           (%write-prolog-compound term stream quotedp numbervarsp ignore-opsp))))
-    ((and (symbolp (first term)) (listp term))
-     (%write-prolog-compound term stream quotedp numbervarsp ignore-opsp))
-    (t (%write-prolog-list term stream quotedp numbervarsp ignore-opsp))))
+    ((and *write-seen* (gethash term *write-seen*))
+     ;; Cyclic revisit on the current path: stop rather than loop forever.
+     (write-string "..." stream))
+    (t
+     (when *write-seen* (setf (gethash term *write-seen*) t))
+     (unwind-protect
+          (%write-prolog-cons term stream context-priority
+                              quotedp numbervarsp ignore-opsp)
+       (when *write-seen* (remhash term *write-seen*))))))
 
 (defun %write-prolog-term-with-options
     (term stream &key (quoted t) (numbervars nil) (ignore-ops nil))
-  (%write-prolog-term term stream +maximum-operator-priority+
-                      quoted numbervars ignore-ops))
+  ;; Only a cons can carry a cycle, so allocate the seen-set lazily -- writing
+  ;; an atom/number/string (the common streamed-output case) allocates nothing.
+  (let ((*write-seen* (if (consp term)
+                          (make-hash-table :test #'eq)
+                          *write-seen*)))
+    (%write-prolog-term term stream +maximum-operator-priority+
+                        quoted numbervars ignore-ops)))
 
 (defun write-prolog-term (term &optional (stream *standard-output*))
   "Write TERM to STREAM in canonical, parseable Prolog syntax and return TERM."

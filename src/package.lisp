@@ -75,6 +75,7 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:*max-prolog-quoted-lexeme-length*
    #:*max-prolog-numeric-lexeme-length*
    #:*max-prolog-interned-symbols*
+   #:*max-prolog-builtin-output-length*
    #:read-prolog-term
    #:read-prolog-clause
    #:write-prolog-term
@@ -172,6 +173,62 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:copy_term
    #:numbervars
    #:|=..|
+   ;; library(apply) / library(lists) extensions
+   #:maplist
+   #:foldl
+   #:include
+   #:exclude
+   #:partition
+   #:permutation
+   #:subtract
+   #:union
+   #:intersection
+   #:list_to_set
+   #:numlist
+   #:sum_list
+   #:sumlist
+   ;; arithmetic relations
+   #:plus
+   #:succ
+   ;; predsort / aggregate_all
+   #:predsort
+   #:aggregate_all
+   ;; library(assoc)
+   #:empty_assoc
+   #:get_assoc
+   #:put_assoc
+   #:del_assoc
+   #:list_to_assoc
+   #:assoc_to_list
+   #:assoc_to_keys
+   #:assoc_to_values
+   ;; library(pairs)
+   #:pairs_keys_values
+   #:pairs_keys
+   #:pairs_values
+   ;; character classification / case folding
+   #:char_type
+   #:code_type
+   #:upcase_atom
+   #:downcase_atom
+   ;; string type and conversions
+   #:string_length
+   #:string_concat
+   #:atom_string
+   #:string_to_atom
+   #:number_string
+   #:string_chars
+   #:string_codes
+   #:term_string
+   #:text_concat
+   #:sub_string
+   #:split_string
+   ;; term <-> atom I/O and output
+   #:term_to_atom
+   #:read_term_from_atom
+   #:print
+   #:format
+   #:tab
    ;; DCG
    #:def-dcg-rule
    #:phrase

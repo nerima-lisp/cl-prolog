@@ -68,7 +68,8 @@ holds of the resolved term, or fails to hold when NEGATE is true."
   (float floatp)
   (compound %term-compound-p)
   (ground %term-has-variables-p :negate t)
-  (atomic (%term-atom-p %prolog-number-p))
+  (string stringp)
+  (atomic (%term-atom-p %prolog-number-p stringp))
   (callable (%term-atom-p %term-compound-p)))
 
 (define-builtin (acyclic_term term) (rulebase environment depth emit)

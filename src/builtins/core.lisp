@@ -13,10 +13,11 @@
     (when ok
       (funcall emit extended))))
 
-(defun %constraint-unify-emit (left right environment emit)
-  "Unify LEFT and RIGHT, then propagate any active constraint store."
+(defun %constraint-unify-emit (left right environment emit &key (occurs-check t))
+  "Unify LEFT and RIGHT, then propagate any active constraint store.
+OCCURS-CHECK is forwarded to UNIFY (see the `occurs_check' flag)."
   (multiple-value-bind (extended ok)
-      (unify left right environment)
+      (unify left right environment occurs-check)
     (when ok
       (if *constraint-post-unify-hook*
           (funcall *constraint-post-unify-hook* extended emit)
@@ -193,7 +194,17 @@ FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
   (char_conversion "OFF" ("ON" "OFF"))
   (debug "OFF" ("ON" "OFF"))
   (unknown "ERROR" ("ERROR" "FAIL" "WARNING"))
-  (double_quotes "CODES" ("CODES" "CHARS" "ATOM")))
+  (double_quotes "CODES" ("CODES" "CHARS" "ATOM" "STRING"))
+  (occurs_check "TRUE" ("TRUE" "FALSE" "ERROR")))
+
+(defun %double-quotes-mode (rulebase)
+  "Return the rulebase's double_quotes flag as a keyword for *DOUBLE-QUOTES*."
+  (let ((value (%prolog-flag-value rulebase (%find-prolog-flag "DOUBLE_QUOTES"))))
+    (cond
+      ((string= value "CHARS") :chars)
+      ((string= value "ATOM") :atom)
+      ((string= value "STRING") :string)
+      (t :codes))))
 
 (defun %rulebase-active-char-conversions (rulebase)
   "Return the conversion table when char_conversion is on and non-empty."

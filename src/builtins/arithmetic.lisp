@@ -67,7 +67,18 @@
           (%raise-resource-error
            "INTEGER_SIZE" nil (%iso-atom "ARITHMETIC")
            "arithmetic result exceeds the configured size limit"))))
-    (expt base exponent)))
+    (expt base exponent))
+  (defun %bounded-ash (integer count)
+    "Arithmetic shift bounded like %BOUNDED-EXPT: a left shift whose result
+would exceed the configured bit size raises resource_error rather than
+allocating an unbounded bignum."
+    (when (and (plusp count)
+               (> (+ (integer-length (abs integer)) count)
+                  *max-prolog-arithmetic-result-bits*))
+      (%raise-resource-error
+       "INTEGER_SIZE" nil (%iso-atom "ARITHMETIC")
+       "arithmetic result exceeds the configured size limit"))
+    (ash integer count)))
 
 (defun %arithmetic-operator-key (operator table)
   (when (symbolp operator)
@@ -127,7 +138,22 @@
   (:atan (value expression) (atan value))
   (:|\\| (value expression)
     (%require-integer value)
-    (lognot value)))
+    (lognot value))
+  (:msb (value expression)
+    (%require-integer value)
+    (unless (plusp value)
+      (%arithmetic-error expression "msb is undefined for ~S" value))
+    (1- (integer-length value)))
+  (:lsb (value expression)
+    (%require-integer value)
+    (unless (plusp value)
+      (%arithmetic-error expression "lsb is undefined for ~S" value))
+    (1- (integer-length (logand value (- value)))))
+  (:popcount (value expression)
+    (%require-integer value)
+    (unless (>= value 0)
+      (%arithmetic-error expression "popcount is undefined for ~S" value))
+    (logcount value)))
 
 (define-arithmetic-table *binary-arithmetic-functions* 2
   (:+ (left right expression) (+ left right))
@@ -168,16 +194,23 @@
     (logxor left right))
   (:<< (left right expression)
     (%require-integer left) (%require-integer right)
-    (ash left right))
+    (%bounded-ash left right))
   (:>> (left right expression)
     (%require-integer left) (%require-integer right)
-    (ash left (- right)))
+    (%bounded-ash left (- right)))
   (:atan (left right expression)
     (%require-real left) (%require-real right)
-    (atan (float left 1.0d0) (float right 1.0d0))))
+    (atan (float left 1.0d0) (float right 1.0d0)))
+  (:atan2 (left right expression)
+    (%require-real left) (%require-real right)
+    (atan (float left 1.0d0) (float right 1.0d0)))
+  (:gcd (left right expression)
+    (%require-integer left) (%require-integer right)
+    (gcd left right)))
 
 (defparameter *arithmetic-constants*
-  (list (cons :pi pi))
+  (list (cons :pi pi)
+        (cons :e (exp 1.0d0)))
   "Data table for zero-argument arithmetic constants.")
 
 (defun %arithmetic-function-table (arity)
@@ -314,3 +347,21 @@ CL-OPERATOR holds between the evaluated LEFT and RIGHT expressions."
      (%unify-emit successor (1+ resolved-predecessor) environment emit))
     ((plusp resolved-successor)
      (%unify-emit predecessor (1- resolved-successor) environment emit))))
+
+(define-iso-builtin (plus a b c) "PLUS"
+  ;; The integer relation A + B =:= C, usable in any single-unknown mode.
+  (flet ((check (argument)
+           (unless (or (logic-var-p argument) (integerp argument))
+             (%raise-type-error "INTEGER" argument environment operation
+                                "plus/3 arguments must be integers"))))
+    (check resolved-a) (check resolved-b) (check resolved-c)
+    (cond
+      ((and (integerp resolved-a) (integerp resolved-b))
+       (%unify-emit c (+ resolved-a resolved-b) environment emit))
+      ((and (integerp resolved-a) (integerp resolved-c))
+       (%unify-emit b (- resolved-c resolved-a) environment emit))
+      ((and (integerp resolved-b) (integerp resolved-c))
+       (%unify-emit a (- resolved-c resolved-b) environment emit))
+      (t (%raise-instantiation-error
+          environment operation
+          "plus/3 requires at least two instantiated arguments")))))

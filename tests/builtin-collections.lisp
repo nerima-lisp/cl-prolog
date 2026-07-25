@@ -73,6 +73,90 @@
   ((msort improper ?sorted) :signals)
   ((keysort ((not-a-pair)) ?sorted) :signals))
 
+(deftest-queries sort4-builtin ((make-rulebase))
+  ((sort 0 |@<| (3 1 2 1) ?s)  :ordered (((?s 1 2 3))))
+  ((sort 0 |@=<| (3 1 2 1) ?s) :ordered (((?s 1 1 2 3))))
+  ((sort 0 |@>| (3 1 2 1) ?s)  :ordered (((?s 3 2 1))))
+  ((sort 0 |@>=| (3 1 2 1) ?s) :ordered (((?s 3 2 1 1))))
+  ;; key 1 selects the first argument of each compound.
+  ((sort 1 |@>=| ((k 3) (k 1) (k 2)) ?s)
+   :ordered (((?s (k 3) (k 2) (k 1)))))
+  ;; key 2 selects the second argument.
+  ((sort 2 |@<| ((k a 3) (k b 1) (k c 2)) ?s)
+   :ordered (((?s (k b 1) (k c 2) (k a 3)))))
+  ;; key past the term's arity is an error.
+  ((sort 2 |@<| ((k 1) (k 2)) ?s) :signals)
+  ((sort 0 |@<| () ?s)         :ordered (((?s))))
+  ((sort -1 |@<| (1 2) ?s)     :signals)
+  ((sort a |@<| (1 2) ?s)      :signals)
+  ((sort ?k |@<| (1 2) ?s)     :signals)
+  ((sort 0 bogus (1 2) ?s)     :signals)
+  ((sort 0 ?order (1 2) ?s)    :signals)
+  ((sort 0 |@<| improper ?s)   :signals)
+  ((sort 1 |@<| ((a . b)) ?s)  :signals))
+
+(defun make-predsort-rulebase ()
+  (prolog ((cmp ?order ?a ?b) (compare ?order ?a ?b))
+          ((by-abs ?order ?a ?b) (is ?aa (abs ?a)) (is ?bb (abs ?b))
+           (compare ?order ?aa ?bb))
+          ((never ?order ?a ?b) (fail))
+          ((bad-order eq ?a ?b))))
+
+(deftest-queries predsort-builtin ((make-predsort-rulebase))
+  ((predsort cmp (3 1 2 1) ?s)  :ordered (((?s 1 2 3))))
+  ((predsort cmp () ?s)         :ordered (((?s))))
+  ;; `=' results drop the later element: 1 and -1 compare equal by abs.
+  ((predsort by-abs (1 -1 2) ?s) :ordered (((?s 1 2))))
+  ;; several equal groups keep the first of each, stably.
+  ((predsort by-abs (3 1 -1 3 2 -2) ?s) :ordered (((?s 1 2 3))))
+  ;; a comparison predicate with no proof makes predsort fail (as in SWI).
+  ((predsort never (1 2 3) ?s)  :fails)
+  ;; a comparison binding a non-order atom raises.
+  ((predsort bad-order (1 2) ?s) :signals)
+  ((predsort ?g (1) ?s)         :signals)
+  ((predsort cmp improper ?s)   :signals))
+
+;; Wrapper predicates keep the aggregate template variable inside the clause
+;; body so only the result variable appears in each query.
+(defun make-aggregate-rulebase ()
+  (prolog ((p 3)) ((p 1)) ((p 2))
+          ((f 1.5d0)) ((f 2.5d0))
+          ((a-tom foo)) ((a-tom bar))
+          ;; a defined predicate with no solutions, so aggregate_all sees an
+          ;; empty set (an *undefined* predicate would raise existence_error).
+          ((nonexistent ?x) (cl-prolog::fail))
+          ((agg-count ?n) (aggregate_all count (p ?x) ?n))
+          ((agg-count1 ?n) (aggregate_all (count ?x) (p ?x) ?n))
+          ((agg-sum ?n) (aggregate_all (sum ?x) (p ?x) ?n))
+          ((agg-sum-expr ?n) (aggregate_all (sum (* ?x ?x)) (p ?x) ?n))
+          ((agg-sum-float ?n) (aggregate_all (sum ?x) (f ?x) ?n))
+          ((agg-max ?n) (aggregate_all (max ?x) (p ?x) ?n))
+          ((agg-min ?n) (aggregate_all (min ?x) (p ?x) ?n))
+          ((agg-bag ?b) (aggregate_all (bag ?x) (p ?x) ?b))
+          ((agg-set ?b) (aggregate_all (set ?x) (p ?x) ?b))
+          ((agg-count-empty ?n) (aggregate_all count (nonexistent ?x) ?n))
+          ((agg-sum-empty ?n) (aggregate_all (sum ?x) (nonexistent ?x) ?n))
+          ((agg-max-empty ?n) (aggregate_all (max ?x) (nonexistent ?x) ?n))
+          ((agg-sum-atoms ?n) (aggregate_all (sum ?x) (a-tom ?x) ?n))))
+
+(deftest-queries aggregate-all-builtin ((make-aggregate-rulebase))
+  ((agg-count ?n)       :ordered (((?n . 3))))
+  ((agg-count1 ?n)      :ordered (((?n . 3))))
+  ((agg-sum ?n)         :ordered (((?n . 6))))
+  ((agg-sum-expr ?n)    :ordered (((?n . 14))))
+  ((agg-sum-float ?n)   :ordered (((?n . 4.0d0))))
+  ((agg-max ?n)         :ordered (((?n . 3))))
+  ((agg-min ?n)         :ordered (((?n . 1))))
+  ((agg-bag ?b)         :ordered (((?b 3 1 2))))
+  ((agg-set ?b)         :ordered (((?b 1 2 3))))
+  ((agg-count-empty ?n) :ordered (((?n . 0))))
+  ((agg-sum-empty ?n)   :ordered (((?n . 0))))
+  ((agg-max-empty ?n)   :fails)
+  ((agg-sum-atoms ?n)   :signals)
+  ((aggregate_all ?spec (p ?x) ?n)       :signals)
+  ((aggregate_all (a . b) (p ?x) ?n)     :signals)
+  ((aggregate_all (bogus ?x) (p ?x) ?n)  :signals))
+
 (deftest collection-builtins-use-standard-variable-order-and-variants ()
   (let ((rulebase
           (make-rulebase

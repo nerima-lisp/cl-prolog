@@ -7,6 +7,104 @@ section at the top of the file.
 
 ## Unreleased
 
+### Added
+
+- `library(assoc)`: `empty_assoc/1`, `put_assoc/4`, `get_assoc/3`,
+  `del_assoc/4`, `list_to_assoc/2`, `assoc_to_list/2`, `assoc_to_keys/2`,
+  `assoc_to_values/2` — association maps keyed by the standard order of terms
+  (`builtins/assoc.lisp`)
+- `library(pairs)`: `pairs_keys_values/3` (bidirectional), `pairs_keys/2`,
+  `pairs_values/2` (`builtins/pairs.lisp`)
+- `plus/3`, the integer relation `A + B =:= C` usable in any single-unknown
+  mode
+- a SWI-compatible **string** term type (represented as a Common Lisp string):
+  the `double_quotes` flag gains a `string` value and is now honored by the
+  reader (`"..."` produces codes/chars/atom/string per the flag); `string/1`
+  and `atomic/1` classify strings; the standard order of terms places String
+  between Atom and Compound; `==`/`compare` use content equality; and the term
+  writer prints strings raw for `write` and as escaped `"..."` for
+  `writeq`/`write_canonical`
+- string builtins (`builtins/string.lisp`): `string_length/2`,
+  `string_concat/3` (relational), `atom_string/2`, `string_to_atom/2`,
+  `number_string/2`, `string_chars/2`, `string_codes/2`, `term_string/2`,
+  `text_concat/3`, `sub_string/5`, `split_string/4`, plus the shared `%text-of`
+  text-coercion helper
+- an `occurs_check` Prolog flag (`true` default, `false`, `error`): `=/2`
+  consults it — `false` allows a cyclic binding, `error` raises when a cycle
+  would form; `unify_with_occurs_check/2` always checks; clause-resolution
+  unification stays occurs-checked for safety
+- regression suites `builtin-string` and `builtin-occurs-check`
+- character classification `char_type/2` and `code_type/2` (simple types plus
+  the `digit(W)`, `to_lower/1`, `to_upper/1`, `upper/1`, `lower/1`, `code/1`
+  parametric types) and case folding `upcase_atom/2`, `downcase_atom/2`
+  (`builtins/char-type.lisp`)
+- `term_to_atom/2` (bidirectional term/text conversion) and
+  `read_term_from_atom/3`, routing parser failures through catchable ISO
+  `syntax_error`/`resource_error` (`builtins/term-io.lisp`)
+- `sort/4` (key-and-order sort with `@<`/`@=<`/`@>`/`@>=`, key 0 = whole term),
+  `predsort/3` (comparison-predicate sort dropping `=` duplicates), and
+  `aggregate_all/3` (`count`, `count/1`, `sum`, `max`, `min`, `bag`, `set`)
+  (`builtins/collection.lisp`)
+- evaluable arithmetic functions `gcd/2`, `atan2/2`, `msb/1`, `lsb/1`,
+  `popcount/1`, and the constant `e` (`builtins/arithmetic.lisp`)
+- regression suites `builtin-char-type` and `builtin-term-io`, plus `sort/4`,
+  `predsort/3`, `aggregate_all/3`, and arithmetic-function coverage
+- `library(lists)` predicates: `sum_list/2` (with the `sumlist/2` alias),
+  `max_list/2`, `min_list/2`, `numlist/3`, `list_to_set/2`, `subtract/3`,
+  `intersection/3`, `union/3`, and `permutation/2` (`builtins/list-extra.lisp`)
+- `library(apply)` meta-predicates driven through the CPS prover:
+  `maplist/2` and up (variadic in the number of lists), `foldl/4..6`,
+  `include/3`, `exclude/3`, and `partition/4` (`builtins/apply.lisp`); element
+  goals are cut-opaque like `call/1`, and the filter predicates test
+  provability only and do not leak their goal's bindings
+- formatted output: `format/1,2,3` supporting the `~w ~p ~q ~a ~s ~d ~D ~f ~e
+  ~g ~r ~R ~c ~n ~~` directives, the `` ~`c `` fill character, `~*`
+  argument-supplied counts, and column control (`~t` fill, `~|` absolute
+  column, `~+` relative column), plus `tab/1,2` and `print/1,2`
+  (`builtins/format.lisp`); format strings may be atoms, code lists, character
+  lists, or Common Lisp strings. `~p` quotes like `print/1`, and `~e`/`~g` use
+  the C/Prolog exponent convention
+- `*max-prolog-builtin-output-length*`: a configurable, exported bound on the
+  characters or list elements a single builtin call may materialize, so
+  `format` fill/repeat/newline runs, `tab/1`, and `numlist/3` ranges raise a
+  catchable `resource_error` instead of exhausting memory on hostile input
+- regression suites `builtin-list-extra` and `builtin-format` covering the new
+  predicates, their error contracts, and resource bounds
+
+### Security
+
+- malformed `format` directives, out-of-range `~r` radices, invalid `~c`
+  character codes, and too-few-argument errors now raise catchable ISO errors
+  instead of escaping to the host as uncatchable Common Lisp conditions
+- `numlist/3`, `tab/1`, and `format`'s repeat/fill/newline counts are bounded
+  against `*max-prolog-builtin-output-length*`, closing unbounded-allocation
+  denial-of-service vectors reachable from untrusted queries
+- `char_type/2`, `code_type/2`, `sort/4`, and `aggregate_all/3` guard their
+  compound arguments with a proper-list check before measuring length, so a
+  partial list (e.g. `char_type(a, [x|y])`) raises a catchable ISO error
+  instead of an uncatchable host `type_error`
+- the `<<` left-shift arithmetic result size is now bounded against
+  `*max-prolog-arithmetic-result-bits*` (like `**`/`^`), so `1 << huge` raises
+  a catchable `resource_error` instead of allocating an unbounded bignum (`>>`
+  only shrinks the result and needs no bound)
+
+### Changed
+
+- the term writer is now cycle-safe: it marks each cons on the current path and
+  emits `...` on revisiting one, so writing a cyclic term (which the
+  `occurs_check=false` flag lets a user build) terminates instead of recursing
+  forever; acyclic shared subterms still print in full
+- `list_to_set/2` deduplicates in O(n log n) via an index-tagged standard-order
+  sort instead of the previous O(n^2) linear scan, preserving first-occurrence
+  order
+- `aggregate_all/3` evaluates the `sum`/`max`/`min` template as an arithmetic
+  expression (so `sum(X*2)` works), matching SWI
+- `predsort/3` fails (rather than raising) when its comparison predicate has no
+  proof, matching SWI; its merge step is iterative to keep the control stack
+  O(log n) on large lists
+- `char_type/2`/`code_type/2` `graphic` now denotes the Prolog symbol-char
+  class (distinct from `graph`)
+
 ## 0.7.0 - 2026-07-24
 
 ### Added

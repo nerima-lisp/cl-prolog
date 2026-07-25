@@ -194,6 +194,192 @@ SORTED with (SORT-FN list), reporting ISO errors under OPERATION-NAME."
                                      (%keysort-key pair environment)))
                  environment emit)))
 
+;;; sort/4 -- key-and-order sort.  Key 0 selects the whole term; a positive
+;;; key selects that argument of each compound.  Order is one of @<, @=<, @>,
+;;; @>= ; @< and @> remove elements comparing equal on the key.
+
+(defun %sort4-key (element key environment operation)
+  "Return the sort key of ELEMENT for sort/4 KEY (0 = whole term)."
+  (if (zerop key)
+      element
+      (progn
+        (unless (and (%proper-list-p element) (> (length element) key))
+          (%raise-type-error "COMPOUND" element environment operation
+                             "sort/4 key argument exceeds the term's arity"))
+        (nth key element))))
+
+(defun %sort4-order (order environment operation)
+  "Return (VALUES ASCENDING-P DEDUP-P) for a sort/4 order atom."
+  (unless (%term-atom-p order)
+    (if (logic-var-p order)
+        (%raise-instantiation-error environment operation
+                                    "sort/4 order must be instantiated")
+        (%raise-type-error "ATOM" order environment operation
+                           "sort/4 order must be an atom")))
+  (let ((name (symbol-name order)))
+    (cond
+      ((string-equal name "@<")  (values t t))
+      ((string-equal name "@=<") (values t nil))
+      ((string-equal name "@>")  (values nil t))
+      ((string-equal name "@>=") (values nil nil))
+      (t (%raise-domain-error "ORDER" order environment operation
+                              "sort/4 order must be @<, @=<, @> or @>=")))))
+
+(define-builtin (sort key order input sorted) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (let* ((operation (%iso-atom "SORT"))
+         (key-value (logic-substitute key environment))
+         (order-value (logic-substitute order environment))
+         (values (%resolved-collection-list input environment operation)))
+    (%require-non-negative-integer key-value environment operation
+                                   "sort/4" "key")
+    (multiple-value-bind (ascending-p dedup-p)
+        (%sort4-order order-value environment operation)
+      ;; Extract every key up front so an out-of-range key is reported even for
+      ;; short lists and each key is computed once.
+      (let* ((tagged (mapcar (lambda (element)
+                               (cons (%sort4-key element key-value
+                                                 environment operation)
+                                     element))
+                             values))
+             (ordered (stable-sort tagged
+                                   (lambda (a b)
+                                     (let ((c (%compare-terms (car a) (car b))))
+                                       (if ascending-p (minusp c) (plusp c))))))
+             (result (if dedup-p
+                         (let ((kept '()))
+                           (dolist (cell ordered (nreverse kept))
+                             (unless (and kept
+                                          (zerop (%compare-terms (car (car kept))
+                                                                 (car cell))))
+                               (push cell kept))))
+                         ordered)))
+        (%unify-emit sorted (mapcar #'cdr result) environment emit)))))
+
+;;; predsort/3 -- sort with a user comparison predicate call(Pred, Order, A, B),
+;;; dropping elements whose comparison yields `='.
+
+(defun %predsort-order (closure a b rulebase environment depth operation fail-tag)
+  "Call CLOSURE(Order, A, B) and return -1/0/1 from the resulting order atom.
+Throws FAIL-TAG when the comparison predicate has no proof, so predsort/3
+fails (as in SWI) rather than raising."
+  (let ((order-var (fresh-logic-variable "?PREDSORT-ORDER")))
+    (multiple-value-bind (result-environment succeeded-p)
+        (%first-proof-environment
+         (%extend-callable-goal closure (list order-var a b) environment operation)
+         rulebase environment depth)
+      (unless succeeded-p
+        (cl:throw fail-tag :fail))
+      (let ((order (logic-substitute order-var result-environment)))
+        (unless (%term-atom-p order)
+          (%raise-type-error "ATOM" order environment operation
+                             "predsort/3 comparison must bind an order atom"))
+        (let ((name (symbol-name order)))
+          (cond ((string-equal name "<") -1)
+                ((string-equal name "=") 0)
+                ((string-equal name ">") 1)
+                (t (%raise-domain-error "ORDER" order environment operation
+                                        "predsort/3 order must be <, = or >"))))))))
+
+(define-builtin (predsort goal input sorted) (rulebase environment depth emit)
+  (let* ((operation (%iso-atom "PREDSORT"))
+         (closure (logic-substitute goal environment))
+         (values (%resolved-collection-list input environment operation))
+         (fail-tag (list 'predsort-fail)))
+    (when (logic-var-p closure)
+      (%raise-instantiation-error environment operation
+                                  "predsort/3 comparison predicate must be instantiated"))
+    ;; Merge sort so each pair is compared once; `=' drops the later element.
+    ;; MERGE-RUNS is iterative (accumulate + NREVERSE) to keep the control
+    ;; stack O(log n) on large lists.
+    (labels ((merge-runs (left right)
+               (let ((accumulator '()))
+                 (loop
+                   (cond
+                     ((null left) (return (nreconc accumulator right)))
+                     ((null right) (return (nreconc accumulator left)))
+                     (t (let ((order (%predsort-order closure (car left) (car right)
+                                                      rulebase environment depth
+                                                      operation fail-tag)))
+                          (cond
+                            ((minusp order) (push (pop left) accumulator))
+                            ((plusp order) (push (pop right) accumulator))
+                            (t ;; equal: keep the left element, drop the right
+                             (push (pop left) accumulator)
+                             (pop right)))))))))
+             (sort-run (items)
+               (if (or (null items) (null (cdr items)))
+                   items
+                   (let* ((half (floor (length items) 2))
+                          (left (subseq items 0 half))
+                          (right (subseq items half)))
+                     (merge-runs (sort-run left) (sort-run right))))))
+      (let ((result (cl:catch fail-tag (sort-run values))))
+        (unless (eq result :fail)
+          (%unify-emit sorted result environment emit))))))
+
+;;; aggregate_all/3 -- count/sum/max/min/bag/set reductions over a goal.
+
+(defun %aggregate-numbers (expr-template goal rulebase environment depth operation)
+  "Collect the solutions of EXPR-TEMPLATE over GOAL and evaluate each as an
+arithmetic expression, matching SWI's sum/max/min templates (a bare number
+evaluates to itself)."
+  (declare (cl:ignore operation))
+  (mapcar (lambda (value)
+            (%evaluate-arithmetic-expression value environment))
+          (%collect-template-solutions expr-template goal
+                                       rulebase environment depth)))
+
+(define-builtin (aggregate_all spec goal result) (rulebase environment depth emit)
+  (let* ((operation (%iso-atom "AGGREGATE_ALL"))
+         (resolved-spec (logic-substitute spec environment)))
+    (flet ((numbers (expr)
+             (%aggregate-numbers expr goal rulebase environment depth operation)))
+      (cond
+        ;; count/0 as the bare atom `count'
+        ((and (%term-atom-p resolved-spec)
+              (string-equal (symbol-name resolved-spec) "count"))
+         (%unify-emit result
+                      (length (%collect-template-solutions t goal rulebase
+                                                           environment depth))
+                      environment emit))
+        ((and (%proper-list-p resolved-spec) (= (length resolved-spec) 2)
+              (%term-atom-p (first resolved-spec)))
+         (let ((tag (symbol-name (first resolved-spec)))
+               (arg (second resolved-spec)))
+           (cond
+             ((string-equal tag "count")
+              (%unify-emit result
+                           (length (%collect-template-solutions arg goal rulebase
+                                                                environment depth))
+                           environment emit))
+             ((string-equal tag "sum")
+              (%unify-emit result (reduce #'+ (numbers arg) :initial-value 0)
+                           environment emit))
+             ((string-equal tag "max")
+              (let ((ns (numbers arg))) (when ns (%unify-emit result (reduce #'max ns) environment emit))))
+             ((string-equal tag "min")
+              (let ((ns (numbers arg))) (when ns (%unify-emit result (reduce #'min ns) environment emit))))
+             ((string-equal tag "bag")
+              (%unify-emit result
+                           (%collect-template-solutions arg goal rulebase
+                                                        environment depth)
+                           environment emit))
+             ((string-equal tag "set")
+              (%unify-emit result
+                           (%standard-term-sort-unique
+                            (%collect-template-solutions arg goal rulebase
+                                                         environment depth))
+                           environment emit))
+             (t (%raise-domain-error "AGGREGATE_SPEC" resolved-spec environment
+                                     operation
+                                     "unsupported aggregate_all/3 template")))))
+        ((logic-var-p resolved-spec)
+         (%raise-instantiation-error environment operation
+                                     "aggregate_all/3 template must be instantiated"))
+        (t (%raise-domain-error "AGGREGATE_SPEC" resolved-spec environment operation
+                                "unsupported aggregate_all/3 template"))))))
+
 (define-builtin (:when test &rest variables) (rulebase environment depth emit)
   ;; TEST receives the solved value of each of VARIABLES.  The DSL compiles
   ;; (:when EXPR) guards into such functions; hand-written queries must pass

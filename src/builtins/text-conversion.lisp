@@ -297,3 +297,22 @@
                               (expt 10 signed-exponent))))
               (coerce scaled 'double-float)))
           (* sign integer-part)))))
+
+(defun %text-of (value environment operation)
+  "Return the text (a CL string) of an atomic-or-text VALUE: a string, atom,
+number, code list, or character list.  Shared by the string builtins and the
+text-accepting builtins (atom_string, number_string, term_string, ...)."
+  (cond
+    ((logic-var-p value)
+     (%raise-instantiation-error environment operation
+                                 "text argument must be instantiated"))
+    ((stringp value) value)
+    ((%term-atom-p value) (%atom-text value))
+    ((or (integerp value) (floatp value)) (%number-text value environment operation))
+    ((null value) "")
+    ((consp value)
+     (if (every #'integerp value)
+         (%code-list-text value environment operation)
+         (%character-list-text value environment operation)))
+    (t (%raise-type-error "ATOM" value environment operation
+                          "expected an atom, string, number, or char/code list"))))

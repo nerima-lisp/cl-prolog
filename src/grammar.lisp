@@ -77,6 +77,24 @@
 
 (declaim (ftype function %parse-expression %parse-list))
 
+(defvar *double-quotes* :codes
+  "How a \"...\" literal is read: :codes (ISO default), :chars, :atom, or
+:string.  Flag-aware readers bind this from the rulebase's double_quotes flag;
+the direct reader APIs default to :codes.")
+
+(defun %double-quoted-value (text position)
+  "Convert the raw TEXT of a \"...\" literal per *DOUBLE-QUOTES*."
+  (ecase *double-quotes*
+    (:codes (map 'list #'char-code text))
+    (:chars (map 'list
+                 (lambda (character)
+                   (%prolog-atom-symbol (string character)
+                                        :preserve-case t :position position))
+                 text))
+    (:atom (%prolog-atom-symbol text :preserve-case t :position position
+                                     :track-resource-p t))
+    (:string text)))
+
 (defun %parse-primary (parser variables minimum-precedence)
   (let ((token (%current-token parser)))
     (cond
@@ -121,6 +139,9 @@
        (%variable-symbol (%token-value token)
                          variables
                          :position (%token-position token)))
+      ((eq :string (%token-kind token))
+       (incf (%parser-position parser))
+       (%double-quoted-value (%token-value token) (%token-position token)))
       ((member (%token-kind token) '(:atom :quoted-atom))
        (incf (%parser-position parser))
        (let ((atom (%prolog-atom-symbol

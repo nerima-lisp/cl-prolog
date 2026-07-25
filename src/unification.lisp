@@ -168,28 +168,27 @@ sub-query) keep the ordinals of variables created by their caller."
             finally (return representative))))
   (defun %walk-term-indexed (term index seen)
     (declare (ignore seen))
-    (labels ((advance (node)
-               (if (logic-var-p node)
-                   (multiple-value-bind (entry present-p)
-                       (%environment-index-entry node index)
-                     (if present-p
-                         (values (car entry) t)
-                         (values node nil)))
-                   (values node nil))))
-      (let ((slow term)
-            (fast term))
-        (loop
-          (multiple-value-bind (next bound-p) (advance slow)
-            (unless bound-p
-              (return next))
-            (setf slow next))
-          (loop repeat 2
-                do (multiple-value-bind (next bound-p) (advance fast)
-                     (unless bound-p
-                       (return-from %walk-term-indexed fast))
-                     (setf fast next)))
-          (when (eq slow fast)
-            (return (%alias-cycle-representative slow index)))))))
+    (when (not (logic-var-p term))
+      (return-from %walk-term-indexed term))
+    (let ((checkpoint term)
+          (cursor term)
+          (power 1)
+          (distance 0))
+      (loop
+        (multiple-value-bind (entry present-p)
+            (%environment-index-entry cursor index)
+          (unless present-p
+            (return cursor))
+          (setf cursor (car entry)))
+        (unless (logic-var-p cursor)
+          (return cursor))
+        (incf distance)
+        (when (eq checkpoint cursor)
+          (return (%alias-cycle-representative cursor index)))
+        (when (= distance power)
+          (setf checkpoint cursor
+                power (* 2 power)
+                distance 0)))))
   (defun %walk-term (term env)
     "Chase TERM through ENV until it is unbound or not a variable."
     (%walk-term-indexed term (%make-environment-index env) nil)))
@@ -212,8 +211,11 @@ sub-query) keep the ordinals of variables created by their caller."
   (defun %occurs-p (var term env)
     (%occurs-p-indexed var term (%make-environment-index env) nil)))
 
-(defun %unify-indexed (left right env base-index &optional index-owned-p)
-  "Unify using BASE-INDEX, returning environment, success flag, and new index. INDEX-OWNED-P permits in-place extension of a caller-owned transient index."
+(defun %unify-indexed (left right env base-index
+                       &optional index-owned-p (occurs-check t))
+  "Unify using BASE-INDEX, returning environment, success flag, and new index. INDEX-OWNED-P permits in-place extension of a caller-owned transient index.
+When OCCURS-CHECK is NIL the occurs check is skipped, so a variable may bind to
+a term containing it (producing a rational/cyclic term)."
   (let ((index base-index)
         (copied-p index-owned-p)
         (seen-pairs nil)
@@ -255,7 +257,8 @@ sub-query) keep the ordinals of variables created by their caller."
                (cond
                  ((eq left right) (values environment t))
                  ((logic-var-p left)
-                  (if (%occurs-p-indexed left right index walk-seen)
+                  (if (and occurs-check
+                           (%occurs-p-indexed left right index walk-seen))
                       (values nil nil)
                       (values
                         (extend-environment left right environment)
@@ -293,11 +296,15 @@ sub-query) keep the ordinals of variables created by their caller."
             (values extended t index)
             (values nil nil base-index))))))
 
-(defun unify (left right &optional (env (quote ())))
+(defun unify (left right &optional (env (quote ())) (occurs-check t))
   "Unify LEFT and RIGHT against ENV.
 
-Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
-  (multiple-value-bind (extended ok index) (%unify-indexed left right env (%make-environment-index env 1) t)
+Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure.
+OCCURS-CHECK defaults to T; pass NIL to allow cyclic bindings (see the
+`occurs_check' Prolog flag).  Kept positional (not &key) so the hot
+clause-resolution path pays no keyword-dispatch cost."
+  (multiple-value-bind (extended ok index)
+      (%unify-indexed left right env (%make-environment-index env 1) t occurs-check)
     (declare (ignore index))
     (values extended ok)))
 

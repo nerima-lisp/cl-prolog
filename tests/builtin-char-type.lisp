@@ -1,0 +1,65 @@
+;;;; char_type/2, code_type/2, upcase_atom/2, downcase_atom/2 tests.
+;;;;
+;;;; Generated atoms are compared by name (case-sensitive), so lowercase
+;;;; result names are written with vertical bars, e.g. |a|, |hello|.
+
+(in-package #:cl-prolog.tests)
+
+(deftest-queries char-type-builtin ((make-rulebase))
+  ;; A one-character atom written bare (a) has the name "A"; use |a| for a
+  ;; genuine lowercase character.
+  ((cl-prolog::char_type |a| alpha)      :succeeds)
+  ((cl-prolog::char_type |5| alpha)      :fails)
+  ((cl-prolog::char_type |a| alnum)      :succeeds)
+  ((cl-prolog::char_type |5| digit)      :succeeds)
+  ((cl-prolog::char_type |A| upper)      :succeeds)
+  ((cl-prolog::char_type |a| lower)      :succeeds)
+  ((cl-prolog::char_type |_| csym)       :succeeds)
+  ((cl-prolog::char_type |_| csymf)      :succeeds)
+  ((cl-prolog::char_type |9| csymf)      :fails)
+  ((cl-prolog::char_type |.| punct)      :succeeds)
+  ((cl-prolog::char_type | | space)      :succeeds)
+  ((cl-prolog::char_type |a| space)      :fails)
+  ((cl-prolog::char_type |a| graph)      :succeeds)
+  ((cl-prolog::char_type | | graph)      :fails)
+  ((cl-prolog::char_type |a| ascii)      :succeeds)
+  ((cl-prolog::char_type |.| period)     :succeeds)
+  ((cl-prolog::char_type |+| graphic)    :succeeds)
+  ((cl-prolog::char_type |a| graphic)    :fails)
+  ((cl-prolog::char_type |7| (digit ?w)) :ordered (((?w . 7))))
+  ((cl-prolog::char_type |a| (to_upper ?u)) :ordered (((?u . cl-prolog::|A|))))
+  ((cl-prolog::char_type |A| (to_lower ?l)) :ordered (((?l . cl-prolog::|a|))))
+  ((cl-prolog::char_type |A| (upper ?l)) :ordered (((?l . cl-prolog::|a|))))
+  ((cl-prolog::char_type |a| (lower ?u)) :ordered (((?u . cl-prolog::|A|))))
+  ((cl-prolog::char_type |a| (code ?c))  :ordered (((?c . 97))))
+  ((cl-prolog::char_type |a| (upper ?l)) :fails)
+  ((cl-prolog::char_type ?v alpha)       :signals)
+  ((cl-prolog::char_type ab alpha)       :signals)
+  ((cl-prolog::char_type |a| bogus)      :signals)
+  ;; a type argument that is a variable, a non-atom, or an improper list
+  ;; must raise a catchable error rather than crash the host.
+  ((cl-prolog::char_type |a| ?type)      :signals)
+  ((cl-prolog::char_type |a| 42)         :signals)
+  ((cl-prolog::char_type |a| (|.| . x))  :signals)
+  ((cl-prolog::char_type |a| (bogus ?x)) :signals))
+
+(deftest-queries code-type-builtin ((make-rulebase))
+  ((cl-prolog::code_type 97 alpha)        :succeeds)
+  ((cl-prolog::code_type 53 digit)        :succeeds)
+  ((cl-prolog::code_type 65 upper)        :succeeds)
+  ((cl-prolog::code_type 97 (to_upper ?u)) :ordered (((?u . 65))))
+  ((cl-prolog::code_type 65 (to_lower ?l)) :ordered (((?l . 97))))
+  ((cl-prolog::code_type 97 (code ?c))    :ordered (((?c . 97))))
+  ((cl-prolog::code_type 55 (digit ?w))   :ordered (((?w . 7))))
+  ((cl-prolog::code_type ?v alpha)        :signals)
+  ((cl-prolog::code_type -1 alpha)        :signals)
+  ((cl-prolog::code_type 9999999999 alpha) :signals)
+  ((cl-prolog::code_type 1.5d0 alpha)     :signals))
+
+(deftest-queries case-fold-builtins ((make-rulebase))
+  ((cl-prolog::upcase_atom hello ?u)     :ordered (((?u . cl-prolog::|HELLO|))))
+  ((cl-prolog::downcase_atom |HeLLo| ?d) :ordered (((?d . cl-prolog::|hello|))))
+  ((cl-prolog::upcase_atom |MiXeD| ?u)   :ordered (((?u . cl-prolog::|MIXED|))))
+  ((cl-prolog::upcase_atom 42 ?u)        :ordered (((?u . cl-prolog::|42|))))
+  ((cl-prolog::upcase_atom ?v ?u)        :signals)
+  ((cl-prolog::upcase_atom (foo bar) ?u) :signals))

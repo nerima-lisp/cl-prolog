@@ -42,7 +42,8 @@
                            &optional (operation (%io-operation "READ_TERM")))
   (let* ((parsed (%io-read-options options environment operation))
          (mode (%io-syntax-errors-mode parsed environment operation))
-         (*active-char-conversions* (%rulebase-active-char-conversions rulebase)))
+         (*active-char-conversions* (%rulebase-active-char-conversions rulebase))
+         (*double-quotes* (%double-quotes-mode rulebase)))
     (multiple-value-bind (value variables names singletons readablep)
         (%io-read-term-values entry (rulebase-operator-table rulebase) mode
                               environment operation)

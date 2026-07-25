@@ -17,8 +17,10 @@ source form."
        (eq (first term) (%prolog-symbol ":-"))
        (= (length term) 2)))
 
-(defun %read-source-term (stream operator-table)
-  (let* ((source (%read-prolog-term-source stream))
+(defun %read-source-term (stream rulebase)
+  (let* ((operator-table (rulebase-operator-table rulebase))
+         (*double-quotes* (%double-quotes-mode rulebase))
+         (source (%read-prolog-term-source stream))
          (parser (%parser (%tokenize-prolog source operator-table) operator-table)))
     (if (eq :eof (%token-kind (%current-token parser)))
         (values nil nil)
@@ -152,7 +154,7 @@ source-loading transaction."
     (multiple-value-bind (term present-p)
         (let ((*active-char-conversions*
                 (%rulebase-active-char-conversions rulebase)))
-          (%read-source-term stream (rulebase-operator-table rulebase)))
+          (%read-source-term stream rulebase))
       (unless present-p (return))
       (cond
         ((%prolog-query-term-p term)
