@@ -72,6 +72,14 @@
       (list (cons name (first resolved-term))
             (cons arity (length (rest resolved-term))))
       environment emit))
+    ;; A cons that is not a proper list is a partial list, and only that: a
+    ;; compound is always proper here, so there is no ambiguity to resolve.
+    ;; ISO 13211-1 makes a list cell the compound `'.'(Head, Tail)'.
+    ((consp resolved-term)
+     (%term-unify-sequence
+      (list (cons name (%intern-prolog-atom "."))
+            (cons arity 2))
+      environment emit))
     (t
      (%raise-type-error
       "CALLABLE" resolved-term environment operation
