@@ -9,38 +9,43 @@ on:
 permissions:
   contents: read
 
+# Supersede in-flight runs for the same PR; never cancel a push to the default
+# branch.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  nix:
-    name: nix (${{ matrix.system }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - system: x86_64-linux
-            runner: ubuntu-latest
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+  # One job on purpose. Granularity belongs in the flake's `checks.*`
+  # attributes, which `nix flake check` evaluates in parallel with build
+  # caching. Splitting these into separate GitHub jobs would duplicate that
+  # scheduling and lose cache sharing between them.
+  #
+  # Add a second job ONLY for work the Nix sandbox cannot do: network access,
+  # a real PTY/TTY, artifact upload, or a different runner OS.
+  check:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      # persist-credentials: false — this job runs untrusted PR code via
+      # `nix flake check`, and never needs the token, so don't leave it in
+      # .git/config for that code to read.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Nix with Cachix
-        uses: ./.github/actions/setup-nix
+      - uses: ./.github/actions/nix-setup
         with:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # A step-level budget narrower than the job's, so a hang here fails
-      # with an attributable "step timed out" instead of being
-      # indistinguishable from a slow cold-cache nixpkgs fetch eating the
-      # whole job budget.
-      - name: Run flake checks
-        timeout-minutes: 25
+      # Runs the SBCL test suite (checks.default), the treefmt formatting gate
+      # (checks.formatting), and the mkdocs --strict build (checks.docs).
+      # Add `--all-systems` only when the flake declares more than one system.
+      - name: Check flake
         run: nix flake check --print-build-logs
+
+      # Catches stray conflict markers and whitespace errors that compile fine.
+      - name: Check diff hygiene
+        run: git diff --check

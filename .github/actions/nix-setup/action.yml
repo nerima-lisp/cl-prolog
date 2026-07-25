@@ -1,8 +1,15 @@
-name: Set up Nix with Cachix
+name: Set up Nix
 description: >-
-  Install Nix with flakes enabled and configure Cachix. Pushes to the binary
-  cache only on non-pull_request events that carry an auth token; every other
-  run (including fork pull requests) is pull-only.
+  Install Nix (Determinate Systems installer) and, when a cache name is
+  provided, configure the Cachix binary cache. Pushes to the cache only on
+  non-pull_request events that carry an auth token; every other run, including
+  fork pull requests, is pull-only. Shared by the CI, docs, release, and
+  flake-update workflows so the installer and Cachix wiring lives in exactly
+  one place.
+
+# NOTE: `actions/checkout` intentionally lives in the caller, not here: a
+# local composite action cannot check the repository out, because its own
+# action.yml is not on disk until after checkout has run.
 
 inputs:
   cachix-cache:
@@ -11,27 +18,22 @@ inputs:
     default: ""
   cachix-auth-token:
     description: >-
-      Cachix auth token. When empty — or on pull_request events — the cache is
-      configured pull-only so untrusted runs can never push.
+      Cachix auth token (pass secrets.CACHIX_AUTH_TOKEN). When empty — or on
+      pull_request events — the cache is configured pull-only so untrusted runs
+      can never push.
     required: false
     default: ""
-  github-token:
-    description: GitHub token handed to the Nix installer to raise API rate limits.
-    required: true
 
 runs:
   using: composite
   steps:
-    - name: Install Nix
-      uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31
-      with:
-        github_access_token: ${{ inputs.github-token }}
-        extra_nix_config: |
-          experimental-features = nix-command flakes
+    - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
-    # Decide push vs pull-only once, off the event name and token presence,
-    # so both Cachix steps share a single source of truth. The token is read
-    # from the environment rather than interpolated into the script body.
+    # Decide push vs pull-only once, off the event name and token presence, so
+    # both Cachix steps share a single source of truth. `nix flake check` runs
+    # arbitrary code out of the pull request, so a pull request must never hold
+    # a token that can write to the org cache. The token is read from the
+    # environment rather than interpolated into the script body.
     - name: Resolve Cachix mode
       id: cachix-mode
       shell: bash

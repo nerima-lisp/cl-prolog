@@ -3,12 +3,12 @@ updates:
   # SHA-pinned actions trade supply-chain safety for staleness: nothing
   # notices a fix landing upstream unless something checks. Composite
   # actions in a subdirectory are not covered by the root "/" entry, so
-  # setup-nix needs its own directory entry.
+  # nix-setup needs its own directory entry.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
   - package-ecosystem: github-actions
-    directory: "/.github/actions/setup-nix"
+    directory: "/.github/actions/nix-setup"
     schedule:
       interval: weekly

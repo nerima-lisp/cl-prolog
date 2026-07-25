@@ -3,9 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
 
-# Read-only by default; the release job elevates to contents: write below.
 permissions:
   contents: read
 
@@ -14,10 +13,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Metadata guards below (tag-matches-version, changelog-has-a-section) only
-  # catch mistagged releases, not a red build: nothing previously stopped a
-  # tag pushed onto a broken main from publishing. Re-run the same flake
-  # checks as CI on the tagged commit itself before anything is published.
+  # Split from `release` on purpose, unlike workflow-templates/release.yml,
+  # which runs `nix flake check` inside the job that holds contents: write.
+  # `nix flake check` executes this repository's own code (flake.nix, t/*.lisp),
+  # so it runs here with contents: read and nothing else; only the job that
+  # publishes gets write access, and that job runs no repository code.
   verify:
     name: Verify flake checks
     runs-on: ubuntu-latest
@@ -25,19 +25,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Nix with Cachix
-        uses: ./.github/actions/setup-nix
+      - uses: ./.github/actions/nix-setup
         with:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run flake checks
+      # Never publish a release that does not pass its own test suite.
+      - name: Verify the tagged tree
         timeout-minutes: 25
         run: nix flake check --print-build-logs
 
@@ -47,64 +45,59 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write # Create the GitHub Release for the pushed tag.
+      contents: write # Create the GitHub Release.
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Guard against mis-tagged releases: the tag (vX.Y.Z) must match the
-      # version ASDF ships, which is the single source of truth the flake
-      # also reads. A mismatch fails the release instead of publishing a lie.
-      - name: Verify tag matches cl-prolog.asd version
+      # Enforces the org invariant "git tag == .asd :version" at the only point
+      # where it can still be corrected cheaply. Without this gate the two drift
+      # silently, which is how cl-boundary-kit reached :version 1.0.0 while its
+      # newest tag was still v0.6.0.
+      #
+      # The sed is anchored to the line start so a comment or docstring merely
+      # mentioning :version cannot shadow the real field, and an empty result is
+      # reported rather than silently compared against the tag.
+      - name: Verify tag matches .asd version
         env:
-          REF_NAME: ${{ github.ref_name }}
+          PACKAGE: cl-prolog
         run: |
           set -euo pipefail
-          tag="${REF_NAME#v}"
-          # Anchored to line start so a comment or docstring merely
-          # mentioning :version can never shadow the real field — same
-          # hazard flake.nix's projectVersion already guards against.
-          asd_version="$(sed -n 's/^[[:space:]]*:version[[:space:]]\+"\([^"]*\)".*/\1/p' cl-prolog.asd | head -n1)"
+          asd_version="$(sed -n 's/^[[:space:]]*:version[[:space:]]\+"\([^"]*\)".*/\1/p' "$PACKAGE.asd" | head -n1)"
+          tag_version="${GITHUB_REF_NAME#v}"
           if [[ -z "$asd_version" ]]; then
-            echo "::error::Could not read :version from cl-prolog.asd"
+            echo "::error::Could not read :version from $PACKAGE.asd" >&2
             exit 1
           fi
-          if [[ "$tag" != "$asd_version" ]]; then
-            echo "::error::Tag v$tag does not match cl-prolog.asd version $asd_version"
+          echo "asd=$asd_version tag=$tag_version"
+          if [[ "$asd_version" != "$tag_version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match $PACKAGE.asd version $asd_version" >&2
             exit 1
           fi
-          printf 'version=%s\n' "$asd_version" >> "$GITHUB_ENV"
 
-      # Slice the matching "## X.Y.Z - DATE" section out of CHANGELOG.md,
-      # stopping at the next "## " heading, and fail if it is empty.
-      - name: Extract release notes from CHANGELOG.md
-        env:
-          VERSION: ${{ env.version }}
+      # Extracts this version's CHANGELOG section as the release body. Requires
+      # the Keep a Changelog heading format `## [X.Y.Z] - YYYY-MM-DD`.
+      #
+      # Written straight to a file rather than through GITHUB_ENV: a CHANGELOG
+      # line can then never be read as an environment assignment.
+      - name: Extract release notes
         run: |
           set -euo pipefail
-          # Capture the "## X.Y.Z" section (heading followed by a space or the
-          # line end, so a bare "## 0.8.0" heading still matches) up to the
-          # next "## " heading.
-          notes="$(awk -v ver="$VERSION" '
-            $0 ~ "^## " ver "( |$)" { capture = 1; next }
-            capture && /^## / { exit }
-            capture { print }
-          ' CHANGELOG.md)"
-          if [[ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]]; then
-            echo "::error::No CHANGELOG.md section found for version $VERSION"
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            echo "::error::CHANGELOG.md has no section for [$version]" >&2
             exit 1
           fi
-          # Randomised heredoc delimiter so a CHANGELOG line can never smuggle
-          # extra environment assignments by matching the terminator.
-          delimiter="RELEASE_NOTES_EOF_$(openssl rand -hex 16)"
-          {
-            printf '%s\n' "RELEASE_NOTES<<$delimiter"
-            printf '%s\n' "$notes"
-            printf '%s\n' "$delimiter"
-          } >> "$GITHUB_ENV"
 
+      # `gh` ships on the runner, so this needs no third-party action at all —
+      # one fewer supplier to trust than the template's
+      # softprops/action-gh-release.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -112,7 +105,6 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          printf '%s' "$RELEASE_NOTES" > release-notes.md
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file release-notes.md

@@ -7,10 +7,14 @@ on:
       - "docs/**"
       - "flake.nix"
       - "flake.lock"
+      # The site version is derived from the .asd :version, so a release
+      # commit that touches nothing else must still republish the site.
       - "cl-prolog.asd"
       - ".github/workflows/docs.yml"
+      - ".github/actions/nix-setup/action.yml"
   workflow_dispatch:
 
+# No token by default; each job opts into exactly the scopes it needs.
 permissions: {}
 
 concurrency:
@@ -25,26 +29,28 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Nix with Cachix
-        uses: ./.github/actions/setup-nix
+      - uses: ./.github/actions/nix-setup
         with:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # `packages.docs` runs `mkdocs build --strict`, so a broken link or a page
+      # missing from the nav fails here. `cp -rL` dereferences the store
+      # symlink, and the chmod makes the copy writable for the upload action.
       - name: Build documentation
-        timeout-minutes: 10
         run: |
           set -euo pipefail
-          timeout 540s nix build .#docs
+          nix build .#docs --print-build-logs
           cp -rL result public
           chmod -R u+w public
 
+      # Kept ahead of workflow-templates/docs.yml (v5/v3): Dependabot already
+      # bumped these here, so taking the template's older pins verbatim would
+      # be a downgrade. SHAs resolved with `gh api repos/<r>/git/ref/tags/<t>`.
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
