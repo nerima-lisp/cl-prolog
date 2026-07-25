@@ -81,8 +81,8 @@ depth, token count, a lexeme size, or the interned-symbol count). Read
   process; if a long-lived process trips it, rebind it or reset the parser's
   symbol table
 
-See [API reference](api-reference.md#parser-resource-limits) for every special
-and its default.
+See [Parser Resource Limits](parser-limits.md) for every special and its
+default, and [Conditions and Errors](conditions.md) for the condition hierarchy.
 
 ## Nix checks fail only in a clean source tree
 

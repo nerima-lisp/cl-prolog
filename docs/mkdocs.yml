@@ -1,0 +1,148 @@
+# cl-prolog documentation — MkDocs + Material configuration.
+#
+# Build:   mkdocs build -f docs/mkdocs.yml --strict
+# Serve:   mkdocs serve  -f docs/mkdocs.yml
+# The Nix flake (`nix build .#docs`) drives the same config offline.
+
+site_name: cl-prolog
+site_description: >-
+  A small, dependency-free Prolog engine for Common Lisp — macro-first rule
+  definition, CPS proof search, and a compact, extensible builtin set.
+site_author: cl-prolog contributors
+site_url: https://takeokunn.github.io/cl-prolog/
+
+repo_name: takeokunn/cl-prolog
+repo_url: https://github.com/takeokunn/cl-prolog
+edit_uri: edit/main/docs/src/
+
+# Content lives in docs/src (kept from the previous mdBook layout).
+docs_dir: src
+site_dir: ../site
+use_directory_urls: true
+
+copyright: Copyright &copy; cl-prolog contributors — MIT License
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/sitemap
+  favicon: assets/favicon.svg
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/takeokunn/cl-prolog
+      name: cl-prolog on GitHub
+  generator: false
+
+plugins:
+  - search
+
+markdown_extensions:
+  # Callouts / admonitions.
+  - admonition
+  - pymdownx.details
+  # Code blocks: syntax highlighting, line numbers, inline highlighting.
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  # Content tabs (e.g. Nix vs. ASDF workflows).
+  - pymdownx.tabbed:
+      alternate_style: true
+  # Task lists, key bindings, smart symbols, emoji.
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.keys
+  - pymdownx.smartsymbols
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+      title: On this page
+
+nav:
+  - Home: README.md
+  - Getting Started:
+      - Installation: installation.md
+      - Quick Start: quick-start.md
+      - Your First Program: first-program.md
+  - Guide:
+      - Querying: querying.md
+      - Rule DSL: rule-dsl.md
+      - Builtin Goals: builtin-goals.md
+      - Arithmetic and Comparison: arithmetic.md
+      - DCG Grammars: dcg.md
+      - Extending the Engine: extending.md
+      - Cookbook: cookbook.md
+      - Examples: examples.md
+  - Reference:
+      - API Reference: api-reference.md
+      - Semantics: semantics.md
+      - Conditions and Errors: conditions.md
+      - Parser Resource Limits: parser-limits.md
+  - Internals:
+      - Architecture: architecture.md
+  - Project:
+      - Development: development.md
+      - Testing: testing.md
+      - Benchmarks: benchmarks.md
+      - Troubleshooting: troubleshooting.md
+      - Release Checklist: release-checklist.md
+      - Changelog: changelog.md
+      - Repository Documentation: repository.md

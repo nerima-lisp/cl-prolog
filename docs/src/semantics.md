@@ -1,57 +1,184 @@
 # Semantics
 
-- **Clause order**: clauses are tried in definition order. Facts and rules
+This page states the operational rules the engine follows. For the machinery
+behind them, see [Architecture](architecture.md); for the exported symbols, see
+the [API Reference](api-reference.md).
+
+## Core rules
+
+- **Clause order** — clauses are tried in definition order. Facts and rules
   share one ordered sequence per predicate; a fact (a clause with an empty
-  body) is not tried ahead of a rule defined before it.
-- **Cut** prunes the running clause's remaining choice points and the
-  predicate's remaining rule clauses.
-- **Optional depth bound**: rule resolution is unbounded by default. Set
+  body) is **not** tried ahead of a rule defined before it.
+- **Cut** (`!`) — prunes the running clause's remaining choice points and the
+  predicate's remaining rule clauses. It is local to the predicate invocation.
+- **Optional depth bound** — rule resolution is unbounded by default. Set
   `:max-depth` to a non-negative integer to bound user-rule resolution;
-  exhaustion signals `prolog-depth-limit-exceeded` rather than masquerading
-  as logical failure.
-- **Occurs check** is always on; unification never introduces cyclic terms.
+  exhaustion signals `prolog-depth-limit-exceeded` rather than masquerading as
+  logical failure.
+- **Occurs check** — always on; unification never introduces cyclic terms.
   Host-provided cyclic cons structures are nevertheless handled safely:
   unification compares them coinductively, substitution preserves cycles and
   sharing, and variable collection terminates.
 
+## Proof-search semantics
+
+- Registered builtins and foreign predicates are **authoritative** for their
+  predicate indicator; otherwise the predicate's clauses are resolved in
+  definition order, with facts and rules interleaved as written.
+- Rule variables (and variables inside facts) are **freshly renamed per use**,
+  so bindings never leak between two uses of the same clause.
+- An explicit depth bound decrements **per user-rule resolution**, so left
+  recursion terminates with the solutions found within the bound.
+
+### What `:max-depth` counts
+
+Depth decreases when proof enters a **user rule**, not for every builtin or
+unification step:
+
+- `0` — facts and builtins only; no rule expansion.
+- `1` — one level of rule expansion.
+- larger values — deeper derived proofs.
+
+`nil` means unbounded. See [Querying](querying.md#depth-bounds) for the caller's
+view and [Conditions and Errors](conditions.md) for the exhaustion condition.
+
+## Cut in detail
+
+Cut uses dynamically scoped `catch`/`throw` tags:
+
+- Each user-predicate invocation establishes a fresh cut barrier.
+- `!` emits the current state and throws to that invocation's tag, abandoning
+  the invocation's remaining alternatives.
+- Opaque meta-calls establish their own barrier; transparent control constructs
+  deliberately reuse the caller's barrier.
+
+This keeps a rule-body cut local to the predicate invocation while preserving
+the transparency of control constructs. See
+[Architecture](architecture.md#cut).
+
 ## Modules
 
 Unqualified calls first resolve predicates in the current module and then its
-imports. `current_predicate/1` follows the same visible-predicate view, including
-imported predicates. In a qualified call `Module:Goal`, `Module` is resolved
-through the current bindings and must become an atom naming an existing module;
-violations raise catchable ISO instantiation, type, or existence errors.
-
-## Proof-search semantics
-
-- registered builtins and foreign predicates are authoritative for their
-  predicate indicator; otherwise the predicate's clauses are resolved in
-  definition order, with facts and rules interleaved as written
-- rule variables (and variables inside facts) are freshly renamed per use
-- an explicit depth bound decrements per user-rule resolution, so left
-  recursion terminates with the solutions found within the bound
+imports. `current_predicate/1` follows the same visible-predicate view,
+including imported predicates. In a qualified call `Module:Goal`, `Module` is
+resolved through the current bindings and must become an atom naming an existing
+module; violations raise catchable ISO instantiation, type, or existence errors.
 
 ## Tabling
 
 A predicate declared with a `:- table name/arity` directive resolves through a
-per-query memo table instead of plain clause resolution. The engine also
-detects left recursion automatically and routes it through the same table so
-that a left-recursive definition terminates with the answers reachable within
-the query. Answers are keyed up to variance, so calls that differ only in
-variable naming share memoized results. The table lives for one public query
-and is discarded afterward; depth-limited searches and active finite-domain
-constraints bypass the table where memoization would be unsound. Tabling has no
-exported Common Lisp symbols — it is engaged only through the source directive.
+per-query memo table instead of plain clause resolution. The engine also detects
+left recursion automatically and routes it through the same table, so a
+left-recursive definition terminates with the answers reachable within the
+query.
+
+- Answers are keyed **up to variance**, so calls that differ only in variable
+  naming share memoized results.
+- The table lives for **one public query** and is discarded afterward.
+- Depth-limited searches and active finite-domain constraints **bypass** the
+  table where memoization would be unsound.
+
+Tabling has no exported Common Lisp symbols — it is engaged only through the
+source directive. See [Architecture](architecture.md#depth-and-tabling).
 
 ## Parser resource limits
 
-Reading Prolog *text* is bounded by configurable resource limits (source
-length, nesting depth, token count, lexeme sizes, and interned-symbol count).
-Exceeding one signals `prolog-parser-resource-error` from the direct reader
-APIs, or a catchable ISO `resource_error/1` term when the limit is hit while a
-`consult`/`load_files` goal runs. See
-[API reference](api-reference.md#parser-resource-limits) for the full list of
-specials and their defaults.
+Reading Prolog *text* is bounded by configurable resource limits (source length,
+nesting depth, token count, lexeme sizes, and interned-symbol count). Exceeding
+one signals `prolog-parser-resource-error` from the direct reader APIs, or a
+catchable ISO `resource_error/1` term when the limit is hit while a
+`consult`/`load_files` goal runs. See [Parser Resource Limits](parser-limits.md)
+for the full list of specials and their defaults.
 
-See [Architecture](architecture.md) for how cut and guards are implemented in
-the CPS engine.
+## Library-predicate divergences from SWI
+
+The `library(lists)` and `library(apply)` predicates aim for SWI compatibility
+but differ deliberately in a few edge modes:
+
+- **`subtract/3`, `intersection/3`, `union/3`** test membership by
+  *unifiability* but discard the successful unification's bindings, whereas
+  SWI's `memberchk`-based versions propagate them. On ground lists the results
+  are identical; the divergence only shows when a list element is an unbound
+  variable, where these predicates never bind the caller's variable.
+- **`permutation/2`** requires at least one argument to be a proper list and
+  raises `instantiation_error` when neither is; SWI's clause-based version can
+  instead loop or partially unify. Results and solution order match SWI for the
+  common `permutation(+List, -Perm)` mode.
+- **`format/2` `~e` and `~g`** are rendered through the host and then
+  normalized to the C/Prolog exponent convention (`3.14e+0`); exact digit and
+  exponent-width formatting may differ slightly from SWI.
+- **`char_type/2` and `code_type/2` are input-only** on the character/code
+  argument (it must be instantiated) — they test or extract, but do not
+  generate a character from a type. `char_type/2`'s `to_lower`/`to_upper`/
+  `upper`/`lower` yield a one-character atom (SWI yields a code even here);
+  `code_type/2` yields codes. `graphic` is the Prolog symbol-char class
+  (distinct from `graph`), and `space`/`white` and `end_of_line`/`newline` are
+  treated as synonyms.
+- **`term_to_atom/2` writes atoms in Prolog display form**: an unquoted-style
+  all-uppercase symbol name is lowercased for output (so a term read from
+  unquoted source round-trips), which means a case-preserved atom such as
+  `'FooBar'` is not recovered verbatim. Unquoted `foo` and quoted `'FOO'` both
+  intern to the same symbol and are therefore indistinguishable on output.
+- **`aggregate_all/3`** evaluates the `sum`/`max`/`min` template as an
+  arithmetic expression (so `sum(X*2)` works), but does not support the
+  `max(Expr, Witness)`/`min(Expr, Witness)` witness forms. `read_term_from_atom/3`
+  validates but ignores its options list (`variable_names` etc. are not
+  honored). `predsort/3` fails (rather than raising) when its comparison
+  predicate has no proof, matching SWI.
+
+## occurs_check and cyclic terms
+
+Unification during clause resolution always performs the occurs check, so the
+engine never builds a cyclic term behind your back. The `occurs_check` flag
+(default `true`) controls `=/2` and `\=/2` specifically: `false` lets `X = f(X)`
+succeed with a cyclic binding, and `error` raises when a cycle would form.
+Substitution, the standard-order comparison, and the term writer all handle
+cyclic structures safely — the writer marks each cons on the current path and
+prints `...` (compound argument) or `|...]` (cyclic list tail) on revisiting one,
+so a cyclic term prints in bounded time.  That `...` output is not re-readable,
+so a cyclic term written with `writeq`/`write_canonical` cannot be read back —
+building cyclic terms (only possible under `occurs_check=false`) trades away
+re-readability.
+`unify_with_occurs_check/2` always checks regardless of the flag. This differs
+from SWI, where the flag is global and defaults to `false`; here the default is
+`true` and the flag is scoped to `=/2`/`\=/2`, keeping the core cycle-free by
+default (the writer being cycle-safe means the default could be flipped to
+`false` in a future release without introducing a non-terminating print).
+
+## Strings
+
+A string is a distinct atomic term type. The `double_quotes` flag
+(`codes` default, `chars`, `atom`, `string`) selects how a `"..."` literal is
+read; it is honored by `read_term/2,3`, `consult`/`load_files`,
+`read_term_from_atom/3`, `term_to_atom/2`, and `term_string/2`. In the standard
+order of terms strings sort between atoms and compound terms; `==`/`compare/3`
+compare string content. `atom_string/2` and friends coerce freely between text
+kinds. The direct Lisp reader APIs default to `codes` regardless of any
+rulebase flag.
+
+## library(assoc) representation
+
+`library(assoc)` associations are keyed by the standard order of terms, but the
+representation diverges from SWI: an assoc here is the ordinary, inspectable,
+unifiable compound `assoc(SortedPairList)` (the empty assoc is `assoc([])`),
+not SWI's opaque AVL `t/…` term. Operations are therefore O(n) rather than
+O(log n), and a program can (but should not) inspect or forge the structure —
+a malformed `assoc(...)` is rejected with a catchable `type_error`. The
+implemented subset is `empty_assoc/1`, `get_assoc/3`, `put_assoc/4`,
+`del_assoc/4`, `list_to_assoc/2` (which rejects duplicate keys), `assoc_to_list/2`,
+`assoc_to_keys/2`, `assoc_to_values/2`; `get_assoc/3` is a semidet lookup (it
+does not enumerate keys on backtracking).
+
+## Builtin output resource limit
+
+Builtins that materialize a character run or list from a small input — format
+fill/repeat/newline runs (`~t`, `~|`, `~Nc`, `~Nn`), `tab/1`, and `numlist/3`
+ranges — are bounded by `*max-prolog-builtin-output-length*`. Exceeding it
+raises a catchable ISO `resource_error/1`, preventing attacker-controlled
+allocation from a tiny query.
+
+## See also
+
+- [Architecture](architecture.md) — how cut, guards, and tabling are
+  implemented in the CPS engine.
+- [Conditions and Errors](conditions.md) — the conditions these rules raise.

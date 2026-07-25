@@ -117,26 +117,27 @@ to `nil` disables that single limit.
 
 `*max-prolog-interned-symbols*` differs from the others: it is a cumulative,
 process-wide bound tracked across parse calls rather than a per-parse limit.
-It exists so that a stream of adversarial source cannot permanently intern an
-unbounded number of symbols.
 
-When a bound is exceeded the parser signals `prolog-parser-resource-error`,
-whose readers describe the violation:
+When a bound is exceeded the parser signals `prolog-parser-resource-error`
+(readers `-resource`, `-limit`, `-observed`, `-position`). For the full
+narrative — how each bound behaves, direct-reader vs. in-engine propagation, and
+how to raise or disable a limit — see the dedicated
+[Parser Resource Limits](parser-limits.md) page.
 
-- `prolog-parser-resource-error-resource` — which limit was hit (a string such
-  as `"IDENTIFIER_LENGTH"`)
-- `prolog-parser-resource-error-limit` — the configured limit value
-- `prolog-parser-resource-error-observed` — the observed value that exceeded it
-- `prolog-parser-resource-error-position` — the source position at the failure
+## Runtime Resource Limits
 
-This condition is a plain Common Lisp `error`, not a `prolog-runtime-error`,
-because it is raised in the lexer beneath the engine's condition hierarchy. The
-direct reader APIs (`read-prolog-term`, `read-prolog-clause`, `parse-prolog`)
-and a direct `consult-prolog` call let it propagate as-is. When the same limit
-is hit *inside* the engine while running a `consult`/`ensure_loaded`/`load_files`
-goal, it is translated into a catchable ISO `resource_error/1` term — for
-example `error(resource_error(identifier_length), _)` — so Prolog-level
-`catch/3` can intercept it.
+Separate from the *parser* limits above, one exported special bounds how much a
+single builtin call may materialize at **runtime**:
+
+- `*max-prolog-builtin-output-length*` — the maximum number of characters or
+  list elements a single builtin call may produce in one step (default
+  `1048576`). It caps `format` fill/repeat/newline runs (`~t`, `~|`, `~Nc`,
+  `~Nn`), `tab/1`, and `numlist/3` ranges, so an attacker-sized count in a tiny
+  query cannot exhaust memory. Exceeding it raises a catchable ISO
+  `resource_error/1`; binding it to `nil` disables the bound.
+
+See [Semantics](semantics.md#builtin-output-resource-limit) for the behavioral
+notes.
 
 ## Rule DSL
 
@@ -163,7 +164,10 @@ arities. See [Builtin goals](builtin-goals.md) for behavior-oriented guidance.
   `keysort`
 - Dynamic database and reflection: `asserta`, `assert`, `assertz`, `retract`,
   `retractall`, `current_predicate`, `predicate_property`, `abolish`, `clause`
-- Unification and term construction: `\=`, `..`, `=..`
+- Unification and term construction: `\=`, `=..` (univ). `..` is the exported
+  finite-domain range operator (`xfx`, priority 450) used inside `in`/`ins`
+  domains — see [Arithmetic and Comparison](arithmetic.md#domain-assignment) —
+  not a callable goal.
 - Arithmetic evaluation and comparison: `is`, `=:=`, `=\=`, `<`, `=<`, `>`,
   `>=`
 - Finite domains: `in`, `ins`, `#=`, `#\=`, `#<`, `#=<`, `#>`, `#>=`,
@@ -174,6 +178,72 @@ arities. See [Builtin goals](builtin-goals.md) for behavior-oriented guidance.
   `compare`, `unifiable`
 - Term inspection and copying: `term_variables`, `functor`, `arg`, `copy_term`,
   `numbervars`
+
+## Prolog-Source Goals
+
+The engine also implements a range of ISO goals that are **not** exported as
+Common Lisp package symbols. They are callable from parsed Prolog source (via
+`consult`/`load_files` or `read-prolog-*`) and in Lisp-shaped queries by their
+goal name, but they are not part of the exported symbol surface above. This
+catalogue lists them by predicate indicator; see
+[Builtin Goals](builtin-goals.md) for behavior-oriented notes.
+
+- **Operators:** `op/3` defines operators in the rulebase operator table;
+  `current_op/3` enumerates them.
+- **Character conversion:** `char_conversion/2` registers a mapping;
+  `current_char_conversion/2` queries it.
+- **Prolog flags:** `current_prolog_flag/2` reads flags (enumerating when the
+  name is unbound); `set_prolog_flag/2` sets one, raising `domain_error` for an
+  unknown flag.
+- **Stream lifecycle:** `open/3`, `open/4`, `close/1`, `close/2`,
+  `stream_property/2`, `set_stream_position/2`, `current_input/1`,
+  `current_output/1`, `set_input/1`, `set_output/1`,
+  `at_end_of_stream/0`, `at_end_of_stream/1`, `flush_output/0`,
+  `flush_output/1`.
+- **Term I/O:** `read/1`, `read/2`, `read_term/2`, `read_term/3`, `write/1`,
+  `write/2`, `writeq/1`, `writeq/2`, `write_canonical/1`, `write_canonical/2`,
+  `write_term/2`, `write_term/3`, `nl/0`, `nl/1`.
+- **Character and byte I/O:** `get_char/1`, `get_char/2`, `peek_char/1`,
+  `peek_char/2`, `put_char/1`, `put_char/2`, `get_byte/1`, `get_byte/2`,
+  `peek_byte/1`, `peek_byte/2`, `put_byte/1`, `put_byte/2`.
+- **Term comparison (standard order):** `=@=/2` (structural variant),
+  `\=@=/2` (not a variant), and `subsumes_term/2` (one-way subsumption without
+  binding either term) — companions to the exported `==`, `@<`, `compare`, and
+  `unifiable`.
+- **Relational arithmetic:** `between/3` (enumerate or test an integer range),
+  `succ/2` (the non-negative successor relation, usable in either direction),
+  and `plus/3` (`A + B =:= C`, any single unknown). See
+  [Arithmetic and Comparison](arithmetic.md#relational-arithmetic).
+- **List library:** `sum_list/2` (`sumlist/2`), `max_list/2`, `min_list/2`,
+  `numlist/3`, `list_to_set/2`, `subtract/3`, `intersection/3`, `union/3`,
+  `permutation/2`.
+- **Apply (meta) library:** `maplist/2` and up, `foldl/4`, `foldl/5`,
+  `foldl/6`, `include/3`, `exclude/3`, `partition/4`.
+- **Sorting and aggregation:** `sort/4`, `predsort/3`, `aggregate_all/3`.
+- **Character classification:** `char_type/2`, `code_type/2`, `upcase_atom/2`,
+  `downcase_atom/2`.
+- **Term ↔ text:** `term_to_atom/2`, `read_term_from_atom/3`.
+- **Strings:** `string/1`, `string_length/2`, `string_concat/3`,
+  `atom_string/2`, `string_to_atom/2`, `number_string/2`, `string_chars/2`,
+  `string_codes/2`, `term_string/2`, `text_concat/3`, `sub_string/5`,
+  `split_string/4`.
+- **Association maps:** `empty_assoc/1`, `put_assoc/4`, `get_assoc/3`,
+  `del_assoc/4`, `list_to_assoc/2`, `assoc_to_list/2`, `assoc_to_keys/2`,
+  `assoc_to_values/2`.
+- **Pairs:** `pairs_keys_values/3`, `pairs_keys/2`, `pairs_values/2`.
+- **Formatted output:** `format/1`, `format/2`, `format/3`, `tab/1`, `tab/2`,
+  `print/1`, `print/2`.
+- **Modules and reflection:** `current_module/1`; and the extra arities
+  `findall/4` (with a difference-list tail) and `term_variables/3` (with a
+  tail).
+- **Process control:** `halt/0`, `halt/1` (raise the `prolog-halt` condition).
+
+!!! note "Why these are not exported"
+    cl-prolog keeps a narrow exported package surface. These goals belong to the
+    parsed-source and query-goal vocabulary, not the Lisp API, so they are
+    implemented but not interned as `cl-prolog` package symbols. The
+    [Rule DSL](rule-dsl.md) and [Extending the Engine](extending.md) pages cover
+    the Lisp-facing surface.
 
 ## DCG
 
@@ -187,6 +257,10 @@ DCG tokens are either a bare token-kind symbol or a `(kind . value)` cons.
 `dcg-token-match-value` matches both kind and value. See [DCG](dcg.md).
 
 ## Conditions
+
+The symbols below are the exported condition surface. For when each is
+signalled and how to handle it, see
+[Conditions and Errors](conditions.md).
 
 - Depth configuration: `invalid-max-depth-error` and reader
   `invalid-max-depth-error-value`

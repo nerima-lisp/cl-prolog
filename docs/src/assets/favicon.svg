@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="cl-prolog">
+  <rect width="32" height="32" rx="7" fill="#3f51b5"/>
+  <g fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <!-- turnstile: the ":-" of a Prolog clause -->
+    <path d="M9 8v16"/>
+    <path d="M9 16h9"/>
+    <circle cx="22" cy="11" r="1.6" fill="#ffffff" stroke="none"/>
+    <circle cx="22" cy="21" r="1.6" fill="#ffffff" stroke="none"/>
+  </g>
+</svg>

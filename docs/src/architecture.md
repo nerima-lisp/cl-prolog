@@ -199,9 +199,10 @@ The pipeline is split across five files:
   I/O failures into ISO source-loading errors (including the catchable
   `resource_error/1` form of a parser resource-limit breach)
 - `source-directives.lisp` evaluates one directive or clause at a time —
-  `op`, `dynamic`, `table`, `use_module`, `include`, `initialization`,
-  `consult`, and `load_files` — recording each operator, predicate-property,
-  and table declaration for later rollback
+  `op`, `dynamic`, `discontiguous`, `multifile`, `table`, `module`,
+  `use_module`, `include`, `set_prolog_flag`, `initialization`, `consult`,
+  `ensure_loaded`, and `load_files` — recording each operator,
+  predicate-property, and table declaration for later rollback
 - `source-rollback.lisp` undoes a previously loaded unit on reload: it removes
   the unit's clauses and replays or restores the operator, predicate-property,
   and table effects it recorded

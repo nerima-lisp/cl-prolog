@@ -1,21 +1,26 @@
 # Development
 
+This page covers the development environment and day-to-day workflow. Testing
+and benchmarks have their own pages: [Testing](testing.md) and
+[Benchmarks](benchmarks.md).
+
 ## Environment
 
-The flake defines outputs for `x86_64-linux` and `aarch64-linux` only. On
-Linux, enter the reproducible development environment with:
+The flake defines outputs for `x86_64-linux` and `aarch64-linux` only. On Linux,
+enter the reproducible development environment with:
 
 ```sh
-nix develop        # sbcl, cl-weave, paredit-cli, nixpkgs-fmt, mdbook
+nix develop        # sbcl, cl-weave, paredit-cli, nixpkgs-fmt, mkdocs-material
 ```
 
-On Darwin and other platforms, the flake does not expose a development shell,
-package, check, or app. Load the local checkout with ASDF instead and use CI as
-the authoritative Linux Nix verification path. Do not treat a successful
-`nix flake check` on Darwin as verification: Nix may omit every Linux-only
-check and still exit successfully.
+!!! warning "Darwin has no flake outputs"
+    On Darwin and other platforms, the flake does not expose a development
+    shell, package, check, or app. Load the local checkout with ASDF instead and
+    use CI as the authoritative Linux Nix verification path. Do **not** treat a
+    successful `nix flake check` on Darwin as verification: Nix may omit every
+    Linux-only check and still exit successfully.
 
-## Examples
+## Running examples
 
 ```sh
 sbcl --non-interactive \
@@ -26,129 +31,59 @@ sbcl --non-interactive \
 
 Run this from the repository root. Loading `cl-prolog/examples` loads the
 library first and then executes all three example files. The example files are
-not standalone scripts, so invoking them directly with `sbcl --script` does
-not load the `cl-prolog` package.
+not standalone scripts, so invoking them directly with `sbcl --script` does not
+load the `cl-prolog` package. See [Examples](examples.md) for a walkthrough.
 
-## Testing
-
-The `cl-prolog/tests` ASDF system depends on
-[cl-weave](https://github.com/nerima-lisp/cl-weave) and runs the complete
-regression suite, including isolated table cases, per-query cases, fixtures,
-and generated relational properties. Nix provides the self-contained runner:
+## Testing at a glance
 
 ```sh
-nix run .
+nix run .          # cl-weave regression suite (Linux)
+nix flake check    # full verification suite (Linux)
 ```
 
-All flake outputs, including the packaged Nix app and checks, are supported on
-Linux only. On Darwin, ensure `cl-weave` is discoverable through ASDF and run:
+`nix flake check` also runs the structural parse gate, the examples check, and
+the documentation build. The full testing workflow — including the Darwin ASDF
+path and the `cl-prolog/weave` query helpers — is on the [Testing](testing.md)
+page.
+
+## Benchmarks at a glance
 
 ```sh
-sbcl --non-interactive \
-  --eval '(require :asdf)' \
-  --load cl-prolog.asd \
-  --eval '(asdf:test-system :cl-prolog)'
+sbcl --script benchmarks/performance.lisp      # in-process micro-benchmarks
+ITERATIONS=5000 benchmarks/external-comparison.sh   # cross-engine comparison
 ```
 
-Then rely on CI for the Linux `nix flake check` verification path. A local
-Darwin invocation may report success after omitting all supported systems.
-
-Pass any cl-weave CLI options after `--`; for example, to produce a JSON
-result:
-
-```sh
-nix run . -- --reporter json --output cl-prolog-weave-results.json
-```
-
-The full Linux Nix verification suite is:
-
-```sh
-nix flake check
-```
-
-This also runs `checks.paredit-lint`, a structural parse gate over every
-tracked `.lisp`/`.asd` file; `checks.examples`, which loads every shipped
-example through ASDF; and `checks.documentation`, which builds the mdBook site
-and fails if it does not produce a valid `index.html`.
-
-### Query test helpers
-
-Load the `cl-prolog/weave` ASDF system to use the public query test helpers:
-
-```lisp
-(asdf:load-system :cl-prolog/weave)
-```
-
-`deftest-queries` creates an independent cl-weave
-case and a fresh rulebase for every query. A leading case label is optional;
-without one, the printed query is used.
-
-```lisp
-(cl-prolog/weave:deftest-queries family-queries ((make-family-rulebase))
-  ("keeps proof order" (parent alice ?child) :ordered
-   (((?child . bob)) ((?child . carol))))
-  ((parent alice ?child) :set
-   (((?child . carol)) ((?child . bob))))
-  ((parent alice ?child) :first ((?child . bob)))
-  ((parent alice bob) :succeeds)
-  ((parent bob alice) :fails)
-  ((parent alice bob) :signals cl-prolog:invalid-max-depth-error
-   :max-depth :invalid))
-```
-
-`:ordered`, `:set`, and `:first` take an expected value. `:set` ignores only
-the order of complete solutions; it still compares the structure within each
-solution with `equal`. `:signals` optionally takes a condition type. Query
-options follow the expected value or assertion kind.
-
-Use `assert-query` inside an existing cl-weave case when a table is not needed:
-
-```lisp
-(cl-weave:it "finds Alice's first child"
-  (cl-prolog/weave:assert-query (make-family-rulebase)
-    (parent alice ?child) :first ((?child . bob))))
-```
-
-## Benchmarks
-
-`benchmarks/performance.lisp` runs in-process micro-benchmarks (alias-chain
-resolution, predicate/first-argument indexing, recursive and branching path
-queries) and reports warm-steady-state timing and allocation per operation:
-
-```sh
-sbcl --script benchmarks/performance.lisp
-```
-
-`benchmarks/external-comparison.sh` cross-checks `cl-prolog` against
-SWI-Prolog, Trealla, and Scryer Prolog on a shared workload
-(`benchmarks/external-workload.pl` / `benchmarks/external-cl-prolog.lisp`),
-verifying each engine returns an identical solution count, checksum, and
-fingerprint before comparing wall-clock time. It shells out to
-`nix shell nixpkgs#{swi-prolog,trealla,scryer-prolog}`, so it requires Nix and
-network access to the binary cache; each engine run is capped at 60 seconds
-per iteration count:
-
-```sh
-ITERATIONS=5000 benchmarks/external-comparison.sh
-```
-
-These scripts are diagnostic tools, not part of `nix flake check` or the
-regression suite.
+These are diagnostic tools, not part of `nix flake check`. See
+[Benchmarks](benchmarks.md).
 
 ## Documentation
 
-```sh
-nix build .#docs   # rendered site in ./result
-mdbook serve docs  # live-reloading preview from the dev shell
-```
+The site is built with [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
+The config lives in `docs/mkdocs.yml` and content in `docs/src/`.
 
-The Nix build is Linux-only. On other systems with mdBook installed, use
-`mdbook build docs` or `mdbook serve docs` directly.
+=== "Nix (Linux)"
 
-## Design Constraints
+    ```sh
+    nix build .#docs   # rendered site in ./result
+    ```
+
+=== "MkDocs directly"
+
+    ```sh
+    # from the dev shell, or any environment with mkdocs-material installed
+    mkdocs serve -f docs/mkdocs.yml          # live-reloading preview
+    mkdocs build -f docs/mkdocs.yml --strict # one-shot strict build
+    ```
+
+`--strict` promotes broken links and unlisted pages to build failures, matching
+the Nix build and the `checks.documentation` gate. The published site deploys to
+GitHub Pages from `.github/workflows/docs.yml` on every push to `main` that
+touches `docs/`, `flake.nix`, `flake.lock`, or the workflow itself.
+
+## Design constraints
 
 - no runtime dependencies, SBCL-tested, ANSI-leaning core
 - a single canonical public API surface
 
-See [Release checklist](release-checklist.md) for the evidence bar a change
-must clear before shipping.
+See [Release Checklist](release-checklist.md) for the evidence bar a change must
+clear before shipping.
