@@ -226,6 +226,14 @@ agreeing with what the same text means in source."
             (%raise-resource-error
              "EXPONENT_MAGNITUDE" environment operation
              "numeric exponent exceeds the configured magnitude limit"))))))
+  ;; A number token ends where the number ends: ISO 13211-1 8.16.7 admits
+  ;; *leading* layout before it but nothing after, so `'3 '' is a syntax error
+  ;; even though the tokenizer would happily skip the trailing space.
+  (when (and (plusp (length text))
+             (member (char text (1- (length text)))
+                     '(#\Space #\Tab #\Return #\Newline)
+                     :test #'char=))
+    (%raise-syntax-error-for text environment operation))
   (let ((tokens (handler-case (%tokenize-prolog text)
                   (prolog-parser-resource-error (condition)
                     (%raise-parser-resource-error condition environment operation))

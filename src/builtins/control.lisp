@@ -81,15 +81,45 @@ ERROR raises when a cycle would form.  Shared by =/2 and \\=/2."
      (%raise-type-error "CALLABLE" closure environment operation
                         "CALL/N requires a callable atom or compound term"))))
 
+(defun %check-callable-body (body whole environment operation)
+  "Check every goal in BODY before any of it runs, per ISO 13211-1 7.8.3.
+
+`call/1' converts its argument to a *body* first, so `call((write(3), 1))'
+raises type_error(callable, (write(3), 1)) without writing anything -- the
+whole body is the culprit, not the `1' inside it.  Walks the control constructs
+that make up a body and stops at anything else, which is an ordinary goal."
+  (labels ((check (goal)
+             (cond
+               ;; A variable in a body position is legitimate: conversion turns
+               ;; it into `call(V)', so it is an instantiation error only if the
+               ;; search actually reaches it -- `call((fail, X))' just fails.
+               ((logic-var-p goal))
+               ((%term-atom-p goal))
+               ((not (%goal-form-p goal))
+                (%raise-type-error "CALLABLE" whole environment operation
+                                   "every goal in a body must be callable"))
+               (t
+                (let ((text (%atom-text (first goal)))
+                      (arguments (rest goal)))
+                  ;; Both spellings of each construct: the parser folds `,'/2
+                  ;; and `;'/2 into the internal `and'/`or', while functional
+                  ;; notation reaches here under the ISO names.
+                  (when (member text '("," ";" "->" "*->" "and" "or"
+                                       "if-then-else" "soft-if-then-else")
+                                :test #'string=)
+                    (mapc #'check arguments)))))))
+    (check body)))
+
 (define-builtin (call closure &rest arguments) (rulebase environment depth emit)
   (let ((resolved-closure (logic-substitute closure environment))
         (resolved-arguments
           (mapcar (lambda (argument)
                     (logic-substitute argument environment))
                   arguments)))
-    (%prove-bindings/k
-     (%extend-callable-goal resolved-closure resolved-arguments environment)
-     rulebase environment depth emit)))
+    (let ((goal (%extend-callable-goal resolved-closure resolved-arguments
+                                       environment)))
+      (%check-callable-body goal goal environment (%iso-atom "CALL"))
+      (%prove-bindings/k goal rulebase environment depth emit))))
 
 (define-builtin (once goal) (rulebase environment depth emit)
   (block first-proof

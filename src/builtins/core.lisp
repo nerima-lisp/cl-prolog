@@ -311,7 +311,11 @@ over one module's stored clauses."
                                "implementation-defined flag is read-only"))
     (let ((new-value (%resolve-prolog-flag-value value environment operation)))
       (unless (member new-value (prolog-flag-allowed-values flag) :test #'equal)
-        (%raise-domain-error "FLAG_VALUE" (logic-substitute value environment)
+        ;; ISO 13211-1 8.17.1.3 blames the pair: which value is wrong only means
+        ;; something together with the flag it was offered to.
+        (%raise-domain-error "FLAG_VALUE"
+                             (%iso-term "+" (logic-substitute name environment)
+                                        (logic-substitute value environment))
                              environment operation "invalid Prolog flag value"))
       (setf (gethash flag-name (rulebase-prolog-flag-values rulebase)) new-value)
       (funcall emit environment))))
