@@ -72,6 +72,19 @@
            "INTEGER_SIZE" nil (%iso-atom "ARITHMETIC")
            "arithmetic result exceeds the configured size limit"))))
     (expt base exponent))
+  (defun %integer-preserving-expt (base exponent expression)
+    "Evaluate ISO 13211-1 9.3.10's `^', which keeps an integer result integral.
+
+Raising an integer other than 1, 0 or -1 to a negative integer power has no
+integer value, which 9.3.10.3 makes a type_error(float, Base) rather than an
+approximation."
+    (when (and (integerp base)
+               (integerp exponent)
+               (minusp exponent)
+               (not (member base '(-1 0 1))))
+      (%raise-type-error "FLOAT" base nil (%iso-atom "ARITHMETIC")
+                         "^ with a negative integer power needs a float base"))
+    (%bounded-expt base exponent expression))
   (defun %bounded-ash (integer count)
     "Arithmetic shift bounded like %BOUNDED-EXPT: a left shift whose result
 would exceed the configured bit size raises resource_error rather than
@@ -166,7 +179,11 @@ allocating an unbounded bignum."
   (:/ (left right expression)
     (%require-real left) (%require-real right)
     (%check-nonzero-divisor expression right)
-    (/ (float left 1.0d0) (float right 1.0d0)))
+    ;; ISO 13211-1 9.1.3: dividing two integers exactly yields the integer
+    ;; quotient; only an inexact one becomes a float.
+    (if (and (integerp left) (integerp right) (zerop (mod left right)))
+        (truncate left right)
+        (/ (float left 1.0d0) (float right 1.0d0))))
   (:// (left right expression)
     (%require-integer left) (%require-integer right)
     (%check-nonzero-divisor expression right)
@@ -185,8 +202,12 @@ allocating an unbounded bignum."
     (mod left right))
   (:min (left right expression) (min left right))
   (:max (left right expression) (max left right))
-  (:** (left right expression) (%bounded-expt left right expression))
-  (:^ (left right expression) (%bounded-expt left right expression))
+  ;; ISO 13211-1 distinguishes the two powers: 9.3.1's `**' is float power, so
+  ;; `2 ** 3' is 8.0, while 9.3.10's `^' preserves integers, so `2 ^ 3' is 8.
+  (:** (left right expression)
+    (%require-real left) (%require-real right)
+    (float (%bounded-expt left right expression) 1.0d0))
+  (:^ (left right expression) (%integer-preserving-expt left right expression))
   (:|/\\| (left right expression)
     (%require-integer left) (%require-integer right)
     (logand left right))
@@ -241,6 +262,19 @@ allocating an unbounded bignum."
                              "arithmetic result is not an integer or float: ~S"
                              result))
         result)
+    ;; ISO 13211-1 9.1.4.2 names the float exceptions, so they must reach Prolog
+    ;; code as catchable evaluation_error/1 terms rather than as a host
+    ;; condition -- `2.0 ** 1e300' overflows a double, and a program is entitled
+    ;; to catch that.
+    (cl:floating-point-overflow ()
+      (%raise-evaluation-error "FLOAT_OVERFLOW" nil (%iso-atom "ARITHMETIC")
+                               "arithmetic result overflows a float"))
+    (cl:floating-point-underflow ()
+      (%raise-evaluation-error "UNDERFLOW" nil (%iso-atom "ARITHMETIC")
+                               "arithmetic result underflows a float"))
+    (cl:division-by-zero ()
+      (%raise-evaluation-error "ZERO_DIVISOR" nil (%iso-atom "ARITHMETIC")
+                               "division by zero"))
     (cl:arithmetic-error (condition)
       (%arithmetic-error expression "host arithmetic failure: ~A" condition))))
 

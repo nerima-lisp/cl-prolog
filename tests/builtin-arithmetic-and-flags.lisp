@@ -32,14 +32,26 @@
   (deftest arithmetic-power-rejects-an-oversized-exponent-or-result ()
     (signals-condition prolog-resource-error
       (query-prolog (make-rulebase) (list 'is '?result (list '** 2 5000))))
+    ;; `**' is ISO 9.3.1's float power, so an oversized result overflows the
+    ;; float rather than the integer bound -- either way it must be catchable.
+    (signals-condition prolog-evaluation-error
+      (query-prolog (make-rulebase)
+                    (list 'is '?result
+                          (list '** (list '** 2 1000) 20))))
+    ;; `^' keeps integers, so the integer size bound is what stops it.
     (signals-condition prolog-resource-error
       (query-prolog (make-rulebase)
                     (list 'is '?result
-                          (list '** (list '** 2 1000) 20)))))
+                          (list 'cl-prolog::^ (list 'cl-prolog::^ 2 1000) 20)))))
 
   (deftest arithmetic-power-with-a-zero-exponent-skips-the-size-check ()
+    ;; ISO 9.3.1: `**' yields a float, so 5 ** 0 is 1.0; 9.3.10's `^' keeps the
+    ;; integer.
+    (is-equal '(((?result . 1.0d0)))
+              (query-prolog (make-rulebase) (list 'is '?result (list '** 5 0))))
     (is-equal '(((?result . 1)))
-              (query-prolog (make-rulebase) (list 'is '?result (list '** 5 0)))))
+              (query-prolog (make-rulebase)
+                            (list 'is '?result (list 'cl-prolog::^ 5 0)))))
 
   (deftest arithmetic-rejects-an-improper-expression-list ()
     (signals-condition prolog-type-error
@@ -74,7 +86,8 @@
   ((cl-prolog::current_prolog_flag bounded ?value) :ordered (((?value . cl-prolog:false))))
   ((cl-prolog::current_prolog_flag max_arity ?value) :ordered (((?value . cl-prolog::unbounded))))
   ((cl-prolog::current_prolog_flag unknown ?value) :ordered (((?value . cl-prolog.user-atoms::error))))
-  ((cl-prolog::current_prolog_flag missing ?value) :fails)
+  ;; ISO 8.17.2.3: an atom naming no flag is a domain_error, not a failure.
+  ((cl-prolog::current_prolog_flag missing ?value) :signals)
   ((cl-prolog::current_prolog_flag ?name ?value) :set
    (((?name . cl-prolog::bounded) (?value . cl-prolog:false))
     ((?name . cl-prolog::max_arity) (?value . cl-prolog::unbounded))
@@ -208,7 +221,8 @@
   ((is ?x (ceiling (/ 7 3)))     :ordered (((?x . 3))))
   ((is ?x (truncate (/ -7 3)))   :ordered (((?x . -2))))
   ((is ?x (round (/ 5 2)))       :ordered (((?x . 2))))
-  ((is ?x (** 2 8))              :ordered (((?x . 256))))
+  ;; ISO 9.3.1 makes `**' the float power and 9.3.10's `^' the integer one.
+  ((is ?x (** 2 8))              :ordered (((?x . 256.0d0))))
   ((is ?x (^ 3 3))               :ordered (((?x . 27))))
   ((is ?x (+ 3))                 :ordered (((?x . 3))))
   ((is ?x (|/\\| 6 3))          :ordered (((?x . 2))))
