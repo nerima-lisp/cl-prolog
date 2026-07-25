@@ -59,12 +59,17 @@ jobs:
       # The sed is anchored to the line start so a comment or docstring merely
       # mentioning :version cannot shadow the real field, and an empty result is
       # reported rather than silently compared against the tag.
+      #
+      # `[[:space:]][[:space:]]*` rather than `[[:space:]]\+`: the latter is a
+      # GNU extension. It works on ubuntu-latest but yields an empty match under
+      # the BSD sed on macOS, so anyone reproducing this gate locally would see
+      # "Could not read :version" on a perfectly good .asd.
       - name: Verify tag matches .asd version
         env:
           PACKAGE: cl-prolog
         run: |
           set -euo pipefail
-          asd_version="$(sed -n 's/^[[:space:]]*:version[[:space:]]\+"\([^"]*\)".*/\1/p' "$PACKAGE.asd" | head -n1)"
+          asd_version="$(sed -n 's/^[[:space:]]*:version[[:space:]][[:space:]]*"\([^"]*\)".*/\1/p' "$PACKAGE.asd" | head -n1)"
           tag_version="${GITHUB_REF_NAME#v}"
           if [[ -z "$asd_version" ]]; then
             echo "::error::Could not read :version from $PACKAGE.asd" >&2
