@@ -48,6 +48,34 @@ the documentation build. The full testing workflow — including the ASDF
 fallback for unsupported platforms and the `cl-prolog/weave` query helpers —
 is on the [Testing](testing.md) page.
 
+## Track new files before trusting `nix flake check`
+
+Git-backed flake input selection drops untracked files *before* this
+repository's own source filter runs. A new docs page, example, or test file
+that exists only in a dirty worktree is therefore absent from every Nix build,
+and `nix flake check` will pass without ever seeing it — or fail with a
+confusing "file does not exist" from inside the sandbox.
+
+```sh
+git add path/to/new-file.lisp   # then re-run
+nix flake check
+```
+
+## Structural refactors
+
+`nix develop` puts [paredit](https://github.com/nerima-lisp/paredit-cli) on
+`PATH`. Prefer it over hand-editing parentheses for renames, moves, and other
+structural changes to Lisp sources:
+
+```sh
+paredit inspect check --file src/engine.lisp
+paredit refactor rename-function --from old-name --to new-name --output json src/*.lisp
+```
+
+Run a plan or preview command without `--write` first, review the JSON, then
+re-run with `--write`. `checks.paredit-lint` fails the build if any tracked
+`.lisp` or `.asd` file stops being a balanced S-expression document.
+
 ## Benchmarks at a glance
 
 ```sh

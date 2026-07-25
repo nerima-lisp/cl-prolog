@@ -1,7 +1,8 @@
 # cl-prolog
 
-[![CI](https://github.com/nerima-lisp/cl-prolog/actions/workflows/ci.yml/badge.svg)](https://github.com/nerima-lisp/cl-prolog/actions/workflows/ci.yml)
+[![CI](https://github.com/nerima-lisp/cl-prolog/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nerima-lisp/cl-prolog/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-MkDocs%20Material-0a7a5a)](https://nerima-lisp.github.io/cl-prolog/)
 
 A small, dependency-free Prolog engine for Common Lisp. Rulebases are plain
 data, proof search is continuation-passing, and the builtin goal set is
@@ -41,22 +42,53 @@ the checkout on your [ASDF source registry](https://asdf.common-lisp.dev/asdf.ht
 git clone https://github.com/nerima-lisp/cl-prolog.git
 ```
 
-With Nix, `nix run github:nerima-lisp/cl-prolog` runs the regression suite.
+With Nix, `nix run github:nerima-lisp/cl-prolog` runs the regression suite, and
+as a flake input:
+
+```nix
+# flake.nix
+inputs.cl-prolog = {
+  url = "github:nerima-lisp/cl-prolog/v1.0.1";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+Note the pinned tag. A bare `github:nerima-lisp/cl-prolog` follows this
+repository's default branch, so a push here would break your build without
+warning.
 
 ## Documentation
 
-<https://nerima-lisp.github.io/cl-prolog/> — querying, builtin goals, the rule
-DSL, DCG support, arithmetic, and semantics. The source lives in
-[`docs/src`](docs/src/README.md); see [Installation](docs/src/installation.md)
-and [Development](docs/src/development.md) to build and test locally.
+Full documentation is published at <https://nerima-lisp.github.io/cl-prolog/>.
+The source for that site lives in [docs/src/](docs/src/).
 
-## Project Policy
+- [Installation](https://nerima-lisp.github.io/cl-prolog/installation/)
+- [Quick Start](https://nerima-lisp.github.io/cl-prolog/quick-start/)
+- [API Reference](https://nerima-lisp.github.io/cl-prolog/api-reference/)
+- [Architecture](https://nerima-lisp.github.io/cl-prolog/architecture/)
 
-[Changelog](CHANGELOG.md) ·
-[Contributing](CONTRIBUTING.md) ·
-[Code of Conduct](CODE_OF_CONDUCT.md) ·
-[Security](SECURITY.md) ·
-[Support](SUPPORT.md)
+## Development
+
+```sh
+nix develop          # SBCL with CL_SOURCE_REGISTRY already set
+nix run .#test       # run the test suite
+nix flake check      # tests + formatting + docs, the same gate CI uses
+nix fmt              # format Nix sources (treefmt)
+```
+
+Tests live in `t/` and run under [cl-weave](https://github.com/nerima-lisp/cl-weave),
+the org's test framework. Without Nix, `sbcl --script run-tests.lisp` runs the
+same suite, provided cl-weave is on `CL_SOURCE_REGISTRY`.
+
+## Contributing
+
+See the org-wide [CONTRIBUTING](https://github.com/nerima-lisp/.github/blob/main/CONTRIBUTING.md)
+guide and the [package standard](https://github.com/nerima-lisp/.github/blob/main/PACKAGE_STANDARD.md).
+Release history is in [CHANGELOG.md](CHANGELOG.md).
+
+## Support
+
+See [SUPPORT](https://github.com/nerima-lisp/.github/blob/main/SUPPORT.md).
 
 ## License
 

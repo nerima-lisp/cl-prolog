@@ -14,10 +14,7 @@ Confirm that these files still describe the current code:
 - `docs/src/troubleshooting.md`
 - `docs/src/changelog.md` — headline summary kept in step with `CHANGELOG.md`
 - `CHANGELOG.md`
-- `CONTRIBUTING.md`
-- `CODE_OF_CONDUCT.md`
-- `SECURITY.md`
-- `SUPPORT.md`
+- `docs/src/compatibility.md` — the supported-surface promise
 
 If the public surface changed, update the docs in the same change. The MkDocs
 build is `--strict`, so a broken cross-link or a page missing from
