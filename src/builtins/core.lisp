@@ -365,21 +365,17 @@ functor happens to be `:-'."
      (%clause-rule-entry (second term) (%body-goals (third term))
                          rulebase goal environment))
     ((and (%proper-list-p term) (eq (first term) ':-))
-     (unless (and (consp (rest term))
-                  (%goal-form-p (second term)))
-       (%raise-type-error "CALLABLE" head environment (first goal)
-                         "a rule's head must be callable"))
-     (%ensure-dynamic-predicate rulebase (first (second term))
-                                (length (rest (second term))) goal environment)
-     (let ((body (cddr term)))
-       (unless (every #'%goal-form-p (mapcar #'%ensure-goal-form body))
-         (%raise-type-error "CALLABLE"
-                         (find-if-not (lambda (element)
-                                        (%goal-form-p (%ensure-goal-form element)))
-                                      body)
-                         environment (first goal)
-                         "every rule body element must be callable"))
-       (%freshen-clause (make-clause (second term) body))))
+     ;; The Lisp clause shape (:- HEAD . BODY-GOALS).  Delegated to
+     ;; %CLAUSE-RULE-ENTRY rather than repeated inline so both spellings of a
+     ;; rule normalize their head the same way: this branch used to test
+     ;; %GOAL-FORM-P on the raw head, which rejected the bare atom head that
+     ;; the `:-'/2 branch above accepts through %ENSURE-GOAL-FORM, and its
+     ;; failure path named an unbound variable instead of the culprit term.
+     ;; (:- ) alone is caught here because it carries no head at all to blame.
+     (unless (consp (rest term))
+       (%raise-type-error "CALLABLE" term environment (first goal)
+                          "a rule's head must be callable"))
+     (%clause-rule-entry (second term) (cddr term) rulebase goal environment))
     ((or (symbolp term) (%goal-form-p term))
      (let ((normalized (%ensure-goal-form term)))
        (%ensure-dynamic-predicate rulebase (first normalized)

@@ -87,6 +87,42 @@
     (assert-query rulebase (retract (:- (loud ?x) (color ?x red))) :succeeds)
     (assert-query rulebase (loud parrot) :fails)))
 
+(deftest lisp-shape-rule-head-matches-the-prolog-shape-rule-head ()
+  "A bare atom head must work in both spellings of a rule.
+
+The `:-'/2 term Prolog source reads normalizes its head through
+%ENSURE-GOAL-FORM, so `assertz((warm :- color(a, red)))' asserts warm/0.  The
+Lisp clause shape (:- HEAD . BODY-GOALS) used to test the raw head instead and
+rejected the same rule."
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase (assertz (color a red)) :succeeds)
+    (assert-query rulebase (assertz (:- warm (color a red))) :succeeds)
+    (assert-query rulebase (warm) :succeeds)
+    (assert-query rulebase (clause warm ?body)
+                  :ordered (((?body color a red))))))
+
+(deftest malformed-lisp-shape-rules-raise-iso-errors ()
+  "A malformed (:- HEAD . BODY) clause must raise the ISO error, not a Lisp one.
+
+The condition class is asserted deliberately: this branch used to name an
+unbound variable when building its type_error, so it terminated the query with
+a Lisp UNBOUND-VARIABLE.  A bare :SIGNALS expectation accepts that just as
+happily as the ISO error and would not have caught the defect."
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase (assertz (:- 42 (color a red)))
+                  :signals cl-prolog:prolog-type-error)
+    (assert-query rulebase (assertz (:- "text" (color a red)))
+                  :signals cl-prolog:prolog-type-error)
+    ;; No head at all to blame, so the whole term is the culprit.
+    (assert-query rulebase (assertz (:-))
+                  :signals cl-prolog:prolog-type-error)
+    ;; ISO 13211-1 8.9.1.3: an uninstantiated head is an instantiation_error,
+    ;; matching how assertz(X) is already handled.
+    (assert-query rulebase (assertz (:- ?head (color a red)))
+                  :signals cl-prolog:prolog-instantiation-error)
+    (assert-query rulebase (assertz (:- (ok a) 42))
+                  :signals cl-prolog:prolog-type-error)))
+
 (deftest predicate-property-validates-arguments ()
   (let ((rulebase (make-rulebase)))
     (assert-query rulebase (predicate_property ?head ?property) :signals)

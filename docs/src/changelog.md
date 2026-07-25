@@ -14,6 +14,25 @@ complete, per-entry history.
     embed the root `CHANGELOG.md` directly. To avoid drift, this page links to
     the source of truth and lists only headline changes.
 
+## 1.0.1 - 2026-07-26
+
+Three defects in the engine's internal Lisp clause shape `(:- HEAD . BODY-GOALS)`,
+all in the same branch of the assert/retract clause converter. The `:-`/2 term
+Prolog source text reads was never affected, which is why the ISO conformance
+suite did not reach them.
+
+- **A malformed rule raised a Lisp error instead of the ISO one.** Building the
+  `type_error(callable, Culprit)` for a non-callable head named an unbound
+  variable, so `(assertz (:- 42 (color a red)))` died with an SBCL
+  `UNBOUND-VARIABLE` that no `catch/3` or `prolog-type-error` handler could
+  intercept. It now raises `prolog-type-error`.
+- **A bare atom head is accepted in both spellings of a clause.**
+  `assertz((warm :- color(a, red)))` asserts `warm/0`; the Lisp shape
+  `(assertz (:- warm (color a red)))` rejected the same rule. Both now store
+  the identical clause — see [Builtin Goals](builtin-goals.md).
+- **An uninstantiated head raises an instantiation_error**, matching how a bare
+  `assertz(X)` is already handled.
+
 ## 1.0.0 - 2026-07-25
 
 First stable release: the exported surface is now considered stable. It fixes

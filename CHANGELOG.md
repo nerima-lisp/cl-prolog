@@ -6,6 +6,38 @@ The format follows a simple Keep a Changelog style.  Unreleased work
 accumulates in an `Unreleased` section at the top of the file, which is renamed
 to the version being cut at release time.
 
+## 1.0.1 - 2026-07-26
+
+### Fixed
+
+- **A malformed Lisp-shape rule no longer terminates the query with a Lisp
+  error.** When `asserta/1`, `assertz/1` or `retract/1` received the Lisp clause
+  shape `(:- HEAD . BODY-GOALS)` with a head that is not callable — say
+  `(assertz (:- 42 (color a red)))` — the branch that builds the ISO
+  `type_error(callable, Culprit)` named an unbound variable as the culprit.
+  Instead of the standard error, the query died with an SBCL
+  `UNBOUND-VARIABLE`, which no `catch/3` and no `prolog-type-error` handler can
+  intercept. The culprit is now the offending head, and the same input raises
+  `prolog-type-error` as ISO 13211-1 8.9.1.3 requires.
+- **A rule whose head is a bare atom is now accepted in both spellings of a
+  clause.** `assertz((warm :- color(a, red)))`, the `:-`/2 term Prolog source
+  reads, normalizes its head through the same path a list head takes, so it
+  asserts `warm/0`. The Lisp shape `(assertz (:- warm (color a red)))` tested
+  the raw head instead and rejected it, even though the documentation describes
+  the two shapes as asserting a rule either way. Both now store the identical
+  clause, and `clause/2` reports the same body for each.
+- **An uninstantiated head in the Lisp clause shape raises an
+  instantiation_error.** `(assertz (:- ?head (color a red)))` reached the same
+  broken culprit expression; it now signals `prolog-instantiation-error`,
+  matching how a bare `assertz(X)` is already handled.
+
+The `:-`/2 branch that reads a rule from Prolog source text was never affected;
+these three defects were confined to the engine's internal Lisp clause shape,
+which is why the ISO conformance suite did not reach them. `tests/builtin-
+dynamic-database.lisp` now covers all three, asserting the specific condition
+class — a bare "signals something" expectation accepts the Lisp `UNBOUND-VARIABLE`
+just as readily as the ISO error and would not have caught the original defect.
+
 ## 1.0.0 - 2026-07-25
 
 First stable release: the exported surface is now considered stable.
