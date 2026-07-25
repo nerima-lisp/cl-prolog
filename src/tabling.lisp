@@ -6,13 +6,24 @@
 
 (defun %replay-table-answers/k (goal state entry succeed)
   "Unify each stored answer for ENTRY with GOAL and invoke SUCCEED."
-  (loop repeat (%table-entry-answer-count entry)
-        for answer in (%table-entry-answers entry)
-        do (multiple-value-bind (extended ok)
-               (unify goal (%instantiate-variant answer)
-                      (proof-state-bindings state))
-             (when ok
-               (funcall succeed (%state-with state :bindings extended))))))
+  (let ((parent-bindings (proof-state-bindings state))
+        (parent-index (proof-state-environment-index state)))
+    (loop repeat (%table-entry-answer-count entry)
+          for answer in (%table-entry-answers entry)
+          do (multiple-value-bind (extended ok extended-index)
+                 (%unify-indexed
+                  goal
+                  (%instantiate-variant answer)
+                  parent-bindings
+                  parent-index
+                  nil)
+               (when ok
+                 (funcall
+                  succeed
+                  (%state-with
+                   state
+                   :bindings extended
+                   :environment-index extended-index)))))))
 
 (defun %predicate-key (goal)
   (when (%goal-form-p goal)
@@ -191,7 +202,7 @@ and its transpose REVERSE-ADJACENCY (Kosaraju's algorithm, second pass)."
          (module (proof-state-module state))
          (cache (%table-session-left-recursion
                  (proof-state-table-session state)))
-         (cache-key (list (rulebase-revision rulebase) module)))
+         (cache-key (list rulebase (rulebase-revision rulebase) module)))
     (when target
       (multiple-value-bind (index present-p) (gethash cache-key cache)
         (unless present-p
@@ -220,12 +231,14 @@ and its transpose REVERSE-ADJACENCY (Kosaraju's algorithm, second pass)."
             (%canonicalize-variant resolved-goal)
           (let* ((key
                    (if cyclic-goal-p
-                       (list (rulebase-revision
+                       (list (proof-state-rulebase state)
+                             (rulebase-revision
                               (proof-state-rulebase state))
                              (proof-state-module state)
                              :cyclic
                              (%variant-graph-key canonical-goal))
-                       (list (rulebase-revision
+                       (list (proof-state-rulebase state)
+                             (rulebase-revision
                               (proof-state-rulebase state))
                              (proof-state-module state)
                              canonical-goal)))

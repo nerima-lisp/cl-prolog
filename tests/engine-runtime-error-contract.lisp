@@ -224,3 +224,11 @@
                                                  ?any cl-prolog:true))))
       (signals-error (query-prolog rulebase '((cl-prolog::halt ?code))))
       (signals-error (query-prolog rulebase '((cl-prolog::halt seven)))))))
+
+(deftest dynamic-list-head-resolves-before-dispatch ()
+  (let ((rulebase (prolog ((ready ok)))))
+    (is-equal (quote (((?predicate . ready))))
+              (query-prolog
+               rulebase
+               (quote ((= ?predicate ready)
+                       (?predicate ok)))))))

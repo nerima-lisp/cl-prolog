@@ -231,3 +231,62 @@
     (is (prolog-succeeds-p rulebase (read-prolog-term "value(alpha).")))
     (is (not (prolog-succeeds-p rulebase
                                 (read-prolog-term "value(local)."))))))
+
+(deftest static-user-fast-path-resolves-imported-predicate ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog
+     ":- module(alpha, [value/1]). value(imported)."
+     rulebase)
+    (consult-prolog
+     ":- use_module(alpha). selected(X) :- value(X)."
+     rulebase)
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "selected(imported).")))
+    (is (not (prolog-succeeds-p
+              rulebase
+              (read-prolog-term "selected(missing)."))))))
+
+(deftest qualified-goal-rejects-stale-package-identity ()
+  (let* ((package (find-package "CL-PROLOG"))
+         (original-name (package-name package))
+         (original-nicknames (package-nicknames package))
+         (colon (find-symbol ":" package))
+         (predicate
+           (symbol-function
+            (find-symbol "%QUALIFIED-GOAL-P" package)))
+         (temporary-name "CL-PROLOG-GUARD-ORIGINAL")
+         (replacement nil)
+         (renamed nil))
+    (is (null (find-package temporary-name)))
+    (unwind-protect
+         (progn
+           (is (funcall predicate
+                        (list colon (quote user) (quote (true)))))
+           (setf renamed (rename-package package temporary-name))
+           (is (eq :package-error
+                   (handler-case
+                       (funcall predicate
+                                (list colon (quote user) (quote (true))))
+                     (package-error () :package-error))))
+           (setf replacement
+                 (make-package original-name :use nil))
+           (let ((new-colon (intern ":" replacement)))
+             (is (not (eq colon new-colon)))
+             (is (not (funcall predicate
+                               (list colon
+                                     (quote user)
+                                     (quote (true))))))
+             (is (funcall predicate
+                          (list new-colon
+                                (quote user)
+                                (quote (true)))))))
+      (when (and replacement (package-name replacement))
+        (delete-package replacement))
+      (when renamed
+        (rename-package package
+                        original-name
+                        original-nicknames)))
+    (is (eq package (find-package original-name)))
+    (is (eq colon (find-symbol ":" package)))
+    (is (equal original-nicknames
+               (package-nicknames package)))))

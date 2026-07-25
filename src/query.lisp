@@ -24,11 +24,18 @@
       (walk query))
     (nreverse variables)))
 
-(defun %project-bindings (query environment)
-  "Return an alist mapping each variable of QUERY to its solved value."
-  (mapcar (lambda (variable)
-            (cons variable (logic-substitute variable environment)))
-          (%collect-query-variables query)))
+(progn
+  (defun %project-bindings-indexed (query environment-index)
+    "Return QUERY variable bindings projected through ENVIRONMENT-INDEX."
+    (mapcar
+     (lambda (variable)
+       (cons variable
+             (%logic-substitute-indexed variable environment-index)))
+     (%collect-query-variables query)))
+
+  (defun %project-bindings (query environment)
+    "Return an alist mapping each variable of QUERY to its solved value."
+    (%project-bindings-indexed query (%make-environment-index environment))))
 
 (defun %query-option (options key default)
   "Return KEY from OPTIONS, or DEFAULT when KEY is absent."
@@ -60,30 +67,40 @@
        (%decode-query-options ,options)
      ,@body))
 
-(defun %map-prolog-solutions* (function rulebase query max-depth environment project limit)
-  (unless (typep limit '(or null (integer 1)))
+(defun %map-prolog-solutions*
+    (function rulebase query max-depth environment project limit)
+  (unless (typep limit (quote (or null (integer 1))))
     (error "MAP-PROLOG-SOLUTIONS: :LIMIT must be NIL or a positive integer, got ~S."
            limit))
-  (%with-logic-variable-order
-    (%collect-variables query)
-    (let ((remaining limit)
-          (cut-tag (%make-cut-tag)))
-      (block search
-        (cl:catch cut-tag
-          (%prove-goals/k
-           (%normalize-query query)
-           (%make-proof-state rulebase environment max-depth
-                              +default-prolog-module+
-                              (%make-rulebase-table-session rulebase)
-                              cut-tag)
-           (lambda (state)
-             (let ((bindings (proof-state-bindings state)))
-               (funcall function (if project
-                                     (%project-bindings query bindings)
-                                     bindings)))
-             (when (and remaining (zerop (decf remaining)))
-               (return-from search))))))
-      nil)))
+  (let ((*unification-scratch* (%make-unification-scratch)))
+    (%with-logic-variable-order
+      (%collect-variables query)
+      (let ((remaining limit)
+            (cut-tag (%make-cut-tag)))
+        (block search
+          (cl:catch cut-tag
+            (%prove-goals/k
+             (%normalize-query query)
+             (%make-proof-state
+              rulebase
+              environment
+              (%make-environment-index environment)
+              max-depth
+              +default-prolog-module+
+              (%make-rulebase-table-session rulebase)
+              cut-tag)
+             (lambda (state)
+               (let ((bindings (proof-state-bindings state))
+                     (environment-index
+                       (proof-state-environment-index state)))
+                 (funcall function
+                          (if project
+                              (%project-bindings-indexed
+                               query environment-index)
+                              bindings)))
+               (when (and remaining (zerop (decf remaining)))
+                 (return-from search))))))
+        nil))))
 
 (defun map-prolog-solutions (function rulebase query &rest options)
   "Prove QUERY against RULEBASE, calling FUNCTION once per solution.
