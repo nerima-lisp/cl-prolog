@@ -6,8 +6,8 @@ and benchmarks have their own pages: [Testing](testing.md) and
 
 ## Environment
 
-The flake defines outputs for `x86_64-linux` and `aarch64-linux`.
-On either of those systems, enter the reproducible development
+The flake defines outputs for `x86_64-linux`, `aarch64-linux`, and
+`aarch64-darwin`. On any of those systems, enter the reproducible development
 environment with:
 
 ```sh

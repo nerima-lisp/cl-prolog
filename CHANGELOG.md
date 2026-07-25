@@ -205,6 +205,10 @@ ordinary Prolog source text, and each now covered by
   (string-scanner escape handling, `%text-of` coercion arms, `sub_string/5`'s
   fully-enumerated mode, a decimal-digit-limit boundary, and a `format/2`
   column directive)
+- `flake.nix` now also builds on `aarch64-darwin`, verified locally end to
+  end (`nix build`, `nix develop`, `nix flake check`) — the prior
+  Linux-only restriction was self-imposed, not inherited from either flake
+  input
 - all in-repo `github.com/takeokunn/cl-prolog` references now point at
   `github.com/nerima-lisp/cl-prolog`, the project's current org
 
