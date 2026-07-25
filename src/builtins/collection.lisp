@@ -120,6 +120,10 @@ within them keep their original order."
                               rulebase environment depth emit)
   (multiple-value-bind (goal existential-variables)
       (%strip-existential-quantifiers quantified-goal)
+    ;; ISO 13211-1 8.10.2.3: the goal is converted to a body first, so
+    ;; `setof(X, X^(true ; 4), L)' blames the whole `(true ; 4)' and runs none
+    ;; of it -- the same conversion `call/1' does, and the same culprit rule.
+    (%check-callable-body goal goal environment (%iso-atom "BAGOF"))
     (let* ((free-variables
              (%bagof-free-variables template goal existential-variables))
            (solutions
