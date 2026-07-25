@@ -20,7 +20,7 @@ Resolved through ASDF rather than *LOAD-PATHNAME*, which points at the fasl
 cache once the suite is compiled."
   (asdf:system-relative-pathname :cl-prolog/tests "tests/iso/inriasuite/"))
 
-(defparameter +inria-conformance-floor+ 424
+(defparameter +inria-conformance-floor+ 427
   "The corpus score this engine is known to reach.
 
 A floor rather than an exact count, so that fixing a builtin never fails the
@@ -101,9 +101,11 @@ failure, since Prolog code is owed a catchable error rather than a Lisp one."
       ;; Anything else is an error term the goal must raise.  Compared by
       ;; printed form so that `type_error(atom, 1.23)' matches structurally
       ;; without depending on how each side spells its atoms internally.
+      ;; An error term the goal must raise.  A variable anywhere in the corpus's
+      ;; expected term is its way of saying "any culprit here", so the two are
+      ;; unified rather than compared as text.
       (t (and (eq kind :error)
-              (string= (cl-prolog:prolog-term-string expected)
-                       (cl-prolog:prolog-term-string datum)))))))
+              (nth-value 1 (cl-prolog:unify expected datum)))))))
 
 (defparameter +inria-non-test-files+ '("README" "file_manip" "halt")
   "Corpus files that hold no runnable cases.

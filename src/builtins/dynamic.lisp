@@ -223,6 +223,9 @@ indicator to T for O(1) membership checks."
     (unless (integerp (third resolved))
       (%raise-type-error "INTEGER" (third resolved) environment 'abolish
                          "predicate arity must be an integer"))
+    (when (> (third resolved) *max-prolog-term-arity*)
+      (%raise-representation-error "MAX_ARITY" environment 'abolish
+                                   "arity exceeds the max_arity flag"))
     (when (minusp (third resolved))
       (%raise-domain-error "NOT_LESS_THAN_ZERO" (third resolved)
                            environment 'abolish

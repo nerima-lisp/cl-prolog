@@ -290,6 +290,10 @@ Return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
                ;; does is the `unknown' flag's to decide.  `error' (the default)
                ;; raises; `fail' and `warning' let the call simply fail, which
                ;; is what makes a partially written program runnable.
+               (if (logic-var-p (first normalized-goal))
+                   (%raise-instantiation-error
+                    environment context
+                    "a goal reached at run time must be instantiated")
                (let ((mode (%prolog-flag-value (proof-state-rulebase state)
                                                (%find-prolog-flag "UNKNOWN"))))
                  (when (string= mode "ERROR")
@@ -297,7 +301,7 @@ Return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
                     "PROCEDURE" (%goal-predicate-indicator normalized-goal)
                     environment context
                     "the invoked predicate is not defined"))
-                 nil))))))))
+                 nil)))))))))
 
 (defun %prove-goal/k (goal state succeed)
   "Prove GOAL, counting every dispatched call for local depth limits."
