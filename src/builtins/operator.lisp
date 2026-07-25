@@ -150,7 +150,20 @@
         (setf (gethash from-character table) to-character))
     (funcall emit environment)))
 
+(defun %require-conversion-character-argument (term environment operation)
+  "Check a current_char_conversion/2 argument per ISO 13211-1 8.14.6.3.
+
+A bound argument that is not a one-character atom is a type_error(character, C);
+enumerating and failing to unify would report it as an ordinary no."
+  (let ((value (logic-substitute term environment)))
+    (unless (or (logic-var-p value) (%character-atom-p value))
+      (%raise-type-error "CHARACTER" value environment operation
+                         "expected a one-character atom"))))
+
 (define-builtin (current_char_conversion from to) (rulebase environment depth emit)
+  (let ((operation (%iso-atom "CURRENT_CHAR_CONVERSION")))
+    (%require-conversion-character-argument from environment operation)
+    (%require-conversion-character-argument to environment operation))
   (let ((pairs '()))
     (maphash (lambda (from-character to-character)
                (push (cons from-character to-character) pairs))

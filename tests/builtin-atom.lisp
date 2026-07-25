@@ -234,7 +234,9 @@ The macro expands each case into two DEFTEST-QUERIES specs."
           (atom-builtin-error-summary '(cl-prolog::char_code ?character ?code)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CHARACTER" "AB"))
           (atom-builtin-error-summary '(cl-prolog::char_code ab ?code)))
-  (:equal '(prolog-domain-error ("DOMAIN_ERROR" "CHARACTER_CODE" -1))
+  ;; ISO 13211-1 8.16.6.3: an integer that names no character is a
+  ;; representation_error, which reports only the flag, not the culprit.
+  (:equal '(prolog-representation-error ("REPRESENTATION_ERROR" "CHARACTER_CODE"))
           (atom-builtin-error-summary '(cl-prolog::char_code ?character -1)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "NUMBER" "ATOM"))
           (atom-builtin-error-summary '(cl-prolog::number_chars atom ?chars)))

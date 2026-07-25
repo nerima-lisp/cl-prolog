@@ -45,6 +45,16 @@
                                unsupported-message))
         (push (cons name (second option)) result)))))
 
+(defun %io-write-options (term environment operation allowed)
+  "Parse write_term/2,3's options, whose ISO 8.14.2.3 domain is `write_option'."
+  (%io-parse-option-list
+   term environment operation "WRITE_OPTION" allowed
+   #'%term-has-variables-p
+   "Write options must be instantiated"
+   "Write options must be a proper list"
+   "Expected a unary write option"
+   "Unsupported write option"))
+
 (defun %io-options (term environment operation allowed)
   (%io-parse-option-list
    term environment operation "STREAM_OPTION" allowed

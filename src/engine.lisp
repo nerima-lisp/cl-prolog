@@ -54,6 +54,12 @@ resource_error.  NIL disables the bound.")
       (prolog-evaluation-error %raise-evaluation-error
        (reason environment operation message)
        (%iso-term "EVALUATION_ERROR" (%iso-atom reason)))
+      ;; ISO 13211-1 7.12.2 (e): a term is well formed but outside what this
+      ;; implementation can represent -- an integer that is no character code,
+      ;; say.  Distinct from a domain error, which is about the value's meaning.
+      (prolog-representation-error %raise-representation-error
+       (flag environment operation message)
+       (%iso-term "REPRESENTATION_ERROR" (%iso-atom flag)))
       ;; Resource and syntax errors are raised through hand-written entry
       ;; points that carry extra slots, so they contribute a condition only.
       (prolog-resource-error nil nil nil)

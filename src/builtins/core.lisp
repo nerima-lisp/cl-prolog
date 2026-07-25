@@ -283,9 +283,14 @@ over one module's stored clauses."
                           (%external-prolog-flag-value
                           (%prolog-flag-value rulebase flag))
                           named-environment emit))))
-        (let ((flag (%find-prolog-flag
-                     (%prolog-flag-name name environment
-                                        (%iso-atom "CURRENT_PROLOG_FLAG")))))
+        (let* ((operation (%iso-atom "CURRENT_PROLOG_FLAG"))
+               (flag (%find-prolog-flag
+                      (%prolog-flag-name name environment operation))))
+          ;; ISO 13211-1 8.17.2.3: an atom that names no flag is a
+          ;; domain_error(prolog_flag, Name), not a silent failure.
+          (unless flag
+            (%raise-domain-error "PROLOG_FLAG" resolved-name environment
+                                 operation "unknown Prolog flag"))
           (when flag
             (%unify-emit value
                          (%external-prolog-flag-value

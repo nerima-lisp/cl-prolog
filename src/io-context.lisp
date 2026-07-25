@@ -36,6 +36,9 @@
      (values :write :output))
     ((or (eq mode :append) (eq mode (%io-context-atom "append")))
      (values :append :output))
+    ((not (symbolp mode))
+     (%raise-type-error "ATOM" mode environment operation
+                        "Stream mode must be an atom"))
     (t
      (%raise-domain-error "IO_MODE" mode environment operation
                           "Stream mode must be read, write, or append"))))
@@ -150,6 +153,12 @@ alias."
 (defun %resolve-prolog-stream (context designator required-mode environment operation)
   (let ((entry (%find-prolog-stream context designator)))
     (unless entry
+      ;; ISO 13211-1 7.12.2 (d)/(g) split the two failures: something that could
+      ;; never name a stream is a domain_error(stream_or_alias), while an atom
+      ;; that simply names no open one is an existence_error(stream).
+      (unless (or (symbolp designator) (prolog-stream-p designator))
+        (%raise-domain-error "STREAM_OR_ALIAS" designator environment operation
+                             "expected a stream or stream alias"))
       (%raise-existence-error "STREAM" designator environment operation
                               "Unknown stream designator"))
     (when required-mode

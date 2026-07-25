@@ -62,8 +62,8 @@
 (defun %io-write-term-goal (entry term options environment emit
                             &optional (operation (%io-operation "WRITE_TERM")))
   (let* (
-         (parsed (%io-options options environment operation
-                              '("quoted" "ignore_ops" "numbervars")))
+         (parsed (%io-write-options options environment operation
+                                    '("quoted" "ignore_ops" "numbervars")))
          (ignore-ops (%io-boolean
                       (%io-option "ignore_ops" parsed (%iso-atom "false"))
                       environment operation))
@@ -129,10 +129,13 @@
   (funcall emit environment))
 
 (defun %io-require-stream-type (entry type environment operation)
+  ;; ISO 13211-1 8.12/8.13 name the stream's *actual* type as the culprit -- a
+  ;; byte read from a text stream is permission_error(input, text_stream, S) --
+  ;; because that is the property that makes the operation illegal.
   (unless (eq (prolog-stream-type entry) type)
     (%raise-permission-error
      (if (eq (prolog-stream-direction entry) :input) "INPUT" "OUTPUT")
-     (if (eq type :text) "TEXT_STREAM" "BINARY_STREAM")
+     (if (eq (prolog-stream-type entry) :text) "TEXT_STREAM" "BINARY_STREAM")
      (%io-public-designator entry) environment operation
      (if (eq type :text)
          "Character operation requires a text stream"
@@ -153,17 +156,32 @@ must. Returns the character, or NIL at end of stream."
                 (t :past)))
     character))
 
+(defun %io-require-in-character (term environment operation)
+  "Check get_char/peek_char's output argument per ISO 13211-1 8.12.1.3.
+
+A bound argument that is neither a one-character atom nor `end_of_file' is a
+type_error(in_character, C); leaving it to unification would fail silently."
+  (let ((value (logic-substitute term environment)))
+    (unless (or (logic-var-p value)
+                (%character-atom-p value)
+                (and (%term-atom-p value)
+                     (string= "end_of_file" (%atom-text value))))
+      (%raise-type-error "IN_CHARACTER" value environment operation
+                         "expected a character or end_of_file"))))
+
 (defun %io-character-input (entry environment operation &key peek)
   (let ((character (%io-read-character entry environment operation :peek peek)))
     (if character (%character-atom character) (%iso-atom "end_of_file"))))
 
 (%define-io-dual-builtin (get_char (character) :input "GET_CHAR")
     (rulebase environment depth emit)
+  (%io-require-in-character character environment operation)
   (%unify-emit character (%io-character-input entry environment operation)
                environment emit))
 
 (%define-io-dual-builtin (peek_char (character) :input "PEEK_CHAR")
     (rulebase environment depth emit)
+  (%io-require-in-character character environment operation)
   (%unify-emit character
                (%io-character-input entry environment operation :peek t)
                environment emit))
@@ -202,15 +220,21 @@ src/builtins/io-code.lisp)."
 
 (defun %io-byte (term environment operation)
   (let ((value (%io-resolve-term term environment operation)))
-    (unless (integerp value)
-      (%raise-type-error "INTEGER" value environment operation
-                         "Byte must be an integer"))
-    (unless (<= 0 value 255)
-      (%raise-domain-error "BYTE" value environment operation
-                           "Byte must be between 0 and 255"))
+    ;; ISO 13211-1 8.13.3.3 uses one class for both shapes: anything that is
+    ;; not a byte is type_error(byte, B).
+    (unless (and (integerp value) (<= 0 value 255))
+      (%raise-type-error "BYTE" value environment operation
+                         "Byte must be an integer between 0 and 255"))
     value))
 
 (defun %io-byte-input-goal (entry byte environment emit operation peek)
+  ;; ISO 13211-1 8.13.1.3: a bound argument that is no in-byte is a
+  ;; type_error(in_byte, B), checked before the stream's type.
+  (let ((value (logic-substitute byte environment)))
+    (unless (or (logic-var-p value)
+                (and (integerp value) (<= -1 value 255)))
+      (%raise-type-error "IN_BYTE" value environment operation
+                         "expected a byte or -1 for end of file")))
   (%unify-emit byte (%io-read-byte entry environment operation :peek peek)
                environment emit))
 
@@ -228,9 +252,12 @@ src/builtins/io-code.lisp)."
   (%io-byte-input-goal entry byte environment emit operation t))
 
 (defun %io-write-byte-goal (entry byte environment emit operation)
-  (%io-require-stream-type entry :binary environment operation)
-  (write-byte (%io-byte byte environment operation)
-              (prolog-stream-stream entry))
+  ;; ISO 13211-1 8.13.3.3 checks the argument before the stream: `put_byte(a)'
+  ;; on a text stream is a type_error(byte, a), not a permission error about
+  ;; the stream, because the argument is wrong whatever the stream is.
+  (let ((value (%io-byte byte environment operation)))
+    (%io-require-stream-type entry :binary environment operation)
+    (write-byte value (prolog-stream-stream entry)))
   (funcall emit environment))
 (%define-io-dual-builtin (put_byte (byte) :output "PUT_BYTE")
     (rulebase environment depth emit)

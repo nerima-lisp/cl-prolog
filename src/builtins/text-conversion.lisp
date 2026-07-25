@@ -137,12 +137,15 @@
   (unless (integerp code)
     (%raise-type-error "INTEGER" code environment operation
                        "character codes must be integers"))
+  ;; ISO 13211-1 8.16.6.3: an integer that is no character code is a
+  ;; representation_error(character_code), not a domain error -- the value is
+  ;; meaningful, it just has no character to name.
   (unless (and (<= 0 code) (< code char-code-limit))
-    (%raise-domain-error "CHARACTER_CODE" code environment operation
-                         "integer is not a character code"))
+    (%raise-representation-error "CHARACTER_CODE" environment operation
+                                 "integer is not a character code"))
   (or (code-char code)
-      (%raise-domain-error "CHARACTER_CODE" code environment operation
-                           "integer is not a character code")))
+      (%raise-representation-error "CHARACTER_CODE" environment operation
+                                   "integer is not a character code")))
 
 (defun %code-list-text
     (codes environment operation
