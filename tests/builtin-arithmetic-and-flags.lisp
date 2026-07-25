@@ -84,13 +84,16 @@
 
 (deftest-queries prolog-flag-builtins ((make-rulebase))
   ((cl-prolog::current_prolog_flag bounded ?value) :ordered (((?value . cl-prolog:false))))
-  ((cl-prolog::current_prolog_flag max_arity ?value) :ordered (((?value . cl-prolog::unbounded))))
+  ;; A finite max_arity: ISO 8.17 allows `unbounded', but every other resource
+  ;; this engine exposes is bounded and an unbounded arity was the one hole.
+  ((cl-prolog::current_prolog_flag max_arity ?value)
+   :ordered (((?value . #.cl-prolog::*max-prolog-term-arity*))))
   ((cl-prolog::current_prolog_flag unknown ?value) :ordered (((?value . cl-prolog.user-atoms::error))))
   ;; ISO 8.17.2.3: an atom naming no flag is a domain_error, not a failure.
   ((cl-prolog::current_prolog_flag missing ?value) :signals)
   ((cl-prolog::current_prolog_flag ?name ?value) :set
    (((?name . cl-prolog::bounded) (?value . cl-prolog:false))
-    ((?name . cl-prolog::max_arity) (?value . cl-prolog::unbounded))
+    ((?name . cl-prolog::max_arity) (?value . #.cl-prolog::*max-prolog-term-arity*))
     ((?name . cl-prolog::integer_rounding_function) (?value . cl-prolog::toward_zero))
     ((?name . cl-prolog::char_conversion) (?value . cl-prolog::off))
     ((?name . cl-prolog.user-atoms::debug) (?value . cl-prolog::off))

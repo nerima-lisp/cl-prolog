@@ -20,7 +20,7 @@ Resolved through ASDF rather than *LOAD-PATHNAME*, which points at the fasl
 cache once the suite is compiled."
   (asdf:system-relative-pathname :cl-prolog/tests "tests/iso/inriasuite/"))
 
-(defparameter +inria-conformance-floor+ 417
+(defparameter +inria-conformance-floor+ 421
   "The corpus score this engine is known to reach.
 
 A floor rather than an exact count, so that fixing a builtin never fails the
@@ -51,6 +51,18 @@ test; raise it when the score improves and a regression will fail here.")
              (= 3 (length term)))
     (second term)))
 
+(defparameter +inria-driver-support-clauses+
+  "exists(Name/Arity) :- functor(Head, Name, Arity), predicate_property(Head, _)."
+  "Helpers the corpus expects its own driver to supply.
+
+Some cases call `exists/1' to ask whether a predicate is available at all.  It
+belongs to the suite's harness rather than to the standard, so it is defined
+here rather than counted as a conformance failure.")
+
+(defun inria-rulebase ()
+  "A rulebase carrying the corpus's driver-supplied helpers."
+  (consult-prolog +inria-driver-support-clauses+))
+
 (defun inria-run-goal (goal)
   "Run GOAL and describe the outcome as (VALUES KIND DATUM).
 
@@ -58,8 +70,7 @@ KIND is :SOLUTIONS with the solution list, :ERROR with the raised formal term,
 or :HOST-CONDITION with the condition type -- which is itself a conformance
 failure, since Prolog code is owed a catchable error rather than a Lisp one."
   (handler-case
-      (values :solutions (cl-prolog:query-prolog (cl-prolog:make-rulebase)
-                                                 (list goal)))
+      (values :solutions (cl-prolog:query-prolog (inria-rulebase) (list goal)))
     (cl-prolog:prolog-exception (condition)
       (let ((term (cl-prolog:prolog-exception-term condition)))
         (values :error (or (inria-error-formal term) term))))

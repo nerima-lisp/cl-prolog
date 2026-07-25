@@ -217,7 +217,10 @@ over one module's stored clauses."
 
 (define-prolog-flags
   (bounded "FALSE" ())
-  (max_arity "UNBOUNDED" ())
+  ;; ISO 8.17 admits `unbounded', but every other resource this engine exposes
+  ;; carries a configurable bound, and an unbounded arity is the one hole in
+  ;; that: `functor(T, foo, HUGE)' would allocate without limit.
+  (max_arity *max-prolog-term-arity* ())
   (integer_rounding_function "TOWARD_ZERO" ())
   (char_conversion "OFF" ("ON" "OFF"))
   (debug "OFF" ("ON" "OFF"))

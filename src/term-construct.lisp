@@ -37,6 +37,12 @@
         (%raise-type-error
          "INTEGER" resolved-arity environment operation
          "functor/3 arity must be an integer"))
+       ((> resolved-arity *max-prolog-term-arity*)
+        ;; ISO 13211-1 8.5.1.3: an arity past what the implementation can build
+        ;; is a representation_error naming the flag that reports the bound.
+        (%raise-representation-error
+         "MAX_ARITY" environment operation
+         "functor/3 arity exceeds the max_arity flag"))
        ((minusp resolved-arity)
         (%raise-domain-error
          "NOT_LESS_THAN_ZERO" resolved-arity environment operation

@@ -117,6 +117,13 @@ Deliberately not a PROLOG-EXCEPTION: catch/3 must not intercept it."))
 
 (declaim (ftype function %iso-atom %iso-term %iso-error-term))
 
+(defparameter *max-prolog-term-arity* 1024
+  "The largest arity a term may have, reported by the `max_arity' flag.
+
+ISO 13211-1 8.17 lets an implementation answer `unbounded' here, but every
+other resource this engine exposes is bounded, and an unbounded arity is the
+one hole left in that: `functor(T, foo, Huge)' would allocate without limit.")
+
 (defun %invalid-goal (goal reason &rest arguments)
   (let ((message (apply #'format nil reason arguments)))
     (error 'invalid-goal-error
