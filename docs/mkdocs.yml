@@ -20,6 +20,12 @@ docs_dir: src
 site_dir: ../site
 use_directory_urls: true
 
+# Also passed as --strict by flake.nix's packages.docs. Declaring it here as
+# well means `mkdocs serve` applies the same gate, so there is no invocation
+# path that silently tolerates a broken link. Use `mkdocs serve --no-strict`
+# while drafting.
+strict: true
+
 copyright: Copyright &copy; cl-prolog contributors — MIT License
 
 theme:
@@ -116,8 +122,20 @@ markdown_extensions:
       permalink: true
       title: On this page
 
+# DOCS_STANDARD.md fixes these six sections, in this order. They track the
+# reader's state: Getting Started has not run anything yet, Guide has it
+# working but does not know the design, Reference is looking up one answer
+# while writing, Internals is about to change the engine, Project is about to
+# contribute. Readership falls off along that order, so reference and
+# internals sit at the back.
+#
+# Guide topics are ordered by dependency, not alphabetically: each page uses
+# vocabulary the previous one introduced.
+#
+# Every page under docs/src/ must appear here — --strict fails the build on an
+# unlisted page, which is what keeps this list from falling behind.
 nav:
-  - Home: README.md
+  - Home: index.md
   - Getting Started:
       - Installation: installation.md
       - Quick Start: quick-start.md
@@ -131,18 +149,23 @@ nav:
       - Extending the Engine: extending.md
       - Cookbook: cookbook.md
       - Examples: examples.md
+      - Troubleshooting: troubleshooting.md
   - Reference:
       - API Reference: api-reference.md
       - Semantics: semantics.md
       - Conditions and Errors: conditions.md
+      - Compatibility: compatibility.md
       - Parser Resource Limits: parser-limits.md
   - Internals:
       - Architecture: architecture.md
+      - Benchmarks: benchmarks.md
   - Project:
       - Development: development.md
       - Testing: testing.md
-      - Benchmarks: benchmarks.md
-      - Troubleshooting: troubleshooting.md
       - Release Checklist: release-checklist.md
       - Changelog: changelog.md
-      - Repository Documentation: repository.md
+
+# docs/notes/ is for measurements worth keeping but not worth publishing.
+# Without this declaration --strict fails the build the moment one is added.
+not_in_nav: |
+  notes/

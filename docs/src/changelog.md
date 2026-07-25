@@ -122,4 +122,3 @@ for details.
 ## See also
 
 - [Release Checklist](release-checklist.md) — the evidence bar for shipping.
-- [Repository Documentation](repository.md) — contributing and policy files.

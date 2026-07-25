@@ -125,3 +125,20 @@ nix run github:nerima-lisp/cl-prolog
 
 See [Installation](installation.md) for the full matrix of load paths and the
 Linux-only Nix caveat.
+
+## Project policy
+
+Conduct, contribution, security and support policies are org-wide defaults,
+published once in the [nerima-lisp/.github](https://github.com/nerima-lisp/.github)
+repository rather than copied into each of the 21 packages:
+
+- [Contributing](https://github.com/nerima-lisp/.github/blob/main/CONTRIBUTING.md)
+- [Code of Conduct](https://github.com/nerima-lisp/.github/blob/main/CODE_OF_CONDUCT.md)
+- [Security policy](https://github.com/nerima-lisp/.github/blob/main/SECURITY.md)
+- [Support](https://github.com/nerima-lisp/.github/blob/main/SUPPORT.md)
+
+What is specific to this package lives here: [Development](development.md) for
+the workflow, [Compatibility](compatibility.md) for what the public surface
+promises, and
+[CHANGELOG.md](https://github.com/nerima-lisp/cl-prolog/blob/main/CHANGELOG.md)
+for the per-entry history.
