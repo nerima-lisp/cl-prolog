@@ -327,11 +327,17 @@ the bare atom Prolog text spells and `clause/2' hands it back unchanged."
                                 "a rule's head must be instantiated"))
   (let ((callable-head (%ensure-goal-form head)))
     (unless (%goal-form-p callable-head)
-      (%invalid-goal goal "a rule must have shape (:- (PREDICATE . ARGS) GOAL...)"))
+      (%raise-type-error "CALLABLE" head environment (first goal)
+                         "a rule's head must be callable"))
     (%ensure-dynamic-predicate rulebase (first callable-head)
                                (length (rest callable-head)) goal environment)
     (unless (every #'%goal-form-p (mapcar #'%ensure-goal-form body))
-      (%invalid-goal goal "every rule body element must be a callable goal"))
+      (%raise-type-error "CALLABLE"
+                         (find-if-not (lambda (element)
+                                        (%goal-form-p (%ensure-goal-form element)))
+                                      body)
+                         environment (first goal)
+                         "every rule body element must be callable"))
     (%freshen-clause (make-clause callable-head body))))
 
 (defun %clause-term-entry (term rulebase goal environment)
@@ -354,12 +360,18 @@ functor happens to be `:-'."
     ((and (%proper-list-p term) (eq (first term) ':-))
      (unless (and (consp (rest term))
                   (%goal-form-p (second term)))
-       (%invalid-goal goal "a rule must have shape (:- (PREDICATE . ARGS) GOAL...)"))
+       (%raise-type-error "CALLABLE" head environment (first goal)
+                         "a rule's head must be callable"))
      (%ensure-dynamic-predicate rulebase (first (second term))
                                 (length (rest (second term))) goal environment)
      (let ((body (cddr term)))
        (unless (every #'%goal-form-p (mapcar #'%ensure-goal-form body))
-         (%invalid-goal goal "every rule body element must be a callable goal"))
+         (%raise-type-error "CALLABLE"
+                         (find-if-not (lambda (element)
+                                        (%goal-form-p (%ensure-goal-form element)))
+                                      body)
+                         environment (first goal)
+                         "every rule body element must be callable"))
        (%freshen-clause (make-clause (second term) body))))
     ((or (symbolp term) (%goal-form-p term))
      (let ((normalized (%ensure-goal-form term)))
@@ -368,7 +380,10 @@ functor happens to be `:-'."
        (let ((table (make-hash-table :test #'eq)))
          (make-clause (%freshen-term normalized table)))))
     (t
-     (%invalid-goal goal "a dynamic clause must be a fact or (:- HEAD BODY...)"))))
+     ;; ISO 13211-1 8.9.1.3: the culprit is the clause term itself, not the
+     ;; assert goal that carried it.
+     (%raise-type-error "CALLABLE" term environment (first goal)
+                        "a dynamic clause must be a fact or a rule"))))
 
 (defun %entry-predicate-arity (entry)
   (let ((head (%entry-head entry)))

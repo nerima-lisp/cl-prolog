@@ -125,10 +125,10 @@ indicator to T for O(1) membership checks."
           (dolist (candidate (nreverse indicators))
             (%unify-emit indicator candidate environment emit))
           (progn
-            ;; Dispatch also covers valid arities of variadic builtins, which
-            ;; cannot all be represented by the finite enumeration above.
-            (when (or (gethash resolved seen)
-                      (%builtin-predicate-p (second resolved) (third resolved)))
+            ;; ISO 13211-1 8.8.2 enumerates the *user-defined* procedures, so a
+            ;; builtin's indicator does not succeed here even though the
+            ;; predicate exists -- `predicate_property/2' is what reports those.
+            (when (gethash resolved seen)
               (funcall emit environment)))))))
 
 (defun %predicate-clause-count (rulebase predicate arity module)
@@ -212,10 +212,14 @@ indicator to T for O(1) membership checks."
                                   "predicate indicator must be instantiated"))
     (unless (and (%proper-list-p resolved)
                  (= (length resolved) 3)
-                 (eq (first resolved) '/)
-                 (symbolp (second resolved)))
+                 (eq (first resolved) '/))
       (%raise-type-error "PREDICATE_INDICATOR" resolved environment 'abolish
                          "expected a predicate indicator"))
+    ;; ISO 13211-1 8.9.4.3 reports the offending *part* of the indicator: a
+    ;; non-atom name is a type_error(atom, Name), not one about the whole term.
+    (unless (symbolp (second resolved))
+      (%raise-type-error "ATOM" (second resolved) environment 'abolish
+                         "predicate name must be an atom"))
     (unless (integerp (third resolved))
       (%raise-type-error "INTEGER" (third resolved) environment 'abolish
                          "predicate arity must be an integer"))

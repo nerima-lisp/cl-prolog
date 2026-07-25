@@ -303,9 +303,13 @@ allocating an unbounded bignum."
                    environment (%iso-atom "ARITHMETIC")
                    "arithmetic expression is not ground"))
                  ((not (consp term))
+                  ;; ISO 13211-1 7.12.2 (b): the culprit of an evaluable type
+                  ;; error is the indicator `Name/Arity', so a bare atom is
+                  ;; reported as `foo/0' rather than as `foo'.
                   (%raise-type-error
-                   "EVALUABLE" term environment
-                   (%iso-atom "ARITHMETIC")
+                   "EVALUABLE"
+                   (if (%term-atom-p term) (%iso-term "/" term 0) term)
+                   environment (%iso-atom "ARITHMETIC")
                    "number or arithmetic expression required"))
                  ((not (%proper-list-p term))
                   (%raise-type-error
