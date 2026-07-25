@@ -1,13 +1,20 @@
-(asdf:defsystem #:cl-prolog
+;;;; System names are written as STRINGS, not #:symbols or :keywords: a string
+;;;; does not depend on the reader's package state at load time, and a single
+;;;; spelling keeps `grep` reliable across the org.
+
+(asdf:defsystem "cl-prolog"
   :description "A small, dependency-free Common Lisp Prolog engine."
   :long-description "A macro-first Common Lisp Prolog engine with CPS proof search, an extensible builtin registry, and a compact rule DSL."
-  :author "takeokunn"
-  :maintainer "takeokunn"
+  :author "takeokunn <bararararatty@gmail.com>"
+  :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
   :long-name "cl-prolog"
+  ;; Single source of truth for the version. flake.nix parses this exact form
+  ;; (first match wins) and release.yml refuses to publish a tag that
+  ;; disagrees with it, so a release edits this one line.
   :version "1.0.1"
   :pathname "src"
   :serial t
@@ -70,17 +77,34 @@
                (:file "dsl-compiler")
                (:file "dsl")
                (:file "dcg"))
-  :in-order-to ((asdf:test-op (asdf:test-op "cl-prolog/tests"))))
+  :in-order-to ((asdf:test-op (asdf:test-op "cl-prolog/test"))))
 
-(asdf:defsystem #:cl-prolog/weave
+(asdf:defsystem "cl-prolog/weave"
   :description "cl-weave helpers for testing cl-prolog queries."
+  :author "takeokunn <bararararatty@gmail.com>"
+  :maintainer "takeokunn <bararararatty@gmail.com>"
+  :license "MIT"
+  :version "1.0.1"
+  :homepage "https://github.com/nerima-lisp/cl-prolog"
+  :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
+  :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
   :depends-on (#:cl-prolog #:cl-weave)
   :pathname "src"
   :components ((:file "weave")))
 
-(asdf:defsystem #:cl-prolog/tests
+;;; The test system is `cl-prolog/test` — singular, slash-separated — with
+;;; :pathname "t". It is NOT `cl-prolog-test` and NOT `cl-prolog/tests`.
+(asdf:defsystem "cl-prolog/test"
+  :description "Test system for cl-prolog."
+  :author "takeokunn <bararararatty@gmail.com>"
+  :maintainer "takeokunn <bararararatty@gmail.com>"
+  :license "MIT"
+  :version "1.0.1"
+  :homepage "https://github.com/nerima-lisp/cl-prolog"
+  :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
+  :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
   :depends-on (#:cl-prolog/weave)
-  :pathname "tests"
+  :pathname "t"
   :serial t
   :components ((:file "support")
                (:module "support-files"
@@ -135,9 +159,16 @@
              (unless (uiop:symbol-call "CL-WEAVE" "RUN-ALL" :reporter :spec)
                (error "cl-prolog cl-weave test suite failed."))))
 
-(asdf:defsystem #:cl-prolog/examples
-  :depends-on (#:cl-prolog)
+(asdf:defsystem "cl-prolog/examples"
   :description "Runnable examples for cl-prolog."
+  :author "takeokunn <bararararatty@gmail.com>"
+  :maintainer "takeokunn <bararararatty@gmail.com>"
+  :license "MIT"
+  :version "1.0.1"
+  :homepage "https://github.com/nerima-lisp/cl-prolog"
+  :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
+  :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
+  :depends-on (#:cl-prolog)
   :serial t
   :pathname "examples"
   :components ((:file "quick-start")

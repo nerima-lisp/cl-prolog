@@ -1,7 +1,7 @@
 ;;;; The INRIA ISO conformance suite, run against this engine.
 ;;;;
-;;;; tests/iso-conformance.lisp states requirements I read out of the standard;
-;;;; this file runs a corpus I did not write (see tests/iso/README.md).  That
+;;;; t/iso-conformance.lisp states requirements I read out of the standard;
+;;;; this file runs a corpus I did not write (see t/iso/README.md).  That
 ;;;; independence is the whole value: it can disagree with this engine in ways a
 ;;;; suite written alongside it cannot, and it is the only coverage here whose
 ;;;; denominator is not my own recollection of ISO/IEC 13211-1.
@@ -18,7 +18,7 @@
 
 Resolved through ASDF rather than *LOAD-PATHNAME*, which points at the fasl
 cache once the suite is compiled."
-  (asdf:system-relative-pathname :cl-prolog/tests "tests/iso/inriasuite/"))
+  (asdf:system-relative-pathname :cl-prolog/test "t/iso/inriasuite/"))
 
 (defparameter +inria-conformance-floor+ 430
   "The corpus score this engine is known to reach.

@@ -3,7 +3,7 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  # cl-weave is the testing library used by the cl-prolog/tests ASDF system.
+  # cl-weave is the testing library used by the cl-prolog/test ASDF system.
   # suite.  It follows this flake's nixpkgs so both share a single SBCL.
   inputs.cl-weave.url = "github:nerima-lisp/cl-weave/v1.0.0";
   inputs.cl-weave.inputs.nixpkgs.follows = "nixpkgs";
@@ -73,10 +73,10 @@
               # This filter cannot reintroduce files excluded as untracked.
               || (
                 let
-                  tests-directory = "${toString ./.}/tests";
+                  test-directory = "${toString ./.}/t";
                   path-string = toString path;
                 in
-                path-string == tests-directory || pkgs.lib.hasPrefix "${tests-directory}/" path-string
+                path-string == test-directory || pkgs.lib.hasPrefix "${test-directory}/" path-string
               )
             )
             && (
@@ -198,7 +198,7 @@
             extraEnv = ''
               export CL_SOURCE_REGISTRY="${cl-weave.packages.${system}.default}/share/common-lisp/source//:$PWD//:"
             '';
-            operation = "(asdf:test-system :cl-prolog/tests)";
+            operation = "(asdf:test-system :cl-prolog/test)";
           };
 
           # Structural parse gate over every tracked Lisp source: fails if
@@ -275,7 +275,7 @@
             runtimeInputs = [ clWeavePackage ];
             text = ''
               ${clSourceRegistryExport clWeavePackage}
-              exec cl-weave run cl-prolog/tests "$@"
+              exec cl-weave run cl-prolog/test "$@"
             '';
           };
         in

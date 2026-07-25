@@ -77,7 +77,7 @@ The `cl-prolog.asd` file defines several ASDF systems:
 | System                 | Purpose                                              |
 | ---------------------- | ---------------------------------------------------- |
 | `cl-prolog`            | The production library and public package.           |
-| `cl-prolog/tests`      | The cl-weave regression suite ([Testing](testing.md)). |
+| `cl-prolog/test`       | The cl-weave regression suite ([Testing](testing.md)). |
 | `cl-prolog/weave`      | Public query test helpers built on cl-weave.         |
 | `cl-prolog/examples`   | Runnable examples ([Examples](examples.md)).         |
 
