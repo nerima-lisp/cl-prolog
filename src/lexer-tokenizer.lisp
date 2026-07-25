@@ -255,6 +255,31 @@
                                 (t
                                  (write-content character out))))))))
                  (setf raw-mode nil)))
+             (block-comment-ahead-p ()
+               (and (eql (peek) #\/) (eql (peek 1) #\*)))
+             (scan-graphic-run ()
+               "Consume the maximal run of graphic characters at POSITION.
+
+Stops before a `/*' so an adjacent block comment still opens where it would
+have without the run, as in `a +/* note */ b'."
+               (let ((start position))
+                 (loop while (and (%prolog-graphic-character-p (peek))
+                                  (not (and (> position start)
+                                            (block-comment-ahead-p))))
+                       do (%check-parser-limit
+                           "IDENTIFIER_LENGTH"
+                           *max-prolog-identifier-length*
+                           (1+ (- position start))
+                           position)
+                          (take))
+                 (subseq text start position)))
+             (end-token-follows-p ()
+               "True when a lone `.' just consumed ends a clause: ISO 6.4.8
+requires layout text, a comment, or end of input after the end token."
+               (let ((next (peek)))
+                 (or (null next)
+                     (member next '(#\Space #\Tab #\Return #\Newline))
+                     (char= next #\%))))
              (scan-number ()
                (let ((start position))
                  (labels ((take-number-character ()
@@ -312,6 +337,18 @@
                       (if (member name word-operators :test #'string=)
                           (emit :operator name start)
                           (emit :atom name start))))
+                   ;; A run of graphic characters is one token, per ISO 6.4.2 --
+                   ;; not the longest declared operator that happens to prefix
+                   ;; it, which would split `===' into `==' and `='.
+                   ((%prolog-graphic-character-p (peek))
+                    (let ((run (scan-graphic-run)))
+                      (cond
+                        ((and (string= run ".") (end-token-follows-p))
+                         (emit :operator "." start))
+                        ((member run symbolic-tokens :test #'string=)
+                         (emit :operator run start))
+                        ;; An undeclared graphic token is simply an atom.
+                        (t (emit :atom run start)))))
                    (t
                     (let ((operator
                             (find-if
@@ -340,6 +377,15 @@
 
 (defun %current-token (parser)
   (aref (%parser-tokens parser) (%parser-position parser)))
+
+(defun %peek-token (parser &optional (offset 1))
+  "Return the token OFFSET positions past the current one.
+
+Reading past the end yields the terminating :EOF token, which every token
+vector carries, so a caller never has to bounds-check its lookahead."
+  (let ((tokens (%parser-tokens parser)))
+    (aref tokens (min (+ (%parser-position parser) offset)
+                      (1- (length tokens))))))
 
 (defun %accept-token (parser kind &optional value)
   (let ((token (%current-token parser)))

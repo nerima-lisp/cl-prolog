@@ -46,7 +46,7 @@ on success.  Returns without emitting on failure."
            ((string-equal name "ascii") (simple (< (char-code character) 128)))
            ;; SWI `graphic' means a Prolog symbol character, distinct from `graph'.
            ((string-equal name "graphic")
-            (simple (find character "#$&*+-./:<=>?@^~\\")))
+            (simple (%prolog-graphic-character-p character)))
            ((or (string-equal name "end_of_line") (string-equal name "newline"))
             (simple (member character '(#\Newline #\Return) :test #'char=)))
            ((string-equal name "period")
@@ -81,7 +81,6 @@ on success.  Returns without emitting on failure."
                             "char_type/2 type must be an atom or compound")))))
 
 (define-builtin (char_type char type) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "CHAR_TYPE"))
          (value (logic-substitute char environment)))
     (unless (%character-atom-p value)
@@ -95,7 +94,6 @@ on success.  Returns without emitting on failure."
                         nil environment operation emit environment)))
 
 (define-builtin (code_type code type) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "CODE_TYPE"))
          (value (logic-substitute code environment)))
     (when (logic-var-p value)
@@ -108,25 +106,17 @@ on success.  Returns without emitting on failure."
 ;;; upcase_atom/2, downcase_atom/2
 
 (defun %case-fold-atom-goal (source target caser environment emit operation)
-  (let* ((value (logic-substitute source environment))
-         (text (cond
-                 ((logic-var-p value)
-                  (%raise-instantiation-error environment operation
-                                              "the source must be instantiated"))
-                 ((stringp value) value)
-                 ((%term-atom-p value) (%atom-text value))
-                 ((or (integerp value) (floatp value))
-                  (%number-text value environment operation))
-                 (t (%raise-type-error "ATOM" value environment operation
-                                       "the source must be atomic")))))
+  (let ((text (%text-of (logic-substitute source environment)
+                        environment operation
+                        :accept :atomic
+                        :instantiation "the source must be instantiated"
+                        :type-message "the source must be atomic")))
     (%unify-emit target (%text-atom (funcall caser text)) environment emit)))
 
 (define-builtin (upcase_atom source upper) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%case-fold-atom-goal source upper #'string-upcase environment emit
                         (%iso-atom "UPCASE_ATOM")))
 
 (define-builtin (downcase_atom source lower) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%case-fold-atom-goal source lower #'string-downcase environment emit
                         (%iso-atom "DOWNCASE_ATOM")))

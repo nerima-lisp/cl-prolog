@@ -91,6 +91,37 @@ the direct reader APIs default to :codes.")
                                 :track-resource-p t))
     (:string text)))
 
+(defparameter +structural-operator-lexemes+ '(")" "]" "}" "," "|" ".")
+  "Operator lexemes that never stand for an atom where a term is expected.
+
+Each closes or separates a construct, so meeting one in a term position is a
+syntax error rather than the atom of the same name.  The quoted spellings
+(`','', `'|'') still read as atoms, since quoting bypasses this table.")
+
+(defun %term-start-token-p (token)
+  "True when TOKEN could begin a term, so a preceding operator has an operand."
+  (not (or (eq :eof (%token-kind token))
+           (and (eq :operator (%token-kind token))
+                (member (%token-value token) +structural-operator-lexemes+
+                        :test #'string=)))))
+
+(defun %operator-token-is-atom-p (parser token)
+  "True when the operator TOKEN denotes the atom of the same name.
+
+ISO 13211-1 6.3.3.1 admits an atom that is an operator as an argument and
+6.3.4.3 admits it bracketed, so `functor(T, +, 2)', `T =.. [+, 1, 2]',
+`sort(0, @<, L, S)' and `X = (+)' are all well-formed.  Those cases look alike
+from here: no operand follows, so the operator has nothing to apply to and the
+only reading left is the atom.
+
+An operator used as the left operand of another operator (`+ == '+'') is not
+covered -- ISO requires brackets there, and guessing would change how a
+genuine prefix operator parses."
+  (and (eq :operator (%token-kind token))
+       (not (member (%token-value token) +structural-operator-lexemes+
+                    :test #'string=))
+       (not (%term-start-token-p (%peek-token parser)))))
+
 (defun %parse-primary (parser variables minimum-precedence)
   (let ((token (%current-token parser)))
     (cond
@@ -104,6 +135,13 @@ the direct reader APIs default to :codes.")
        (prog1 (list 'brace (let ((*parsing-dcg-body-p* nil))
                             (%parse-expression parser variables 0)))
          (%expect-token parser :operator "}")))
+      ;; Checked before the prefix-operator branch: `- 1' is prefix minus
+      ;; because a term follows, while the `-' in `f(-, 1)' is the atom.
+      ((%operator-token-is-atom-p parser token)
+       (incf (%parser-position parser))
+       (%prolog-atom-symbol (%token-value token)
+                            :position (%token-position token)
+                            :track-resource-p t))
       ((%prefix-operator-definition parser token)
        (let* ((definition (%prefix-operator-definition parser token))
               (binding-power (%operator-binding-power definition)))

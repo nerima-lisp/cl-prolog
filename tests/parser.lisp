@@ -41,6 +41,42 @@
   (with-input-from-string (stream "value % comment at end of file")
     (is-equal 'cl-prolog::value (read-prolog-term stream))))
 
+(deftest parser-reads-an-operator-as-an-atom-where-it-has-no-operand ()
+  "ISO 13211-1 6.3.3.1 admits an atom that is an operator as an argument and
+6.3.4.3 admits it bracketed, so the Order argument of `compare/3', the
+specifier of `sort/4' and the name argument of `op/3' can all be written."
+  (is-equal (list 'cl-prolog::f (prolog-atom "+") 1)
+            (read-prolog-term "f(+, 1)"))
+  (is-equal (list (prolog-atom "+") (prolog-atom "-"))
+            (read-prolog-term "[+, -]"))
+  (is-equal (prolog-atom "@<") (read-prolog-term "(@<)"))
+  (is-equal (list 'cl-prolog::f (prolog-atom "-")) (read-prolog-term "f(-)"))
+  ;; A prefix operator with an operand still applies to it.
+  (is-equal -1 (read-prolog-term "- 1"))
+  (is-equal '(cl-prolog::- 1 2) (read-prolog-term "1 - 2"))
+  (is-equal '(cl-prolog::not cl-prolog:fail) (read-prolog-term "\\+ fail"))
+  ;; ...and a closing delimiter where a term belongs is still a syntax error,
+  ;; rather than the atom of that name.
+  (signals-error (read-prolog-term "f(, 1)"))
+  (signals-error (read-prolog-term "f(a, )")))
+
+(deftest parser-reads-a-graphic-run-as-one-token ()
+  "ISO 13211-1 6.4.2 makes a maximal run of graphic characters one token, and an
+undeclared one is an atom -- which is what lets `:- op(700, xfx, ===).' name an
+operator before it exists.  Matching the longest declared operator instead
+would split `===' into `==' and `='."
+  (is-equal "===" (prolog-atom-text (read-prolog-term "(===)")))
+  (is-equal "@#$" (prolog-atom-text (read-prolog-term "(@#$)")))
+  (is-equal '(cl-prolog::op 700 cl-prolog::xfx #.(cl-prolog:prolog-atom "==="))
+            (read-prolog-term "op(700, xfx, ===)"))
+  ;; A declared operator run still lexes as that operator, and the end token is
+  ;; still a lone `.' followed by layout or end of input.
+  (is-equal '(cl-prolog::|=..| cl-prolog::?X (cl-prolog::a))
+            (read-prolog-term "X =.. [a]."))
+  ;; A block comment still opens where it would without the run.
+  (is-equal '(cl-prolog::+ cl-prolog::a cl-prolog::b)
+            (read-prolog-term "a +/* note */ b")))
+
 (deftest prolog-clause-parser ()
   (let ((fact (read-prolog-clause "parent(tom, bob)."))
         (rule (read-prolog-clause "ancestor(X,Y) :- parent(X,Z), ancestor(Z,Y).")))
