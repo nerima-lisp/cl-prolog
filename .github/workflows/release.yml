@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Read-only by default; the release job elevates to contents: write below.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # Create the GitHub Release for the pushed tag.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # Guard against mis-tagged releases: the tag (vX.Y.Z) must match the
+      # version ASDF ships, which is the single source of truth the flake
+      # also reads. A mismatch fails the release instead of publishing a lie.
+      - name: Verify tag matches cl-prolog.asd version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="${REF_NAME#v}"
+          asd_version="$(sed -n 's/.*:version[[:space:]]*"\([^"]*\)".*/\1/p' cl-prolog.asd | head -n1)"
+          if [[ -z "$asd_version" ]]; then
+            echo "::error::Could not read :version from cl-prolog.asd"
+            exit 1
+          fi
+          if [[ "$tag" != "$asd_version" ]]; then
+            echo "::error::Tag v$tag does not match cl-prolog.asd version $asd_version"
+            exit 1
+          fi
+          printf 'version=%s\n' "$asd_version" >> "$GITHUB_ENV"
+
+      # Slice the matching "## X.Y.Z - DATE" section out of CHANGELOG.md,
+      # stopping at the next "## " heading, and fail if it is empty.
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ env.version }}
+        run: |
+          set -euo pipefail
+          # Capture the "## X.Y.Z" section (heading followed by a space or the
+          # line end, so a bare "## 0.8.0" heading still matches) up to the
+          # next "## " heading.
+          notes="$(awk -v ver="$VERSION" '
+            $0 ~ "^## " ver "( |$)" { capture = 1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md)"
+          if [[ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]]; then
+            echo "::error::No CHANGELOG.md section found for version $VERSION"
+            exit 1
+          fi
+          # Randomised heredoc delimiter so a CHANGELOG line can never smuggle
+          # extra environment assignments by matching the terminator.
+          delimiter="RELEASE_NOTES_EOF_$(openssl rand -hex 16)"
+          {
+            printf '%s\n' "RELEASE_NOTES<<$delimiter"
+            printf '%s\n' "$notes"
+            printf '%s\n' "$delimiter"
+          } >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$RELEASE_NOTES" > release-notes.md
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md

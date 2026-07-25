@@ -1,0 +1,63 @@
+name: Set up Nix with Cachix
+description: >-
+  Install Nix with flakes enabled and configure Cachix. Pushes to the binary
+  cache only on non-pull_request events that carry an auth token; every other
+  run (including fork pull requests) is pull-only.
+
+inputs:
+  cachix-cache:
+    description: Cachix cache name. When empty, Cachix is not configured at all.
+    required: false
+    default: ""
+  cachix-auth-token:
+    description: >-
+      Cachix auth token. When empty — or on pull_request events — the cache is
+      configured pull-only so untrusted runs can never push.
+    required: false
+    default: ""
+  github-token:
+    description: GitHub token handed to the Nix installer to raise API rate limits.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Nix
+      uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31
+      with:
+        github_access_token: ${{ inputs.github-token }}
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+
+    # Decide push vs pull-only once, off the event name and token presence,
+    # so both Cachix steps share a single source of truth. The token is read
+    # from the environment rather than interpolated into the script body.
+    - name: Resolve Cachix mode
+      id: cachix-mode
+      shell: bash
+      env:
+        CACHIX_AUTH_TOKEN: ${{ inputs.cachix-auth-token }}
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+        push=false
+        if [[ -n "$CACHIX_AUTH_TOKEN" && "$EVENT_NAME" != "pull_request" ]]; then
+          push=true
+        fi
+        printf 'push=%s\n' "$push" >> "$GITHUB_OUTPUT"
+
+    - name: Configure Cachix (pull-only)
+      if: ${{ inputs.cachix-cache != '' && steps.cachix-mode.outputs.push != 'true' }}
+      uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+      with:
+        name: ${{ inputs.cachix-cache }}
+        extraPullNames: nix-community
+        skipPush: true
+
+    - name: Configure Cachix (push-enabled)
+      if: ${{ inputs.cachix-cache != '' && steps.cachix-mode.outputs.push == 'true' }}
+      uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+      with:
+        name: ${{ inputs.cachix-cache }}
+        authToken: ${{ inputs.cachix-auth-token }}
+        extraPullNames: nix-community
