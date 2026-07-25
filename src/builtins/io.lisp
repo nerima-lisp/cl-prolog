@@ -311,6 +311,18 @@ ISO atom naming this predicate."
     (setf (prolog-stream-end-of-stream entry) :not)
     (funcall emit environment)))
 
+(defun %validate-current-stream-argument (rulebase term environment operation)
+  "Check current_input/1's or current_output/1's argument per ISO 8.11.1.3.
+
+A bound argument that is not a stream or one of its aliases is a
+domain_error(stream, T); unifying against the current stream alone would fail
+silently instead, which hides a misspelled alias."
+  (let ((resolved (logic-substitute term environment)))
+    (unless (or (logic-var-p resolved)
+                (%find-prolog-stream (%io-context rulebase) resolved))
+      (%raise-domain-error "STREAM" resolved environment operation
+                           "expected a stream or stream alias"))))
+
 (macrolet ((define-current-stream-builtins (&body specifications)
              ;; Each specification is (DIRECTION CONTEXT-ACCESSOR CURRENT-NAME
              ;; SET-NAME SET-OPERATION).  Reading and writing a direction's
@@ -323,6 +335,9 @@ ISO atom naming this predicate."
                         append
                         `((define-builtin (,current-name stream)
                               (rulebase environment depth emit)
+                            (%validate-current-stream-argument
+                             rulebase stream environment
+                             (%io-operation ,(string current-name)))
                             (%unify-emit stream
                                          (%io-public-designator
                                           (,context-accessor (%io-context rulebase)))

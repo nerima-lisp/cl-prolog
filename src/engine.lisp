@@ -175,13 +175,20 @@ declares one in +PROLOG-RUNTIME-ERROR-SPECIFICATIONS+."
      operation
      (princ-to-string condition))))
 
+(defun %raise-syntax-error-for (description environment operation)
+  "Raise DESCRIPTION as a catchable ISO syntax_error/1 term.
+
+DESCRIPTION becomes the culprit as an uninterned symbol, so untrusted text never
+enters a package."
+  (%raise-iso-error
+   'prolog-syntax-error
+   (%iso-term "SYNTAX_ERROR" (make-symbol description))
+   environment operation description))
+
 (defun %raise-syntax-error (condition environment operation)
   "Raise parser CONDITION as a catchable ISO syntax_error/1 term."
-  (let ((description (prolog-parse-error-description condition)))
-    (%raise-iso-error
-     'prolog-syntax-error
-     (%iso-term "SYNTAX_ERROR" (make-symbol description))
-     environment operation description)))
+  (%raise-syntax-error-for (prolog-parse-error-description condition)
+                           environment operation))
 
 (defmacro define-term-guard (name (value &rest extra-parameters)
                              &key documentation resolve instantiation

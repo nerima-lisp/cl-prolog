@@ -317,6 +317,9 @@ over one module's stored clauses."
 HEAD is normalized to goal form, but BODY is stored exactly as it arrived --
 the same asymmetry the source loader produces, so a zero-arity body goal stays
 the bare atom Prolog text spells and `clause/2' hands it back unchanged."
+  (when (logic-var-p head)
+    (%raise-instantiation-error environment (first goal)
+                                "a rule's head must be instantiated"))
   (let ((callable-head (%ensure-goal-form head)))
     (unless (%goal-form-p callable-head)
       (%invalid-goal goal "a rule must have shape (:- (PREDICATE . ARGS) GOAL...)"))
@@ -333,6 +336,12 @@ TERM may be a fact, the Lisp clause shape (:- HEAD . BODY-GOALS), or the `:-'/2
 term Prolog source text reads a rule as.  ISO 13211-1 7.6.1 converts all three
 to a clause, so `assertz((h :- a, b))' asserts a rule instead of a fact whose
 functor happens to be `:-'."
+  ;; Checked before anything else: a logic variable is a symbol, so without this
+  ;; `assertz(X)' fell through to the fact branch and stored a clause whose head
+  ;; was a fresh variable.  ISO 13211-1 8.9.1.3 requires an instantiation_error.
+  (when (logic-var-p term)
+    (%raise-instantiation-error environment (first goal)
+                                "a dynamic clause must be instantiated"))
   (cond
     ((%prolog-rule-term-p term)
      (%clause-rule-entry (second term) (%body-goals (third term))

@@ -90,13 +90,15 @@
     (%check-atom-text-limit resolved-atom environment operation))
   (cond
     ((not (logic-var-p resolved-atom))
-     ;; Unlike number_chars/2 and number_codes/2, invalid atom text fails.
-     (handler-case
-         (%unify-emit number
-                      (%text-number (%atom-text resolved-atom)
-                                    environment operation)
-                      environment emit)
-       (prolog-domain-error () nil)))
+     ;; Unlike number_chars/2 and number_codes/2, invalid atom text fails.  The
+     ;; parse runs outside the handler so that an error raised further along the
+     ;; continuation is not mistaken for this atom's and silently swallowed.
+     (let ((parsed (handler-case (%text-number (%atom-text resolved-atom)
+                                               environment operation)
+                     (prolog-syntax-error () nil)
+                     (prolog-domain-error () nil))))
+       (when parsed
+         (%unify-emit number parsed environment emit))))
     ((not (logic-var-p resolved-number))
      (%unify-emit
       atom

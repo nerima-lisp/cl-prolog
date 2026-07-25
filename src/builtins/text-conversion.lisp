@@ -192,9 +192,9 @@
            (if (<= length 64)
                text
                (format nil "~A...<~D characters>" (subseq text 0 32) length))))
-    (%raise-domain-error "NUMBER_TEXT" (make-symbol culprit-text)
-                         environment operation
-                         "text is not a valid number")))
+    ;; ISO 13211-1 8.16.7.3 and 8.16.8.3: text that does not spell a number is a
+    ;; syntax_error, the same class the reader raises for it.
+    (%raise-syntax-error-for culprit-text environment operation)))
 
 (defun %text-number (text environment operation)
   (%check-text-resource-limit

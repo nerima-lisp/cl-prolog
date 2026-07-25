@@ -206,14 +206,30 @@ for the two resolved terms' %COMPARE-TERMS result."
   (@> #'plusp)
   (@>= (lambda (comparison) (not (minusp comparison)))))
 
+(defun %validate-compare-order (order environment operation)
+  "Check a bound ORDER argument of compare/3 per ISO 13211-1 8.4.2.3.
+
+An unbound one is the ordinary output mode; a bound one that is not an atom is a
+type_error and an atom outside `<', `=', `>' is a domain_error, rather than the
+silent failure that unifying against the computed order alone would give."
+  (unless (logic-var-p order)
+    (unless (%term-atom-p order)
+      (%raise-type-error "ATOM" order environment operation
+                         "compare/3 order must be an atom"))
+    (unless (member (%atom-text order) '("<" "=" ">") :test #'string=)
+      (%raise-domain-error "ORDER" order environment operation
+                           "compare/3 order must be <, = or >"))))
+
 (define-builtin (compare order left right) (rulebase environment depth emit)
-  (%unify-emit order
-               (ecase (%compare-terms (%term-resolve left environment)
-                                      (%term-resolve right environment))
-                 (-1 '<)
-                 (0 '=)
-                 (1 '>))
-               environment emit))
+  (let ((resolved-order (logic-substitute order environment)))
+    (%validate-compare-order resolved-order environment (%iso-atom "COMPARE"))
+    (%unify-emit order
+                 (ecase (%compare-terms (%term-resolve left environment)
+                                        (%term-resolve right environment))
+                   (-1 '<)
+                   (0 '=)
+                   (1 '>))
+                 environment emit)))
 
 (defun %unifier-equations (left right)
   "Return the trial unifier for LEFT and RIGHT without changing caller state."

@@ -41,9 +41,10 @@ double_quotes flag, converting parser failures into catchable ISO errors."
          (text (%term-text-source (logic-substitute atom environment)
                                   environment operation))
          (resolved-options (logic-substitute options environment)))
-    (unless (or (logic-var-p resolved-options) (%proper-list-p resolved-options))
-      (%raise-type-error "LIST" resolved-options environment operation
-                         "read_term_from_atom/3 options must be a proper list"))
+    ;; Shares the read-option validator with read_term/2,3, so an unsupported
+    ;; option raises the ISO 8.14.1.3 domain_error(read_option, O) here too
+    ;; rather than being accepted and ignored.
+    (%io-read-options resolved-options environment operation)
     (%unify-emit term
                  (%parse-term-from-text text rulebase environment operation)
                  environment emit)))

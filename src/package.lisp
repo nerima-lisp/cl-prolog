@@ -60,6 +60,7 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:prolog-existence-error
    #:prolog-evaluation-error
    #:prolog-resource-error
+   #:prolog-syntax-error
    #:prolog-halt
    #:prolog-halt-code
    #:arithmetic-evaluation-error

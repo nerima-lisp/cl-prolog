@@ -245,7 +245,16 @@ indicator to T for O(1) membership checks."
 
 (define-builtin (clause head body) (rulebase environment depth emit)
   (let* ((resolved-head (logic-substitute head environment))
-         (callable (%ensure-callable resolved-head environment 'clause)))
+         (callable (%ensure-callable resolved-head environment 'clause))
+         (resolved-body (logic-substitute body environment)))
+    ;; ISO 13211-1 8.8.1.3: a bound Body that is not callable is a type_error,
+    ;; not a silent failure.
+    (unless (or (logic-var-p resolved-body)
+                (symbolp resolved-body)
+                (%goal-form-p resolved-body))
+      (%raise-type-error "CALLABLE" resolved-body environment
+                         (%iso-atom "CLAUSE")
+                         "clause/2 body must be a callable term"))
     (%ensure-dynamic-predicate rulebase (first callable)
                                (length (rest callable))
                                (list 'clause head body) environment
