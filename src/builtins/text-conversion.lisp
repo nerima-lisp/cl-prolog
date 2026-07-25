@@ -21,9 +21,10 @@
     text)
 
   (defun %check-atom-text-limit (atom environment operation)
-    (%check-text-resource-limit
-     (%atom-text atom) *max-prolog-quoted-lexeme-length* "ATOM_LENGTH"
-     environment operation "atom text exceeds the configured length limit"))
+    (%check-resource-limit
+     (%atom-text-length atom) *max-prolog-quoted-lexeme-length* "ATOM_LENGTH"
+     environment operation "atom text exceeds the configured length limit")
+    (%atom-text atom))
 
   (defun %integer-within-decimal-digit-limit-p (integer digit-limit)
     (let* ((magnitude (abs integer))
@@ -42,38 +43,22 @@
         (%raise-resource-error
          "INTEGER_SIZE" environment operation
          "integer decimal representation exceeds the configured length limit")))
-    integer)
-
-  (defun %atom-text (atom)
-    (symbol-name atom)))
+    integer))
 
 (defun %text-atom (text &optional environment (operation (%iso-atom "ATOM")))
   (%check-text-resource-limit
    text *max-prolog-quoted-lexeme-length* "ATOM_LENGTH" environment operation
    "atom text exceeds the configured length limit")
-  (%prolog-atom-symbol text :preserve-case t))
+  (%intern-prolog-atom text))
 
 (defun %character-atom-p (term)
-  (and (%term-atom-p term) (= 1 (length (%atom-text term)))))
+  (and (%term-atom-p term) (= 1 (%atom-text-length term))))
 
-(defun %ensure-atom-value (value environment operation argument)
-  (when (logic-var-p value)
-    (%raise-instantiation-error environment operation
-                                (format nil "~A must be instantiated" argument)))
-  (unless (%term-atom-p value)
-    (%raise-type-error "ATOM" value environment operation
-                       (format nil "~A must be an atom" argument)))
-  value)
-
-(defun %ensure-nonnegative-integer-or-variable (value environment operation argument)
-  (unless (logic-var-p value)
-    (unless (integerp value)
-      (%raise-type-error "INTEGER" value environment operation
-                         (format nil "~A must be an integer" argument)))
-    (when (minusp value)
-      (%raise-domain-error "NOT_LESS_THAN_ZERO" value environment operation
-                           (format nil "~A must not be negative" argument))))
-  value)
+(define-term-guard %ensure-atom-value (value argument)
+  :instantiation (format nil "~A must be instantiated" argument)
+  :accept (%term-atom-p value)
+  :type "ATOM"
+  :type-message (format nil "~A must be an atom" argument))
 
 (defun %ensure-proper-instantiated-list
     (value environment operation argument
@@ -152,12 +137,15 @@
   (unless (integerp code)
     (%raise-type-error "INTEGER" code environment operation
                        "character codes must be integers"))
+  ;; ISO 13211-1 8.16.6.3: an integer that is no character code is a
+  ;; representation_error(character_code), not a domain error -- the value is
+  ;; meaningful, it just has no character to name.
   (unless (and (<= 0 code) (< code char-code-limit))
-    (%raise-domain-error "CHARACTER_CODE" code environment operation
-                         "integer is not a character code"))
+    (%raise-representation-error "CHARACTER_CODE" environment operation
+                                 "integer is not a character code"))
   (or (code-char code)
-      (%raise-domain-error "CHARACTER_CODE" code environment operation
-                           "integer is not a character code")))
+      (%raise-representation-error "CHARACTER_CODE" environment operation
+                                   "integer is not a character code")))
 
 (defun %code-list-text
     (codes environment operation
@@ -207,14 +195,72 @@
            (if (<= length 64)
                text
                (format nil "~A...<~D characters>" (subseq text 0 32) length))))
-    (%raise-domain-error "NUMBER_TEXT" (make-symbol culprit-text)
-                         environment operation
-                         "text is not a valid number")))
+    ;; ISO 13211-1 8.16.7.3 and 8.16.8.3: text that does not spell a number is a
+    ;; syntax_error, the same class the reader raises for it.
+    (%raise-syntax-error-for culprit-text environment operation)))
+
+(defun %read-number-token (text environment operation)
+  "Read TEXT as one Prolog number token, per ISO 13211-1 8.16.7/8.16.8.
+
+The standard says the characters are read as a *number token*, which is the
+reader's own grammar: leading layout, a sign, and the `0'c'/`0x'/`0o'/`0b'
+notations all belong to it.  Delegating to the reader is what keeps this
+agreeing with what the same text means in source."
+  ;; The exponent-magnitude bound is this engine's own guard against a short
+  ;; text that would demand an enormous float; it has to run before the reader
+  ;; sees the text, since the reader would simply fail on it.
+  (let ((exponent (position-if (lambda (character)
+                                 (member character '(#\e #\E) :test #'char=))
+                               text)))
+    (when exponent
+      (let ((digits (count-if #'digit-char-p text :start exponent)))
+        (when (> digits (length (princ-to-string
+                                 *max-prolog-arithmetic-exponent-magnitude*)))
+          (%raise-resource-error
+           "EXPONENT_MAGNITUDE" environment operation
+           "numeric exponent exceeds the configured magnitude limit"))
+        (let ((value (ignore-errors
+                      (parse-integer text :start (1+ exponent) :junk-allowed t))))
+          (when (and value
+                     (> (abs value) *max-prolog-arithmetic-exponent-magnitude*))
+            (%raise-resource-error
+             "EXPONENT_MAGNITUDE" environment operation
+             "numeric exponent exceeds the configured magnitude limit"))))))
+  ;; A number token ends where the number ends: ISO 13211-1 8.16.7 admits
+  ;; *leading* layout before it but nothing after, so `'3 '' is a syntax error
+  ;; even though the tokenizer would happily skip the trailing space.
+  (when (and (plusp (length text))
+             (member (char text (1- (length text)))
+                     '(#\Space #\Tab #\Return #\Newline)
+                     :test #'char=))
+    (%raise-syntax-error-for text environment operation))
+  (let ((tokens (handler-case (%tokenize-prolog text)
+                  (prolog-parser-resource-error (condition)
+                    (%raise-parser-resource-error condition environment operation))
+                  (error ()
+                    (%raise-syntax-error-for text environment operation)))))
+    ;; Exactly one number token, optionally signed, and nothing else.  Reading
+    ;; the text as a *term* instead would also accept `1.', which is a number
+    ;; followed by an end token rather than a number token.
+    (let* ((index 0)
+           (sign (let ((token (aref tokens 0)))
+                   (when (and (eq :operator (%token-kind token))
+                              (member (%token-value token) '("+" "-")
+                                      :test #'string=))
+                     (incf index)
+                     (if (string= (%token-value token) "-") -1 1)))))
+      (let ((number (aref tokens index))
+            (end (aref tokens (min (1+ index) (1- (length tokens))))))
+        (unless (and (eq :number (%token-kind number))
+                     (eq :eof (%token-kind end)))
+          (%raise-syntax-error-for text environment operation))
+        (if (eql sign -1) (- (%token-value number)) (%token-value number))))))
 
 (defun %text-number (text environment operation)
   (%check-text-resource-limit
    text *max-prolog-numeric-lexeme-length* "NUMBER_TEXT_LENGTH"
    environment operation "numeric text exceeds the configured length limit")
+  (return-from %text-number (%read-number-token text environment operation))
   (let* ((length (length text))
          (position 0)
          (sign 1)
@@ -298,21 +344,34 @@
               (coerce scaled 'double-float)))
           (* sign integer-part)))))
 
-(defun %text-of (value environment operation)
-  "Return the text (a CL string) of an atomic-or-text VALUE: a string, atom,
-number, code list, or character list.  Shared by the string builtins and the
-text-accepting builtins (atom_string, number_string, term_string, ...)."
-  (cond
-    ((logic-var-p value)
-     (%raise-instantiation-error environment operation
-                                 "text argument must be instantiated"))
-    ((stringp value) value)
-    ((%term-atom-p value) (%atom-text value))
-    ((or (integerp value) (floatp value)) (%number-text value environment operation))
-    ((null value) "")
-    ((consp value)
-     (if (every #'integerp value)
-         (%code-list-text value environment operation)
-         (%character-list-text value environment operation)))
-    (t (%raise-type-error "ATOM" value environment operation
-                          "expected an atom, string, number, or char/code list"))))
+(defun %text-of (value environment operation
+                 &key (accept :any)
+                      (instantiation "text argument must be instantiated")
+                      (type "ATOM")
+                      (type-message
+                       "expected an atom, string, number, or char/code list"))
+  "Return the text (a CL string) of an atomic-or-text VALUE.
+
+ACCEPT selects the admissible shapes beyond a string or atom: :ATOMIC also
+accepts a number, :TEXT also accepts a code or character list, and :ANY (the
+default) accepts both.  A NIL INSTANTIATION lets an unbound VALUE fall through
+to the TYPE-MESSAGE type_error instead of raising instantiation_error.  Shared
+by the string builtins, the text-accepting conversions (atom_string,
+number_string, term_string, ...), format/1,2,3 and the case-folding builtins."
+  (let ((numbers (member accept '(:atomic :any)))
+        (lists (member accept '(:text :any))))
+    (cond
+      ((logic-var-p value)
+       (if instantiation
+           (%raise-instantiation-error environment operation instantiation)
+           (%raise-type-error type value environment operation type-message)))
+      ((stringp value) value)
+      ((%term-atom-p value) (%atom-text value))
+      ((and numbers (or (integerp value) (floatp value)))
+       (%number-text value environment operation))
+      ((and lists (null value)) "")
+      ((and lists (consp value))
+       (if (every #'integerp value)
+           (%code-list-text value environment operation)
+           (%character-list-text value environment operation)))
+      (t (%raise-type-error type value environment operation type-message)))))

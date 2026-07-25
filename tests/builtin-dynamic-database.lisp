@@ -257,3 +257,39 @@
                       ((?value . second))
                       ((?value . third))))
     (assert-query rulebase (item ?value) :fails)))
+
+;;;; ISO 13211-1 7.6.1 clause conversion: assertz/1, asserta/1, retract/1 and
+;;;; retractall/1 accept the `:-'/2 term Prolog source text reads a rule as,
+;;;; not only the Lisp-level (:- HEAD . BODY-GOALS) shape.
+
+(deftest-prolog-goals dynamic-database-converts-prolog-rule-terms
+  "assertz((silent :- true)), silent"
+  "assertz((guarded(X) :- X > 1)), guarded(2)"
+  "assertz((guarded(X) :- X > 1)), \\+ guarded(0)"
+  "assertz((chain(X) :- link(X), tail(X))), assertz(link(1)), assertz(tail(1)), chain(1)"
+  "asserta((early :- true)), early"
+  ;; A rule asserted after a fact of the same predicate keeps both.
+  "assertz(both(1)), assertz((both(X) :- X = 2)), both(1), both(2)"
+  ;; clause/2 hands the body back in the shape source text spells it.
+  "assertz(bare), clause(bare, Body), Body == true"
+  "assertz((joined :- one, two)), clause(joined, Body), Body == (one , two)"
+  ;; retract/1 matches through the same conversion, and a fact's body is `true'.
+  "assertz((doomed :- true)), retract((doomed :- true)), \\+ doomed"
+  "assertz(plain_fact), retract((plain_fact :- true)), \\+ plain_fact"
+  "assertz((first_of(1) :- true)), assertz((first_of(2) :- true)), retract((first_of(X) :- true)), X == 1"
+  "assertz((looping :- fail)), retractall((looping :- _)), \\+ looping")
+
+(deftest asserting-a-rule-stores-it-as-a-rule ()
+  "The regression this guards: the `:-'/2 term used to be stored whole as a
+fact head, so the predicate it should have defined stayed undefined."
+  (let ((rulebase (make-rulebase)))
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "assertz((stored(X) :- X > 1))")))
+    (let* ((clauses (rulebase-visible-clauses rulebase))
+           (head (clause-head (first clauses))))
+      (is-equal 1 (length clauses))
+      (is-equal 'cl-prolog::stored (first head))
+      (is-equal 1 (length (rest head)))
+      (is (logic-var-p (second head)))
+      (is (clause-body (first clauses))
+          "the asserted clause must have a body, not be a fact"))))

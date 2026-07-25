@@ -48,6 +48,14 @@ iteration count.
     suite so that CI does not depend on external Prolog binaries or timing
     stability.
 
+## CI
+
+`.github/workflows/benchmarks.yml` runs `benchmarks/performance.lisp` (the
+self-contained micro-benchmarks only — the cross-engine comparison needs
+external Prolog binaries and stays local-only) on `workflow_dispatch` and a
+weekly schedule. It is never triggered by a push or pull request and never
+gates a merge, consistent with the diagnostic-not-a-gate design above.
+
 ## See also
 
 - [Testing](testing.md) — the regression suite and query helpers.

@@ -20,7 +20,7 @@ have confirmed the impact.
 
 Instead, report the issue through one of these channels:
 
-- the repository's [private vulnerability report form](https://github.com/takeokunn/cl-prolog/security/advisories/new),
+- the repository's [private vulnerability report form](https://github.com/nerima-lisp/cl-prolog/security/advisories/new),
   when GitHub makes that form available
 - if the form is unavailable, a private contact method explicitly published on
   the [maintainer's GitHub profile](https://github.com/takeokunn), initially

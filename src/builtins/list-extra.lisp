@@ -15,25 +15,19 @@ format builtins to cap attacker-controlled allocation."
     (%raise-resource-error resource environment operation message))
   count)
 
-(defun %require-proper-list (value environment operation argument)
-  "Return VALUE when it is a proper list, otherwise raise the ISO error."
-  (cond
-    ((logic-var-p value)
-     (%raise-instantiation-error environment operation
-                                 (format nil "~A must be instantiated" argument)))
-    ((%proper-list-p value) value)
-    (t (%raise-type-error "LIST" value environment operation
-                          (format nil "~A must be a proper list" argument)))))
+(define-term-guard %require-proper-list (value argument)
+  :documentation "Return VALUE when it is a proper list, otherwise raise the ISO error."
+  :instantiation (format nil "~A must be instantiated" argument)
+  :accept (%proper-list-p value)
+  :type "LIST"
+  :type-message (format nil "~A must be a proper list" argument))
 
-(defun %require-number (value environment operation)
-  "Return VALUE when it is a Prolog number, otherwise raise the ISO error."
-  (cond
-    ((logic-var-p value)
-     (%raise-instantiation-error environment operation
-                                 "list elements must be instantiated numbers"))
-    ((or (integerp value) (floatp value)) value)
-    (t (%raise-type-error "NUMBER" value environment operation
-                          "list elements must be numbers"))))
+(define-term-guard %require-number (value)
+  :documentation "Return VALUE when it is a Prolog number, otherwise raise the ISO error."
+  :instantiation "list elements must be instantiated numbers"
+  :accept (or (integerp value) (floatp value))
+  :type "NUMBER"
+  :type-message "list elements must be numbers")
 
 (defun %resolved-number-list (list-term environment operation argument)
   "Resolve LIST-TERM to a proper list of Prolog numbers."
@@ -45,7 +39,6 @@ format builtins to cap attacker-controlled allocation."
 ;;; sum_list/2, sumlist/2, max_list/2, min_list/2
 
 (define-builtin ((sum_list sumlist) list-term sum) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%unify-emit sum
                (reduce #'+ (%resolved-number-list list-term environment
                                                   (%iso-atom "SUM_LIST") "first argument")
@@ -55,7 +48,6 @@ format builtins to cap attacker-controlled allocation."
 (defmacro %define-list-extremum-builtin (name reducer operation)
   "Define a fold-over-numbers builtin that fails on the empty list."
   `(define-builtin (,name list-term extremum) (rulebase environment depth emit)
-     (declare (cl:ignore rulebase depth))
      (let ((numbers (%resolved-number-list list-term environment
                                            (%iso-atom ,operation) "first argument")))
        (when numbers
@@ -67,7 +59,6 @@ format builtins to cap attacker-controlled allocation."
 ;;; numlist/3
 
 (define-builtin (numlist low high list-term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((operation (%iso-atom "NUMLIST"))
         (low-value (logic-substitute low environment))
         (high-value (logic-substitute high environment)))
@@ -93,7 +84,6 @@ format builtins to cap attacker-controlled allocation."
 ;;; duplicates keeping the earliest index, then restore original order.
 
 (define-builtin (list_to_set list-term set) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((value (logic-substitute list-term environment))
          (elements (%require-proper-list value environment
                                          (%iso-atom "LIST_TO_SET") "first argument"))
@@ -127,52 +117,36 @@ format builtins to cap attacker-controlled allocation."
   "True when ITEM unifies with some element of LIST, discarding bindings."
   (some (lambda (element) (nth-value 1 (unify item element environment))) list))
 
-(define-builtin (subtract set-a set-b difference) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (let ((operation (%iso-atom "SUBTRACT"))
-        (a (logic-substitute set-a environment))
-        (b (logic-substitute set-b environment)))
-    (%require-proper-list a environment operation "first argument")
-    (%require-proper-list b environment operation "second argument")
-    (%unify-emit difference
-                 (remove-if (lambda (element)
-                              (%unifiable-member-p element b environment))
-                            a)
-                 environment emit)))
-
-(define-builtin (intersection set-a set-b common) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (let ((operation (%iso-atom "INTERSECTION"))
-        (a (logic-substitute set-a environment))
-        (b (logic-substitute set-b environment)))
-    (%require-proper-list a environment operation "first argument")
-    (%require-proper-list b environment operation "second argument")
-    (%unify-emit common
-                 (remove-if-not (lambda (element)
-                                  (%unifiable-member-p element b environment))
-                                a)
-                 environment emit)))
-
-(define-builtin (union set-a set-b combined) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (let ((operation (%iso-atom "UNION"))
-        (a (logic-substitute set-a environment))
-        (b (logic-substitute set-b environment)))
-    (%require-proper-list a environment operation "first argument")
-    (%require-proper-list b environment operation "second argument")
+(macrolet ((define-set-operation-builtins (&body specifications)
+             ;; Each specification is (NAME RESULT OPERATION COMBINATION);
+             ;; COMBINATION runs with A and B bound to the resolved lists and
+             ;; IN-B-P testing membership in B.
+             `(progn
+                ,@(loop for (name result operation combination) in specifications
+                        collect
+                        `(define-builtin (,name set-a set-b ,result)
+                             (rulebase environment depth emit)
+                           (let ((operation (%iso-atom ,operation))
+                                 (a (logic-substitute set-a environment))
+                                 (b (logic-substitute set-b environment)))
+                             (%require-proper-list a environment operation
+                                                   "first argument")
+                             (%require-proper-list b environment operation
+                                                   "second argument")
+                             (flet ((in-b-p (element)
+                                      (%unifiable-member-p element b environment)))
+                               (%unify-emit ,result ,combination
+                                            environment emit))))))))
+  (define-set-operation-builtins
+    (subtract difference "SUBTRACT" (remove-if #'in-b-p a))
+    (intersection common "INTERSECTION" (remove-if-not #'in-b-p a))
     ;; union(A, B, C): the elements of A not in B, followed by all of B.
-    (%unify-emit combined
-                 (append (remove-if (lambda (element)
-                                      (%unifiable-member-p element b environment))
-                                    a)
-                         b)
-                 environment emit)))
+    (union combined "UNION" (append (remove-if #'in-b-p a) b))))
 
 ;;; permutation/2 -- nondeterministic; enumerates permutations of the
 ;;; instantiated list argument.
 
 (define-builtin (permutation list-term permuted) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "PERMUTATION"))
          (source (logic-substitute list-term environment))
          (target (logic-substitute permuted environment)))

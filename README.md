@@ -1,16 +1,11 @@
 # cl-prolog
 
-[![CI](https://github.com/takeokunn/cl-prolog/actions/workflows/ci.yml/badge.svg)](https://github.com/takeokunn/cl-prolog/actions/workflows/ci.yml)
+[![CI](https://github.com/nerima-lisp/cl-prolog/actions/workflows/ci.yml/badge.svg)](https://github.com/nerima-lisp/cl-prolog/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A small, dependency-free Prolog engine for Common Lisp, built around three ideas:
-
-- **macro-first rule definition** — clauses are data, macros own the syntax
-- **CPS proof search** — the engine emits solutions through continuations; callers
-  choose streaming or collection
-- **data / logic separation** — rulebases are plain structs the engine walks
-
-The public package is `cl-prolog`.
+A small, dependency-free Prolog engine for Common Lisp. Rulebases are plain
+data, proof search is continuation-passing, and the builtin goal set is
+extensible. The public package is `cl-prolog`.
 
 ## Quick Start
 
@@ -31,56 +26,37 @@ The public package is `cl-prolog`.
 ;; => (((?WHO . BOB)) ((?WHO . ALICE)))
 ```
 
-Start with the [documentation source](docs/src/README.md) for querying,
-builtin goals, the rule DSL, DCG support, and semantics. The published site
-is available at <https://takeokunn.github.io/cl-prolog/>.
+Prolog source text works too:
+
+```lisp
+(query-prolog (consult-prolog #p"family.pl") (read-prolog-term "ancestor(tom, Who)"))
+```
 
 ## Install
 
-cl-prolog is not currently distributed by Quicklisp. Clone the repository and
-either load its ASDF definition directly or place the checkout in a directory
-configured in your [ASDF source registry](https://asdf.common-lisp.dev/asdf.html#Configuring-ASDF).
+cl-prolog is not on Quicklisp. Clone it and load its ASDF definition, or put
+the checkout on your [ASDF source registry](https://asdf.common-lisp.dev/asdf.html#Configuring-ASDF):
 
 ```sh
-git clone https://github.com/takeokunn/cl-prolog.git
-cd cl-prolog
-sbcl --non-interactive \
-  --eval '(require :asdf)' \
-  --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
-  --eval '(asdf:load-system :cl-prolog)'
+git clone https://github.com/nerima-lisp/cl-prolog.git
 ```
 
-```sh
-nix run github:takeokunn/cl-prolog
-```
+With Nix, `nix run github:nerima-lisp/cl-prolog` runs the regression suite.
 
-This runs the cl-weave regression suite through the Linux-only Nix runner.
+## Documentation
 
-See [Development](docs/src/development.md) for building from a local
-checkout, running the test suite, and previewing the documentation site.
-
-## Development
-
-The flake currently defines outputs for `x86_64-linux` and `aarch64-linux`
-only. Run these commands on Linux:
-
-```sh
-nix develop
-nix run .          # cl-weave-backed ASDF regression suite
-nix flake check    # full verification suite
-```
-
-On Darwin and other platforms, use the local ASDF workflow above. The flake
-does not currently expose development shells, packages, checks, or apps for
-those systems; Linux Nix verification runs in CI.
+<https://nerima-lisp.github.io/cl-prolog/> — querying, builtin goals, the rule
+DSL, DCG support, arithmetic, and semantics. The source lives in
+[`docs/src`](docs/src/README.md); see [Installation](docs/src/installation.md)
+and [Development](docs/src/development.md) to build and test locally.
 
 ## Project Policy
 
-- [Changelog](CHANGELOG.md)
-- [Contributing](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Security](SECURITY.md)
-- [Support](SUPPORT.md)
+[Changelog](CHANGELOG.md) ·
+[Contributing](CONTRIBUTING.md) ·
+[Code of Conduct](CODE_OF_CONDUCT.md) ·
+[Security](SECURITY.md) ·
+[Support](SUPPORT.md)
 
 ## License
 

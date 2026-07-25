@@ -63,16 +63,30 @@
     (signals-error (cl-prolog::%operator-table-find table "alpha"))
     (signals-error (cl-prolog::%operator-table-find table 'alpha :unknown))))
 
-(deftest operator-table-breaks-ties-by-package-then-symbol-name ()
+(deftest operator-table-breaks-ties-by-operator-name-text ()
+  "Same-priority, same-specifier definitions enumerate in the order of their
+name text -- what `current_op/3' reports -- and not by the home package of the
+symbol that happens to represent each name, which is an internal detail."
   (let* ((empty (cl-prolog::%make-operator-table '()))
          (table (cl-prolog::%operator-table-define empty 'cl-prolog::zeta 500 :yfx))
          (table (cl-prolog::%operator-table-define table 'cl-prolog.tests::alpha 500 :yfx))
          (table (cl-prolog::%operator-table-define table 'cl-prolog.tests::beta 500 :yfx)))
-    (is-equal '((500 :yfx cl-prolog::zeta)
-                (500 :yfx cl-prolog.tests::alpha)
-                (500 :yfx cl-prolog.tests::beta))
+    (is-equal '((500 :yfx cl-prolog.tests::alpha)
+                (500 :yfx cl-prolog.tests::beta)
+                (500 :yfx cl-prolog::zeta))
               (mapcar #'operator-summary
                       (cl-prolog::%operator-table-current table)))))
+
+(deftest operator-table-identifies-a-name-by-its-text ()
+  "One atom is one operator, so redefining `+' through a symbol the parser
+would produce replaces the standard table's COMMON-LISP:+ entry instead of
+adding a second, invisible definition at the same priority."
+  (let* ((table (cl-prolog::%operator-table-define
+                 cl-prolog::*standard-operator-table*
+                 (prolog-atom "+") 700 :yfx))
+         (found (cl-prolog::%operator-table-find table 'cl:+ :yfx)))
+    (is-equal 1 (length found))
+    (is-equal 700 (cl-prolog::operator-definition-priority (first found)))))
 
 (deftest standard-operator-table-is-self-contained ()
   (let ((before (cl-prolog::%operator-table-current

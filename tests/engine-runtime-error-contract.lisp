@@ -5,7 +5,6 @@
 
 (cl-prolog::define-builtin (test-programmer-error)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase environment depth emit))
   (error "test-only Common Lisp programmer error"))
 
 (defun capture-prolog-condition (thunk)

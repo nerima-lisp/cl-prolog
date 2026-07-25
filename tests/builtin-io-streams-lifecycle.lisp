@@ -11,18 +11,18 @@
   (with-io-rulebase (rulebase input output) "a"
     (assert-query rulebase (cl-prolog::current_input ?stream) :succeeds)
     (assert-query rulebase (cl-prolog::get_char ?character)
-                  :ordered (((?character . cl-prolog::|a|))))
+                  :ordered (((?character . cl-prolog::a))))
     (assert-query rulebase (cl-prolog::at_end_of_stream) :succeeds)
     (assert-query rulebase (cl-prolog::put_char z) :succeeds)
     (assert-query rulebase (cl-prolog::nl) :succeeds)
     (assert-query rulebase (cl-prolog::flush_output) :succeeds)
-    (is-equal (format nil "Z~%") (get-output-stream-string output))))
+    (is-equal (format nil "z~%") (get-output-stream-string output))))
 
 (deftest io-builtins-support-explicit-streams ()
   (with-io-rulebase (rulebase input output) "x"
     (assert-query rulebase
                   (cl-prolog::get_char cl-prolog::user_input ?character)
-                  :ordered (((?character . cl-prolog::|x|))))
+                  :ordered (((?character . cl-prolog::x))))
     (assert-query rulebase
                   (cl-prolog::put_char cl-prolog::user_output q)
                   :succeeds)
@@ -125,17 +125,17 @@
 (deftest io-set-stream-position-repositions-input-stream ()
   (with-io-rulebase (rulebase input output) "abc"
     (assert-query rulebase (cl-prolog::get_char ?first)
-                  :ordered (((?first . cl-prolog::|a|))))
+                  :ordered (((?first . cl-prolog::a))))
     (assert-query rulebase
                   (cl-prolog::set_stream_position cl-prolog::user_input 0)
                   :succeeds)
     (assert-query rulebase (cl-prolog::get_char ?again)
-                  :ordered (((?again . cl-prolog::|a|))))))
+                  :ordered (((?again . cl-prolog::a))))))
 
 (deftest io-set-stream-position-clears-past-end-state ()
   (with-io-rulebase (rulebase input output) "a"
     (assert-query rulebase (cl-prolog::get_char ?character)
-                  :ordered (((?character . cl-prolog::|a|))))
+                  :ordered (((?character . cl-prolog::a))))
     (assert-query rulebase (cl-prolog::get_char ?character)
                   :ordered (((?character . cl-prolog::end_of_file))))
     (assert-query
@@ -147,7 +147,7 @@
                   (cl-prolog::set_stream_position cl-prolog::user_input 0)
                   :succeeds)
     (assert-query rulebase (cl-prolog::get_char ?again)
-                  :ordered (((?again . cl-prolog::|a|))))))
+                  :ordered (((?again . cl-prolog::a))))))
 
 (deftest io-stream-position-validates-property-and-position ()
   (with-io-rulebase (rulebase input output) ""
@@ -167,17 +167,17 @@
   ("current stream"
    (assert-query rulebase
                  (cl-prolog::peek_char ?value)
-                 :ordered (((?value . cl-prolog::|a|))))
+                 :ordered (((?value . cl-prolog::a))))
    (assert-query rulebase
                  (cl-prolog::get_char ?value)
-                 :ordered (((?value . cl-prolog::|a|)))))
+                 :ordered (((?value . cl-prolog::a)))))
   ("explicit stream"
    (assert-query rulebase
                  (cl-prolog::peek_char cl-prolog::user_input ?value)
-                 :ordered (((?value . cl-prolog::|a|))))
+                 :ordered (((?value . cl-prolog::a))))
    (assert-query rulebase
                  (cl-prolog::get_char cl-prolog::user_input ?value)
-                 :ordered (((?value . cl-prolog::|a|))))))
+                 :ordered (((?value . cl-prolog::a))))))
 
 (defmacro with-binary-stream-rulebase
     ((rulebase context input-path output-path) input-bytes &body body)
@@ -263,8 +263,7 @@
     (with-open-file (stream path :direction :output :if-exists :supersede)
       (write-string "hello." stream))
     (with-io-rulebase (rulebase input output) ""
-      (let ((source (cl-prolog::%prolog-atom-symbol (namestring path)
-                                                    :preserve-case t)))
+      (let ((source (prolog-atom (namestring path))))
         (dolist (query (list (list 'cl-prolog::open source
                                    'cl-prolog.user-atoms::read '?stream)
                              (list 'cl-prolog::open source

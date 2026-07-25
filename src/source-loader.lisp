@@ -24,7 +24,6 @@
                                            &body body)
     "Define a source-loading builtin with shared wrapper logic."
     `(define-builtin (,name ,@arguments) (rulebase environment depth emit)
-       (declare (ignore depth))
        (with-source-loading-builtin (environment ,operation emit)
          ,@body))))
 

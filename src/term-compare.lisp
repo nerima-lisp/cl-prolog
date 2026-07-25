@@ -4,6 +4,17 @@
 
 (in-package #:cl-prolog)
 
+(defun %same-atomic-term-p (left right)
+  "True when the atomic terms LEFT and RIGHT are the same Prolog term.
+
+Atoms compare by text rather than by symbol identity, so `==/2', `compare/3'
+and `=/2' all agree on which atoms are one atom -- otherwise `X == Y' could be
+false for a pair `X = Y' unifies, and `sort/2' would keep both copies."
+  (cond
+    ((and (symbolp left) (symbolp right)) (%same-atom-text-p left right))
+    ((and (stringp left) (stringp right)) (string= left right))
+    (t (eql left right))))
+
 (defun %term-identical-p (left right &optional
                                        (seen (make-hash-table :test #'eq)))
   (cond
@@ -18,8 +29,7 @@
              (setf (gethash right right-terms) t)
              (and (%term-identical-p (car left) (car right) seen)
                   (%term-identical-p (cdr left) (cdr right) seen))))))
-    ((and (stringp left) (stringp right)) (string= left right))
-    (t (eql left right))))
+    (t (%same-atomic-term-p left right))))
 
 (defun %term-variant-p (left right)
   (let ((left-bindings (make-hash-table :test #'eq))
@@ -54,9 +64,7 @@
                           (and (variants-p (car left-term) (car right-term))
                                (variants-p (cdr left-term) (cdr right-term)))))))
                  ((or (consp left-term) (consp right-term)) nil)
-                 ((and (stringp left-term) (stringp right-term))
-                  (string= left-term right-term))
-                 (t (eql left-term right-term)))))
+                 (t (%same-atomic-term-p left-term right-term)))))
       (variants-p left right))))
 
 (defun %term-order-class (term)
@@ -82,40 +90,23 @@
      (cond
        ((< left right) -1)
        ((> left right) 1)
+       ;; ISO 13211-1 7.2.1: numbers order by value, and a Float precedes an
+       ;; Integer it compares equal to -- so 1.0 @< 1 holds.
+       ((and (floatp left) (integerp right)) -1)
+       ((and (integerp left) (floatp right)) 1)
        (t (%compare-strings (prin1-to-string left)
                             (prin1-to-string right)))))
     (t (%compare-strings (prin1-to-string left)
                          (prin1-to-string right)))))
 
-(defvar *atom-order-ordinals* (make-hash-table :test #'eq))
-
-(defvar *next-atom-order-ordinal* 0)
-
-(defun %atom-order-ordinal (atom)
-  (multiple-value-bind (ordinal presentp)
-      (gethash atom *atom-order-ordinals*)
-    (if presentp
-        ordinal
-        (setf (gethash atom *atom-order-ordinals*)
-              (prog1 *next-atom-order-ordinal*
-                (incf *next-atom-order-ordinal*))))))
-
 (defun %compare-atoms (left right)
-  (let ((name-comparison (%compare-strings (symbol-name left)
-                                           (symbol-name right))))
-    (if (zerop name-comparison)
-        (let ((package-comparison
-                (%compare-strings (if (symbol-package left)
-                                      (package-name (symbol-package left))
-                                      "")
-                                  (if (symbol-package right)
-                                      (package-name (symbol-package right))
-                                      ""))))
-          (if (zerop package-comparison)
-              (%compare-numbers (%atom-order-ordinal left)
-                                (%atom-order-ordinal right))
-              package-comparison))
-        name-comparison)))
+  "Order two atoms by their text, as ISO 13211-1 7.2.3 requires.
+
+Text, not symbol name or home package: two symbols with the same text are the
+same Prolog atom -- the atom `list' reaches the engine as COMMON-LISP:LIST from
+a Lisp-authored rulebase but as CL-PROLOG.USER-ATOMS::LIST from Prolog source --
+so they must compare equal here exactly as they unify."
+  (%compare-atom-texts left right))
 
 (defun %compare-variables (left right)
   (let ((left-ordinal (%logic-variable-ordinal left))
@@ -191,7 +182,6 @@ resolved-right) holds, or fails to hold when NEGATE is true."
   `(progn
      ,@(loop for (name predicate &key negate) in definitions
              collect `(define-builtin (,name left right) (rulebase environment depth emit)
-                        (declare (cl:ignore rulebase depth))
                         (,(if negate 'unless 'when)
                          (,predicate (%term-resolve left environment)
                                      (%term-resolve right environment))
@@ -211,7 +201,6 @@ for the two resolved terms' %COMPARE-TERMS result."
      ,@(loop for (name predicate) in definitions
              collect `(define-builtin (,name left right)
                           (rulebase environment depth emit)
-                        (declare (cl:ignore rulebase depth))
                         (%emit-term-comparison ,predicate left right
                                                environment emit)))))
 
@@ -221,15 +210,30 @@ for the two resolved terms' %COMPARE-TERMS result."
   (@> #'plusp)
   (@>= (lambda (comparison) (not (minusp comparison)))))
 
+(defun %validate-compare-order (order environment operation)
+  "Check a bound ORDER argument of compare/3 per ISO 13211-1 8.4.2.3.
+
+An unbound one is the ordinary output mode; a bound one that is not an atom is a
+type_error and an atom outside `<', `=', `>' is a domain_error, rather than the
+silent failure that unifying against the computed order alone would give."
+  (unless (logic-var-p order)
+    (unless (%term-atom-p order)
+      (%raise-type-error "ATOM" order environment operation
+                         "compare/3 order must be an atom"))
+    (unless (member (%atom-text order) '("<" "=" ">") :test #'string=)
+      (%raise-domain-error "ORDER" order environment operation
+                           "compare/3 order must be <, = or >"))))
+
 (define-builtin (compare order left right) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (%unify-emit order
-               (ecase (%compare-terms (%term-resolve left environment)
-                                      (%term-resolve right environment))
-                 (-1 '<)
-                 (0 '=)
-                 (1 '>))
-               environment emit))
+  (let ((resolved-order (logic-substitute order environment)))
+    (%validate-compare-order resolved-order environment (%iso-atom "COMPARE"))
+    (%unify-emit order
+                 (ecase (%compare-terms (%term-resolve left environment)
+                                        (%term-resolve right environment))
+                   (-1 '<)
+                   (0 '=)
+                   (1 '>))
+                 environment emit)))
 
 (defun %unifier-equations (left right)
   "Return the trial unifier for LEFT and RIGHT without changing caller state."
@@ -245,7 +249,6 @@ for the two resolved terms' %COMPARE-TERMS result."
 
 (define-builtin (unifiable left right unifier)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((resolved-left (%term-resolve left environment))
         (resolved-right (%term-resolve right environment)))
     (multiple-value-bind (equations unifiable-p)
@@ -270,10 +273,10 @@ for the two resolved terms' %COMPARE-TERMS result."
                       (atom pattern)
                       (atom value))
                   (%term-identical-p pattern value))
-                 ((and (consp pattern) (consp value))
-                  (and (matches-p (car pattern) (car value))
-                       (matches-p (cdr pattern) (cdr value))))
-                 (t (%term-identical-p pattern value)))))
+                 ;; Both are conses here: the clause above caught every case
+                 ;; where either side is an atom.
+                 (t (and (matches-p (car pattern) (car value))
+                         (matches-p (cdr pattern) (cdr value)))))))
       (matches-p general specific))))
 
 (define-term-relation-builtin

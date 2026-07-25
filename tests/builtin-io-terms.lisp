@@ -37,8 +37,8 @@
              (cl-prolog::variable_names ?names)))
      :ordered (((?term . (cl-prolog::pair cl-prolog::?x cl-prolog::?x cl-prolog::?y))
           (?variables . (cl-prolog::?x cl-prolog::?y))
-          (?names . ((cl-prolog::= cl-prolog::|X| cl-prolog::?x)
-                     (cl-prolog::= cl-prolog::|Y| cl-prolog::?y))))))))
+          (?names . ((cl-prolog::= #.(cl-prolog:prolog-atom "X") cl-prolog::?x)
+                     (cl-prolog::= #.(cl-prolog:prolog-atom "Y") cl-prolog::?y))))))))
 (deftest io-read-term-preserves-quoted-question-atoms ()
   (with-io-rulebase (rulebase input output) "'?x'."
     (with-single-query-solution
@@ -65,8 +65,8 @@
           (is (eq x repeated-x))
           (is (logic-var-p anonymous))
           (is-equal
-           (list (list 'cl-prolog::= 'cl-prolog::|Y| y)
-                 (list 'cl-prolog::= 'cl-prolog::|Z| z))
+           (list (list 'cl-prolog::= '#.(cl-prolog:prolog-atom "Y") y)
+                 (list 'cl-prolog::= '#.(cl-prolog:prolog-atom "Z") z))
            singletons))))))
 
 (deftest io-read-term-validates-syntax-error-policy ()
@@ -124,12 +124,12 @@
   (with-io-rulebase (rulebase input output) ""
     (assert-query rulebase
                   (cl-prolog::write_term
-                   cl-prolog::|Mary Jane|
+                   #.(cl-prolog:prolog-atom "Mary Jane")
                    ((cl-prolog::quoted cl-prolog::true)))
                   :succeeds)
     (assert-query rulebase
                   (cl-prolog::write_term
-                   cl-prolog::|Mary Jane|
+                   #.(cl-prolog:prolog-atom "Mary Jane")
                    ((cl-prolog::quoted cl-prolog::false)))
                   :succeeds)
     (is-equal "'Mary Jane'Mary Jane" (get-output-stream-string output))))
@@ -139,19 +139,19 @@
     (assert-query rulebase
                   (cl-prolog::write_term
                    cl-prolog::user_output
-                   (cl-prolog::$var 25)
+                   (#.(cl-prolog:prolog-atom "$VAR") 25)
                    ((cl-prolog::numbervars cl-prolog::true)))
                   :succeeds)
     (assert-query rulebase
                   (cl-prolog::write_term
                    cl-prolog::user_output
-                   (cl-prolog::$var 26)
+                   (#.(cl-prolog:prolog-atom "$VAR") 26)
                    ((cl-prolog::numbervars cl-prolog::true)))
                   :succeeds)
     (assert-query rulebase
                   (cl-prolog::write_term
                    cl-prolog::user_output
-                   (cl-prolog::$var 0)
+                   (#.(cl-prolog:prolog-atom "$VAR") 0)
                    ((cl-prolog::numbervars cl-prolog::false)
                     (cl-prolog::quoted cl-prolog::true)))
                   :succeeds)
@@ -161,7 +161,7 @@
   (with-io-rulebase (rulebase input output) ""
     (assert-query rulebase
                   (cl-prolog::write_term
-                   (cl-prolog::+ (cl-prolog::$var 0) cl-prolog::|Mary Jane|)
+                   (cl-prolog::+ (#.(cl-prolog:prolog-atom "$VAR") 0) #.(cl-prolog:prolog-atom "Mary Jane"))
                    ((cl-prolog::quoted cl-prolog::false)
                     (cl-prolog::ignore_ops cl-prolog::true)
                     (cl-prolog::numbervars cl-prolog::true)))
@@ -184,10 +184,10 @@
                  :ordered (((?term . (cl-prolog::pair
                                 cl-prolog::?x cl-prolog::?x)))))
    (assert-query rulebase
-                 (cl-prolog::write (cl-prolog::$var 0))
+                 (cl-prolog::write (#.(cl-prolog:prolog-atom "$VAR") 0))
                  :succeeds)
    (assert-query rulebase
-                 (cl-prolog::writeq cl-prolog::|Mary Jane|)
+                 (cl-prolog::writeq #.(cl-prolog:prolog-atom "Mary Jane"))
                  :succeeds)
    (is-equal "A'Mary Jane'" (get-output-stream-string output)))
   ("explicit stream"
@@ -197,18 +197,18 @@
                                 cl-prolog::?x cl-prolog::?x)))))
    (assert-query rulebase
                  (cl-prolog::write cl-prolog::user_output
-                                   (cl-prolog::$var 0))
+                                   (#.(cl-prolog:prolog-atom "$VAR") 0))
                  :succeeds)
    (assert-query rulebase
                  (cl-prolog::writeq cl-prolog::user_output
-                                    cl-prolog::|Mary Jane|)
+                                    #.(cl-prolog:prolog-atom "Mary Jane"))
                  :succeeds)
    (is-equal "A'Mary Jane'" (get-output-stream-string output))))
 
 (deftest io-char-conversion-applies-to-unquoted-read-text ()
   (with-io-rulebase (rulebase input output) "aaa. 'aaa'. aaa."
     (assert-query rulebase
-                  (cl-prolog::char_conversion cl-prolog::|a| cl-prolog::|b|)
+                  (cl-prolog::char_conversion cl-prolog::a cl-prolog::b)
                   :succeeds)
     ;; The conversion table is inert until the flag is switched on.
     (assert-query rulebase (cl-prolog::read_term ?term ())
@@ -218,7 +218,7 @@
                   :succeeds)
     ;; Quoted atoms are exempt from conversion.
     (assert-query rulebase (cl-prolog::read_term ?term ())
-                  :ordered (((?term . cl-prolog::|aaa|))))
+                  :ordered (((?term . cl-prolog::aaa))))
     (assert-query rulebase (cl-prolog::read_term ?term ())
                   :ordered (((?term . cl-prolog::bbb))))))
 
@@ -226,12 +226,12 @@
   (with-io-rulebase (rulebase input output) ""
     (assert-query rulebase
                   (cl-prolog::write_canonical
-                   (cl-prolog::foo (cl-prolog::bar 1 2) cl-prolog::|a b|))
+                   (cl-prolog::foo (cl-prolog::bar 1 2) #.(cl-prolog:prolog-atom "a b")))
                   :succeeds)
     (let ((text (get-output-stream-string output)))
       (is (search "'a b'" text)
           "write_canonical must quote atoms that need quoting")
-      (is-equal '(cl-prolog::foo (cl-prolog::bar 1 2) cl-prolog::|a b|)
+      (is-equal '(cl-prolog::foo (cl-prolog::bar 1 2) #.(cl-prolog:prolog-atom "a b"))
                 (read-prolog-term (concatenate 'string text " ."))))))
 
 (deftest io-read-resource-errors-remain-catchable-for-all-syntax-policies ()

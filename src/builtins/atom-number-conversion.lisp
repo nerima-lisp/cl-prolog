@@ -50,6 +50,19 @@
 (defmacro define-number-list-conversion (name list-to-text text-to-list)
   `(define-iso-builtin (,name number list) ,(string-upcase (symbol-name name))
      (cond
+       ;; Both bound: ISO 13211-1 8.16.7/8.16.8 relate a number to *a* text that
+       ;; denotes it, not to the one this engine would print.  So `3.3E+0' and
+       ;; `3.3' both name 3.3, and the comparison has to be numeric.
+       ((and (not (logic-var-p resolved-number))
+             (not (logic-var-p resolved-list))
+             (realp resolved-number))
+        (when (eql resolved-number
+                   (%text-number
+                    (,list-to-text
+                     resolved-list environment operation
+                     *max-prolog-numeric-lexeme-length* "NUMBER_TEXT_LENGTH")
+                    environment operation))
+          (funcall emit environment)))
        ((not (logic-var-p resolved-number))
         (unless (realp resolved-number)
           (%raise-type-error "NUMBER" resolved-number environment operation
@@ -90,13 +103,15 @@
     (%check-atom-text-limit resolved-atom environment operation))
   (cond
     ((not (logic-var-p resolved-atom))
-     ;; Unlike number_chars/2 and number_codes/2, invalid atom text fails.
-     (handler-case
-         (%unify-emit number
-                      (%text-number (%atom-text resolved-atom)
-                                    environment operation)
-                      environment emit)
-       (prolog-domain-error () nil)))
+     ;; Unlike number_chars/2 and number_codes/2, invalid atom text fails.  The
+     ;; parse runs outside the handler so that an error raised further along the
+     ;; continuation is not mistaken for this atom's and silently swallowed.
+     (let ((parsed (handler-case (%text-number (%atom-text resolved-atom)
+                                               environment operation)
+                     (prolog-syntax-error () nil)
+                     (prolog-domain-error () nil))))
+       (when parsed
+         (%unify-emit number parsed environment emit))))
     ((not (logic-var-p resolved-number))
      (%unify-emit
       atom

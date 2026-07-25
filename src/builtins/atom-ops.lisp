@@ -4,8 +4,8 @@
 
 (define-iso-builtin (atom_length atom length) "ATOM_LENGTH"
   (%ensure-atom-value resolved-atom environment operation "atom_length/2 atom")
-  (%ensure-nonnegative-integer-or-variable
-   resolved-length environment operation "atom_length/2 length")
+  (%require-bounded-integer resolved-length environment operation
+                            "atom_length/2 length" :allow-variable t)
   (%check-atom-text-limit resolved-atom environment operation)
   (%unify-emit length (length (%atom-text resolved-atom)) environment emit))
 
@@ -87,12 +87,12 @@
 
 (define-iso-builtin (sub_atom atom before length after sub) "SUB_ATOM"
   (%ensure-atom-value resolved-atom environment operation "sub_atom/5 atom")
-    (%ensure-nonnegative-integer-or-variable
-     resolved-before environment operation "before")
-    (%ensure-nonnegative-integer-or-variable
-     resolved-length environment operation "length")
-    (%ensure-nonnegative-integer-or-variable
-     resolved-after environment operation "after")
+    (%require-bounded-integer resolved-before environment operation "before"
+                              :allow-variable t)
+    (%require-bounded-integer resolved-length environment operation "length"
+                              :allow-variable t)
+    (%require-bounded-integer resolved-after environment operation "after"
+                              :allow-variable t)
     (unless (or (logic-var-p resolved-sub) (%term-atom-p resolved-sub))
       (%raise-type-error "ATOM" resolved-sub environment operation
                          "sub_atom/5 subterm must be an atom"))

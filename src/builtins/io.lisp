@@ -5,12 +5,9 @@
 (defun %io-operation (name)
   (%iso-atom name))
 
-(defun %io-resolve-term (term environment operation)
-  (let ((value (logic-substitute term environment)))
-    (when (logic-var-p value)
-      (%raise-instantiation-error environment operation
-                                  "I/O argument must be instantiated"))
-    value))
+(define-term-guard %io-resolve-term (term)
+  :resolve t
+  :instantiation "I/O argument must be instantiated")
 
 (defun %io-option-name-p (term name)
   (and (symbolp term) (string-equal (symbol-name term) name)))
@@ -47,6 +44,16 @@
           (%raise-domain-error domain-name option environment operation
                                unsupported-message))
         (push (cons name (second option)) result)))))
+
+(defun %io-write-options (term environment operation allowed)
+  "Parse write_term/2,3's options, whose ISO 8.14.2.3 domain is `write_option'."
+  (%io-parse-option-list
+   term environment operation "WRITE_OPTION" allowed
+   #'%term-has-variables-p
+   "Write options must be instantiated"
+   "Write options must be a proper list"
+   "Expected a unary write option"
+   "Unsupported write option"))
 
 (defun %io-options (term environment operation allowed)
   (%io-parse-option-list
@@ -92,12 +99,9 @@
     (unless (symbolp value)
       (%raise-type-error "ATOM" value environment operation
                          "Stream source must be an atom"))
-    (let ((name (symbol-name value)))
-      ;; Unquoted atoms are interned uppercase; quoted mixed-case atoms retain
-      ;; their spelling and must remain usable on case-sensitive filesystems.
-      (if (string= name (string-upcase name))
-          (string-downcase name)
-          name))))
+    ;; The atom's text, not its symbol name: a mixed-case atom such as
+    ;; `'Data/Input.pl'' must stay usable on a case-sensitive filesystem.
+    (%atom-text value)))
 
 (defun %io-public-designator (entry)
   (or (prolog-stream-alias entry) (prolog-stream-handle entry)))
@@ -111,29 +115,32 @@
 (defun %io-current-output-entry (rulebase)
   (prolog-io-context-current-output (%io-context rulebase)))
 
-(defmacro %define-io-dual-builtin ((name current-arguments explicit-arguments operation)
+(defmacro %define-io-dual-builtin ((name arguments direction operation)
                                    (rulebase environment depth emit)
-                                   &body clauses)
-  ;; CLAUSES is a flat (:current FORM :explicit FORM) plist; a NIL lookup
-  ;; would silently compile a builtin whose body always fails, so reject
-  ;; malformed clauses at macroexpansion time.
-  (unless (and (= (length clauses) 4)
-               (eq (first clauses) :current)
-               (eq (third clauses) :explicit))
-    (error "~S expects (:CURRENT form :EXPLICIT form), got ~S for ~S"
-           '%define-io-dual-builtin clauses name))
-  (let ((current-form (getf clauses :current))
-        (explicit-form (getf clauses :explicit)))
-    `(progn
-       (define-builtin (,name ,@current-arguments) (,rulebase ,environment ,depth ,emit)
-         (declare (ignore ,depth))
-         (let ((operation (%io-operation ,operation)))
-           ,current-form))
-       (define-builtin (,name stream ,@explicit-arguments)
-           (,rulebase ,environment ,depth ,emit)
-         (declare (ignore ,depth))
-         (let ((operation (%io-operation ,operation)))
-           ,explicit-form)))))
+                                   &body body)
+  "Define the NAME/N and NAME/N+1 halves of an ISO stream predicate from one BODY.
+
+The N-arity half acts on the current input or output stream, selected by
+DIRECTION (:INPUT or :OUTPUT); the N+1-arity half takes an explicit stream
+designator as its leading argument.  BODY is spliced into both halves and sees
+two anaphoric bindings: ENTRY, the resolved PROLOG-STREAM, and OPERATION, the
+ISO atom naming this predicate."
+  (let ((stream (gensym "STREAM"))
+        (current-entry (ecase direction
+                         (:input '%io-current-input-entry)
+                         (:output '%io-current-output-entry))))
+    (flet ((half (leading entry-form)
+             `(define-builtin (,name ,@leading ,@arguments)
+                  (,rulebase ,environment ,depth ,emit)
+                (let* ((operation (%io-operation ,operation))
+                       (entry ,entry-form))
+                  (declare (ignorable operation entry))
+                  ,@body))))
+      `(progn
+         ,(half '() `(,current-entry ,rulebase))
+         ,(half (list stream)
+                `(%io-stream-entry ,rulebase ,stream ,direction
+                                   ,environment operation))))))
 
 (defun %io-stream-entry (rulebase term direction environment operation)
   (%resolve-prolog-stream (%io-context rulebase)
@@ -142,10 +149,10 @@
 
 (defun %io-character (term environment operation)
   (let ((value (%io-resolve-term term environment operation)))
-    (unless (and (symbolp value) (= (length (symbol-name value)) 1))
+    (unless (and (symbolp value) (= (%atom-text-length value) 1))
       (%raise-type-error "CHARACTER" value environment operation
                          "Expected a one-character atom"))
-    (char (symbol-name value) 0)))
+    (char (%atom-text value) 0)))
 
 (defun %io-register-open-stream (rulebase source mode options environment operation)
   (let* ((type (%io-option "type" options (%iso-atom "text")))
@@ -197,11 +204,9 @@
           (%close-prolog-stream! (%io-context rulebase) entry environment operation)))))
 
 (define-builtin (open source mode stream) (rulebase environment depth emit)
-  (declare (ignore depth))
   (%io-open-goal rulebase source mode stream '() environment emit))
 
 (define-builtin (open source mode stream options) (rulebase environment depth emit)
-  (declare (ignore depth))
   (%io-open-goal rulebase source mode stream options environment emit))
 
 (defun %io-close-goal (rulebase stream options environment emit)
@@ -215,11 +220,9 @@
     (funcall emit environment)))
 
 (define-builtin (close stream) (rulebase environment depth emit)
-  (declare (ignore depth))
   (%io-close-goal rulebase stream '() environment emit))
 
 (define-builtin (close stream options) (rulebase environment depth emit)
-  (declare (ignore depth))
   (%io-close-goal rulebase stream options environment emit))
 
 (defun %io-stream-entries (rulebase)
@@ -252,8 +255,7 @@
                (pathnamep (prolog-stream-source entry)))
        (list (list (%iso-atom "file_name")
                    (%prolog-atom-symbol
-                    (princ-to-string (prolog-stream-source entry))
-                    :preserve-case t))))
+                    (princ-to-string (prolog-stream-source entry))))))
      (list (list (%iso-atom "mode")
                  (%iso-atom (string-downcase
                              (symbol-name (prolog-stream-mode entry))))))
@@ -288,7 +290,6 @@
 
 (define-builtin (stream_property stream property)
     (rulebase environment depth emit)
-  (declare (ignore depth))
   (let* ((operation (%io-operation "STREAM_PROPERTY"))
          (resolved-property (logic-substitute property environment)))
     (unless (or (logic-var-p resolved-property)
@@ -306,16 +307,11 @@
 
 (define-builtin (set_stream_position stream position)
     (rulebase environment depth emit)
-  (declare (ignore depth))
   (let* ((operation (%io-operation "SET_STREAM_POSITION"))
          (entry (%io-stream-entry rulebase stream nil environment operation))
          (resolved-position (%io-resolve-term position environment operation)))
-    (unless (integerp resolved-position)
-      (%raise-type-error "INTEGER" resolved-position environment operation
-                         "Stream position must be an integer"))
-    (when (minusp resolved-position)
-      (%raise-domain-error "NOT_LESS_THAN_ZERO" resolved-position environment
-                           operation "Stream position must not be negative"))
+    (%require-bounded-integer resolved-position environment operation
+                              "Stream position")
     (unless (ignore-errors
               (file-position (prolog-stream-stream entry) resolved-position))
       (%raise-permission-error "REPOSITION" "STREAM"
@@ -325,38 +321,49 @@
     (setf (prolog-stream-end-of-stream entry) :not)
     (funcall emit environment)))
 
-(defmacro %define-current-stream-builtin (&body definitions)
-  "Each of DEFINITIONS is (NAME ACCESSOR); ACCESSOR retrieves the rulebase's
-current input or output stream entry, which NAME unifies with its public
-designator."
-  `(progn
-     ,@(loop for (name accessor) in definitions
-             collect `(define-builtin (,name stream) (rulebase environment depth emit)
-                        (declare (ignore depth))
-                        (%unify-emit stream
-                                     (%io-public-designator (,accessor rulebase))
-                                     environment emit)))))
+(defun %validate-current-stream-argument (rulebase term environment operation)
+  "Check current_input/1's or current_output/1's argument per ISO 8.11.1.3.
 
-(%define-current-stream-builtin
-  (current_input %io-current-input-entry)
-  (current_output %io-current-output-entry))
+A bound argument that is not a stream or one of its aliases is a
+domain_error(stream, T); unifying against the current stream alone would fail
+silently instead, which hides a misspelled alias."
+  (let ((resolved (logic-substitute term environment)))
+    (unless (or (logic-var-p resolved)
+                (%find-prolog-stream (%io-context rulebase) resolved))
+      (%raise-domain-error "STREAM" resolved environment operation
+                           "expected a stream or stream alias"))))
 
-(defmacro %define-set-stream-builtin (&body definitions)
-  "Each of DEFINITIONS is (NAME DIRECTION CONTEXT-ACCESSOR OPERATION-NAME);
-NAME resolves STREAM under DIRECTION and installs it as the rulebase's
-current stream for that direction via (SETF CONTEXT-ACCESSOR)."
-  `(progn
-     ,@(loop for (name direction context-accessor operation-name) in definitions
-             collect `(define-builtin (,name stream) (rulebase environment depth emit)
-                        (declare (ignore depth))
-                        (let ((operation (%io-operation ,operation-name)))
-                          (setf (,context-accessor (%io-context rulebase))
-                                (%io-stream-entry rulebase stream ,direction environment operation))
-                          (funcall emit environment))))))
-
-(%define-set-stream-builtin
-  (set_input :input prolog-io-context-current-input "SET_INPUT")
-  (set_output :output prolog-io-context-current-output "SET_OUTPUT"))
+(macrolet ((define-current-stream-builtins (&body specifications)
+             ;; Each specification is (DIRECTION CONTEXT-ACCESSOR CURRENT-NAME
+             ;; SET-NAME SET-OPERATION).  Reading and writing a direction's
+             ;; current stream go through one slot named once, so the getter
+             ;; and setter of a direction cannot drift onto different slots.
+             `(progn
+                ,@(loop for (direction context-accessor current-name
+                             set-name set-operation)
+                          in specifications
+                        append
+                        `((define-builtin (,current-name stream)
+                              (rulebase environment depth emit)
+                            (%validate-current-stream-argument
+                             rulebase stream environment
+                             (%io-operation ,(string current-name)))
+                            (%unify-emit stream
+                                         (%io-public-designator
+                                          (,context-accessor (%io-context rulebase)))
+                                         environment emit))
+                          (define-builtin (,set-name stream)
+                              (rulebase environment depth emit)
+                            (let ((operation (%io-operation ,set-operation)))
+                              (setf (,context-accessor (%io-context rulebase))
+                                    (%io-stream-entry rulebase stream ,direction
+                                                      environment operation))
+                              (funcall emit environment))))))))
+  (define-current-stream-builtins
+    (:input prolog-io-context-current-input
+     current_input set_input "SET_INPUT")
+    (:output prolog-io-context-current-output
+     current_output set_output "SET_OUTPUT")))
 
 (defun %io-parse-term-with-variables (input operator-table)
   (let* ((parser (%parser (%tokenize-prolog input operator-table) operator-table))
@@ -379,7 +386,7 @@ current stream for that direction via (SETF CONTEXT-ACCESSOR)."
                 (loop for variable in ordered
                       for name = (gethash variable names)
                       when name
-                        collect (list '= (%prolog-atom-symbol name :preserve-case t)
+                        collect (list '= (%prolog-atom-symbol name)
                                       variable))))
           (values term ordered named
                   (loop for entry in named

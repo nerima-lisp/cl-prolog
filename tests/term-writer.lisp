@@ -4,10 +4,14 @@
 
 (deftest prolog-term-writer-atoms-variables-and-numbers ()
   (is-equal "simple" (prolog-term-string 'cl-prolog::simple))
+  ;; A mixed-case atom must be written with its spelling intact and quoted,
+  ;; so that reading the output back yields the same atom.
   (is-equal "'Mary Jane'"
-            (prolog-term-string 'cl-prolog::|Mary Jane|))
+            (prolog-term-string (prolog-atom "Mary Jane")))
+  (is-equal "fooBar" (prolog-term-string (prolog-atom "fooBar")))
+  (is-equal "'FooBar'" (prolog-term-string (prolog-atom "FooBar")))
   (is-equal "'can''t'"
-            (prolog-term-string 'cl-prolog::|can't|))
+            (prolog-term-string (prolog-atom "can't")))
   (is-equal "X" (prolog-term-string 'cl-prolog::?X))
   (is-equal "42" (prolog-term-string 42))
   (is-equal 1.5d0
@@ -15,8 +19,7 @@
   (is-equal "!" (prolog-term-string 'cl-prolog::|!|)))
 
 (deftest prolog-term-writer-handles-malformed-numbervars-and-fx-prefixes ()
-  (let ((term (list (cl-prolog::%prolog-atom-symbol "$VAR" :preserve-case t)
-                     0 'cl-prolog::extra)))
+  (let ((term (list (prolog-atom "$VAR") 0 'cl-prolog::extra)))
     (is-equal term (read-prolog-term (prolog-term-string term))))
   (let ((term (read-prolog-term ":- foo.")))
     (is-equal term (read-prolog-term (prolog-term-string term)))))

@@ -6,14 +6,12 @@
 (in-package #:cl-prolog)
 
 (define-builtin (term_variables term variables) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%unify-emit variables
                (%collect-variables (%term-resolve term environment))
                environment emit))
 
 (define-builtin (term_variables term variables tail)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%unify-emit variables
                (append (%collect-variables (%term-resolve term environment))
                        tail)
@@ -39,6 +37,12 @@
         (%raise-type-error
          "INTEGER" resolved-arity environment operation
          "functor/3 arity must be an integer"))
+       ((> resolved-arity *max-prolog-term-arity*)
+        ;; ISO 13211-1 8.5.1.3: an arity past what the implementation can build
+        ;; is a representation_error naming the flag that reports the bound.
+        (%raise-representation-error
+         "MAX_ARITY" environment operation
+         "functor/3 arity exceeds the max_arity flag"))
        ((minusp resolved-arity)
         (%raise-domain-error
          "NOT_LESS_THAN_ZERO" resolved-arity environment operation
@@ -68,13 +72,21 @@
       (list (cons name (first resolved-term))
             (cons arity (length (rest resolved-term))))
       environment emit))
+    ;; A cons that is not a proper list is a partial list, and only that: a
+    ;; compound is always proper here, so there is no ambiguity to resolve.
+    ;; ISO 13211-1 makes a list cell the compound `'.'(Head, Tail)'.
+    ((consp resolved-term)
+     (%term-unify-sequence
+      (list (cons name (%intern-prolog-atom "."))
+            (cons arity 2))
+      environment emit))
     (t
      (%raise-type-error
       "CALLABLE" resolved-term environment operation
       "functor/3 term must be a Prolog term"))))
 
 (define-iso-builtin (arg index term (argument :raw)) "ARG"
-  (%require-non-negative-integer resolved-index environment operation "arg/3" "index")
+  (%require-bounded-integer resolved-index environment operation "arg/3 index")
   (cond
       ((logic-var-p resolved-term)
        (%raise-instantiation-error
@@ -94,13 +106,13 @@
                environment emit))
 
 (define-iso-builtin (numbervars term start (end :raw)) "NUMBERVARS"
-  (%require-non-negative-integer resolved-start environment operation "numbervars/3" "start")
+  (%require-bounded-integer resolved-start environment operation "numbervars/3 start")
   (let ((variables (%collect-variables resolved-term)))
     (%term-unify-sequence
      (append
       (loop for variable in variables
             for index from resolved-start
-            collect (cons variable (list '$var index)))
+            collect (cons variable (list +numbervars-functor+ index)))
       (list (cons end (+ resolved-start (length variables)))))
      environment emit)))
 

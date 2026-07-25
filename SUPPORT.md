@@ -5,7 +5,7 @@ right channel with enough concrete evidence to reproduce the issue.
 
 ## Usage questions
 
-Open a [GitHub issue](https://github.com/takeokunn/cl-prolog/issues/new) when
+Open a [GitHub issue](https://github.com/nerima-lisp/cl-prolog/issues/new) when
 you need help with:
 
 - choosing between immutable construction and explicit dynamic rulebase
@@ -26,7 +26,7 @@ limits, and release-gate failures.
 
 ## Bug reports
 
-Open a [GitHub issue](https://github.com/takeokunn/cl-prolog/issues/new) for
+Open a [GitHub issue](https://github.com/nerima-lisp/cl-prolog/issues/new) for
 reproducible library defects.
 
 Useful evidence:
@@ -41,7 +41,7 @@ Useful evidence:
 
 Do not report suspected vulnerabilities in a public issue first.
 Follow [`SECURITY.md`](SECURITY.md) and use the repository's
-[private vulnerability report form](https://github.com/takeokunn/cl-prolog/security/advisories/new)
+[private vulnerability report form](https://github.com/nerima-lisp/cl-prolog/security/advisories/new)
 when GitHub makes it available. If the private form is unavailable, do not put
 vulnerability details in an issue; use the fallback procedure documented in
 the security policy.

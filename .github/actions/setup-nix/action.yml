@@ -37,6 +37,7 @@ runs:
       shell: bash
       env:
         CACHIX_AUTH_TOKEN: ${{ inputs.cachix-auth-token }}
+        CACHIX_CACHE: ${{ inputs.cachix-cache }}
         EVENT_NAME: ${{ github.event_name }}
       run: |
         set -euo pipefail
@@ -45,6 +46,14 @@ runs:
           push=true
         fi
         printf 'push=%s\n' "$push" >> "$GITHUB_OUTPUT"
+        # A missing repo variable silently disables Cachix below (both
+        # "Configure Cachix" steps are gated on cachix-cache != ''), so every
+        # build falls back to a full local realisation with a green check and
+        # no other signal. Surface it loudly instead of letting "CI got slow"
+        # go uninvestigated for months.
+        if [[ -z "$CACHIX_CACHE" ]]; then
+          echo "::warning::CACHIX_CACHE is unset; building without a binary cache"
+        fi
 
     - name: Configure Cachix (pull-only)
       if: ${{ inputs.cachix-cache != '' && steps.cachix-mode.outputs.push != 'true' }}

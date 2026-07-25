@@ -3,7 +3,7 @@
 (in-package #:cl-prolog.tests)
 
 (deftest prolog-term-parser ()
-  (is-equal '(cl-prolog::person cl-prolog::|Mary Jane| 12 1.5d0)
+  (is-equal (list 'cl-prolog::person (cl-prolog:prolog-atom "Mary Jane") 12 1.5d0)
             (read-prolog-term "person('Mary Jane', 12, 1.5)."))
   (is-equal '(cl-prolog::a cl-prolog::b cl-prolog::c)
             (read-prolog-term "[a,b,c]"))
@@ -18,22 +18,64 @@
   (let ((nil-atom (read-prolog-term "nil"))
         (car-atom (read-prolog-term "car")))
     (is (not (null nil-atom)))
-    (is (eq nil-atom (read-prolog-term "'NIL'")))
+    ;; Quoting an atom cannot change which atom it is (ISO 13211-1 6.4.2), but
+    ;; case is part of the name, so `'NIL'' denotes a different atom.
+    (is (eq nil-atom (read-prolog-term "'nil'")))
+    (is (not (eq nil-atom (read-prolog-term "'NIL'"))))
     (is (eq (symbol-package nil-atom)
             (find-package '#:cl-prolog.user-atoms)))
     (is (not (eq car-atom 'cl:car)))
-    (is-equal '() (read-prolog-term "[]"))))
+    (is-equal '() (read-prolog-term "[]"))
+    ;; ISO 6.3.5 makes `[]' an atom, which this engine represents as NIL, so
+    ;; its quoted spelling denotes the same atom.
+    (is-equal '() (read-prolog-term "'[]'"))))
 
 (deftest prolog-stream-term-reader-is-incremental ()
   (with-input-from-string
       (stream (format nil
                       "first(1.5, 'not.a.term'). % between terms~%second([a,b])."))
-    (is-equal '(cl-prolog.user-atoms::first 1.5d0 cl-prolog::|not.a.term|)
+    (is-equal '(cl-prolog.user-atoms::first 1.5d0 cl-prolog::not.a.term)
               (read-prolog-term stream))
     (is-equal '(cl-prolog.user-atoms::second (cl-prolog::a cl-prolog::b))
               (read-prolog-term stream)))
   (with-input-from-string (stream "value % comment at end of file")
     (is-equal 'cl-prolog::value (read-prolog-term stream))))
+
+(deftest parser-reads-an-operator-as-an-atom-where-it-has-no-operand ()
+  "ISO 13211-1 6.3.3.1 admits an atom that is an operator as an argument and
+6.3.4.3 admits it bracketed, so the Order argument of `compare/3', the
+specifier of `sort/4' and the name argument of `op/3' can all be written."
+  (is-equal (list 'cl-prolog::f (prolog-atom "+") 1)
+            (read-prolog-term "f(+, 1)"))
+  (is-equal (list (prolog-atom "+") (prolog-atom "-"))
+            (read-prolog-term "[+, -]"))
+  (is-equal (prolog-atom "@<") (read-prolog-term "(@<)"))
+  (is-equal (list 'cl-prolog::f (prolog-atom "-")) (read-prolog-term "f(-)"))
+  ;; A prefix operator with an operand still applies to it.
+  (is-equal -1 (read-prolog-term "- 1"))
+  (is-equal '(cl-prolog::- 1 2) (read-prolog-term "1 - 2"))
+  (is-equal '(cl-prolog::not cl-prolog:fail) (read-prolog-term "\\+ fail"))
+  ;; ...and a closing delimiter where a term belongs is still a syntax error,
+  ;; rather than the atom of that name.
+  (signals-error (read-prolog-term "f(, 1)"))
+  (signals-error (read-prolog-term "f(a, )")))
+
+(deftest parser-reads-a-graphic-run-as-one-token ()
+  "ISO 13211-1 6.4.2 makes a maximal run of graphic characters one token, and an
+undeclared one is an atom -- which is what lets `:- op(700, xfx, ===).' name an
+operator before it exists.  Matching the longest declared operator instead
+would split `===' into `==' and `='."
+  (is-equal "===" (prolog-atom-text (read-prolog-term "(===)")))
+  (is-equal "@#$" (prolog-atom-text (read-prolog-term "(@#$)")))
+  (is-equal '(cl-prolog::op 700 cl-prolog::xfx #.(cl-prolog:prolog-atom "==="))
+            (read-prolog-term "op(700, xfx, ===)"))
+  ;; A declared operator run still lexes as that operator, and the end token is
+  ;; still a lone `.' followed by layout or end of input.
+  (is-equal '(cl-prolog::|=..| cl-prolog::?X (cl-prolog::a))
+            (read-prolog-term "X =.. [a]."))
+  ;; A block comment still opens where it would without the run.
+  (is-equal '(cl-prolog::+ cl-prolog::a cl-prolog::b)
+            (read-prolog-term "a +/* note */ b")))
 
 (deftest prolog-clause-parser ()
   (let ((fact (read-prolog-clause "parent(tom, bob)."))
@@ -125,15 +167,67 @@
     (is (not (prolog-succeeds-p rulebase other-query))))))
 
 (deftest quoted-atoms-decode-escape-sequences ()
-  (is-equal "it's" (symbol-name (read-prolog-term "'it''s'.")))
-  (is-equal "anb" (symbol-name (read-prolog-term "'a\\nb'."))))
+  "ISO 13211-1 6.4.2.1: a `\\'-escape in a quoted token denotes the character it
+names, so `'a\\nb'' holds a newline rather than the letter n."
+  (is-equal "it's" (prolog-atom-text (read-prolog-term "'it''s'.")))
+  (is-equal (format nil "a~Cb" #\Newline)
+            (prolog-atom-text (read-prolog-term "'a\\nb'.")))
+  (is-equal (format nil "a~Cb" #\Tab)
+            (prolog-atom-text (read-prolog-term "'a\\tb'.")))
+  (is-equal "a\\b" (prolog-atom-text (read-prolog-term "'a\\\\b'.")))
+  (is-equal "a'b" (prolog-atom-text (read-prolog-term "'a\\'b'.")))
+  ;; \xHH\ and \OOO\ name a character by code, in hex and octal.
+  (is-equal "aAb" (prolog-atom-text (read-prolog-term "'a\\x41\\b'.")))
+  (is-equal "aAb" (prolog-atom-text (read-prolog-term "'a\\101\\b'.")))
+  ;; A `\'-newline continuation contributes nothing, so the atom is one word.
+  (is-equal "ab" (prolog-atom-text
+                  (read-prolog-term (format nil "'a\\~Cb'." #\Newline))))
+  ;; The same decoding applies inside a "..." literal.
+  (is-equal (list (char-code #\Newline))
+            (read-prolog-term "\"\\n\".")))
+
+(deftest numeric-literals-cover-the-iso-notations ()
+  "ISO 13211-1 6.4.4: a character-code constant and radix constants."
+  (is-equal 97 (read-prolog-term "0'a."))
+  (is-equal 39 (read-prolog-term "0''."))
+  (is-equal 39 (read-prolog-term "0'''."))
+  (is-equal (char-code #\Newline) (read-prolog-term "0'\\n."))
+  (is-equal 65 (read-prolog-term "0'\\x41\\."))
+  (is-equal 255 (read-prolog-term "0xff."))
+  (is-equal 255 (read-prolog-term "0xFF."))
+  (is-equal 15 (read-prolog-term "0o17."))
+  (is-equal 5 (read-prolog-term "0b101."))
+  ;; A `0' that begins no such constant is still the plain integer zero.
+  (is-equal 0 (read-prolog-term "0."))
+  (is-equal 0.5d0 (read-prolog-term "0.5."))
+  (is-equal '(cl-prolog::f 0 cl-prolog::x) (read-prolog-term "f(0, x)"))
+  ;; ...and the notations survive the stream splitter, not just a string.
+  (with-input-from-string (stream "code(0'a). code(0'').")
+    (is-equal '(cl-prolog::code 97) (read-prolog-term stream))
+    (is-equal '(cl-prolog::code 39) (read-prolog-term stream))))
+
+(deftest bitwise-operators-are-declared ()
+  "ISO 13211-1 6.3.4.4 table 7 declares the bitwise operators, without which
+their evaluable functors have no written form."
+  (dolist (case '(("X is 1 << 3" 8)
+                  ("X is 8 >> 3" 1)
+                  ("X is 12 /\\ 10" 8)
+                  ("X is 12 \\/ 10" 14)
+                  ("X is 12 xor 10" 6)
+                  ("X is \\ 0" -1)))
+    (destructuring-bind (source expected) case
+      (let ((solutions (query-prolog (make-rulebase) (read-prolog-term source))))
+        (is-equal expected (solution-binding 'cl-prolog::?X (first solutions))
+                  source)))))
 
 (deftest raw-term-source-reader-tracks-comments-quotes-and-decimal-points ()
   (dolist (text (list "X is 4/2."
                        "foo /* comment */ bar."
                        "X is 3.14."
                        "'a\\b'."
-                       "'it''s'."))
+                       "'it''s'."
+                       "\"a\\b\"."
+                       "\"it\"\"s\"."))
     (is-equal text
               (with-input-from-string (stream text)
                 (cl-prolog::%read-prolog-term-source stream)))))
@@ -237,7 +331,7 @@ against its :OBSERVED/:LIMIT/:POSITION, which vary per resource kind."
   (let ((source (format nil "~Cabc~C" (code-char 39) (code-char 39))))
     (let ((*max-prolog-quoted-lexeme-length* 3))
       (let ((term (read-prolog-term source)))
-        (is-equal "abc" (symbol-name term))
+        (is-equal "abc" (prolog-atom-text term))
         (is (eq (find-package "CL-PROLOG")
                 (symbol-package term)))))
     (let* ((*max-prolog-quoted-lexeme-length* 2)

@@ -7,13 +7,10 @@
 
 (in-package #:cl-prolog)
 
-(defun %resolve-meta-goal (goal environment operation)
-  "Resolve the goal-closure argument of a meta-predicate."
-  (let ((closure (logic-substitute goal environment)))
-    (when (logic-var-p closure)
-      (%raise-instantiation-error environment operation
-                                  "meta-predicate goal must be instantiated"))
-    closure))
+(define-term-guard %resolve-meta-goal (goal)
+  :documentation "Resolve the goal-closure argument of a meta-predicate."
+  :resolve t
+  :instantiation "meta-predicate goal must be instantiated")
 
 (defun %fresh-list-variables (prefix count)
   "Return COUNT fresh logic variables named with PREFIX."

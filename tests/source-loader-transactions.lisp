@@ -55,7 +55,7 @@
              (cl-prolog::operator-definition-priority
               (first (cl-prolog::%operator-table-find
                       (cl-prolog::rulebase-operator-table rulebase)
-                      (cl-prolog::%prolog-atom-symbol "dup_test_op" :preserve-case t)
+                      (prolog-atom "dup_test_op")
                       :xfx))))))))
 
 (deftest load-files-rolls-back-the-whole-list-on-late-failure ()
@@ -136,8 +136,11 @@
       ((source ":- op(500, xfx, layered_operator). source_clause."))
     (let ((rulebase (consult-prolog source)))
       (is (%source-query-succeeds-p rulebase "assertz(runtime_clause)"))
+      ;; Quoted, but with the same spelling: a quoted name denotes the same atom
+      ;; the source's unquoted `op/3' directive declared, so this override
+      ;; layers over it rather than declaring a second, differently-cased one.
       (is (%source-query-succeeds-p
-           rulebase "op(600, xfx, 'LAYERED_OPERATOR')"))
+           rulebase "op(600, xfx, 'layered_operator')"))
       (rewrite-prolog-file! source "replacement_clause.")
       (consult-prolog source rulebase)
       (is (%source-query-succeeds-p rulebase "runtime_clause"))

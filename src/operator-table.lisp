@@ -32,7 +32,10 @@
            +operator-specifiers+ specifier)))
 
 (defun %same-operator-key-p (definition name specifier)
-  (and (eq name (operator-definition-name definition))
+  ;; Names compare by text, not identity: `+' reaches the table as COMMON-LISP:+
+  ;; from the Lisp-authored standard table but as CL-PROLOG.USER-ATOMS::+ when
+  ;; op/3 or the parser names it, and one atom must mean one operator.
+  (and (%same-atom-text-p name (operator-definition-name definition))
        (eq specifier (operator-definition-specifier definition))))
 
 (defun %operator-table-remove (table name specifier)
@@ -78,15 +81,11 @@ Priority zero removes the matching NAME and SPECIFIER definition."
      (< (%operator-specifier-rank (operator-definition-specifier left))
         (%operator-specifier-rank (operator-definition-specifier right))))
     (t
-     (let ((left-package (symbol-package (operator-definition-name left)))
-           (right-package (symbol-package (operator-definition-name right))))
-       (let ((left-package-name (and left-package (package-name left-package)))
-             (right-package-name (and right-package (package-name right-package))))
-         (if (equal left-package-name right-package-name)
-             (string< (symbol-name (operator-definition-name left))
-                      (symbol-name (operator-definition-name right)))
-             (string< (or left-package-name "")
-                      (or right-package-name ""))))))))
+     ;; By operator name text.  Within one table a name identifies at most one
+     ;; definition per specifier (see %SAME-OPERATOR-KEY-P), so this is a total
+     ;; order and needs no package or identity tiebreak.
+     (minusp (%compare-atom-texts (operator-definition-name left)
+                                  (operator-definition-name right))))))
 
 (defun %operator-definition-less-p (left right)
   (let ((left-priority (operator-definition-priority left))
@@ -109,7 +108,7 @@ Priority zero removes the matching NAME and SPECIFIER definition."
   (stable-sort
    (remove-if-not
     (lambda (definition)
-      (and (eq name (operator-definition-name definition))
+      (and (%same-atom-text-p name (operator-definition-name definition))
            (or (null specifier)
                (eq specifier (operator-definition-specifier definition)))))
     (operator-table-definitions table))
@@ -126,10 +125,15 @@ Priority zero removes the matching NAME and SPECIFIER definition."
     (700 :xfx |=\\=|) (700 :xfx <) (700 :xfx =<) (700 :xfx >) (700 :xfx >=)
     (700 :xfx in) (700 :xfx |#=|) (700 :xfx |#\\=|)
     (700 :xfx |#<|) (700 :xfx |#=<|) (700 :xfx |#>|) (700 :xfx |#>=|)
-    (500 :yfx +) (500 :yfx -) (450 :xfx |..|)
+    (500 :yfx +) (500 :yfx -)
+    ;; The bitwise operators of ISO 13211-1 6.3.4.4 table 7.  Their evaluable
+    ;; functors already existed; without these declarations `X is 1 << 3' and
+    ;; `X is 12 /\ 10' were unwritable, since nothing parsed the operator.
+    (500 :yfx |/\\|) (500 :yfx |\\/|) (500 :yfx xor)
+    (450 :xfx |..|)
     (400 :yfx *) (400 :yfx /) (400 :yfx //) (400 :yfx div)
-    (400 :yfx mod) (400 :yfx rem)
-    (200 :xfx **) (200 :xfy ^) (200 :fy +) (200 :fy -)))
+    (400 :yfx mod) (400 :yfx rem) (400 :yfx |<<|) (400 :yfx |>>|)
+    (200 :xfx **) (200 :xfy ^) (200 :fy +) (200 :fy -) (200 :fy |\\|)))
 
 (defun %make-standard-operator-table ()
   (reduce (lambda (table declaration)

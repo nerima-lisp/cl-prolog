@@ -4,19 +4,24 @@
   :author "takeokunn"
   :maintainer "takeokunn"
   :license "MIT"
-  :homepage "https://github.com/takeokunn/cl-prolog"
-  :bug-tracker "https://github.com/takeokunn/cl-prolog/issues"
-  :source-control (:git "https://github.com/takeokunn/cl-prolog.git")
+  :homepage "https://github.com/nerima-lisp/cl-prolog"
+  :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
+  :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
   :long-name "cl-prolog"
-  :version "0.8.0"
+  :version "1.0.0"
   :pathname "src"
   :serial t
   :components ((:file "package")
+                 (:file "atom-name")
                  (:file "operator-table")
                  (:file "module-system")
                  (:file "source-registry")
+                 (:file "logic-variable")
+                 (:file "clause")
+                 (:file "predicate-index")
                  (:file "data")
                  (:file "table-variant")
+                 (:file "environment-index")
                  (:file "unification")
                  (:file "lexer")
                  (:file "lexer-operator-lexemes")
@@ -25,6 +30,7 @@
                  (:file "term-writer")
                (:file "engine")
                (:file "io-context")
+               (:file "proof-state")
                (:file "prover")
                (:file "tabling")
                (:module "builtins"
@@ -84,6 +90,9 @@
                              (:file "query")
                              (:file "fixtures")))
                (:file "unification")
+               (:file "iso-conformance")
+               (:file "iso-inria")
+               (:file "atom-canonicalization")
                (:file "operator-table")
                (:file "parser")
                (:file "term-writer")

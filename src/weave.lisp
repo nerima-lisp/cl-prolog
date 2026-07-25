@@ -41,9 +41,7 @@
           (:ordered
            `(cl-weave:expect ,run-form :to-equal ',expected))
           (:set
-           `(cl-weave:expect
-             (%solution-multiset-equal-p ,run-form ',expected)
-             :to-be-truthy))
+           `(cl-weave:expect ,run-form :to-solve ',expected))
           (:first
            `(cl-weave:expect ,run-form :to-equal ',expected))
           (:succeeds
@@ -68,19 +66,37 @@
               (second body)
               (cddr body)))))
 
+(defun %solution-multiset-remove (solutions removals)
+  "Return SOLUTIONS with one occurrence of each solution in REMOVALS deleted."
+  (let ((remaining (copy-list solutions)))
+    (dolist (removal removals remaining)
+      (let ((position (position removal remaining :test #'equal)))
+        (when position
+          (setf remaining (append (subseq remaining 0 position)
+                                  (subseq remaining (1+ position)))))))))
+
+(defun %solution-multiset-diff (actual expected)
+  "Return the EXPECTED solutions missing from ACTUAL and the unexpected extras."
+  (values (%solution-multiset-remove expected actual)
+          (%solution-multiset-remove actual expected)))
+
 (defun %solution-multiset-equal-p (actual expected)
   "Return true when ACTUAL and EXPECTED contain equal solutions in any order."
-  (and (= (length actual) (length expected))
-       (labels ((match (remaining wanted)
-                  (if (endp wanted)
-                      (endp remaining)
-                      (let ((position (position (first wanted) remaining
-                                                :test #'equal)))
-                        (and position
-                             (match (append (subseq remaining 0 position)
-                                            (subseq remaining (1+ position)))
-                                    (rest wanted)))))))
-         (match actual expected))))
+  (multiple-value-bind (missing unexpected)
+      (%solution-multiset-diff actual expected)
+    (and (null missing) (null unexpected))))
+
+(cl-weave:defmatcher :to-solve (actual expected)
+  "Passes when ACTUAL holds exactly the EXPECTED solutions in any order."
+  (unless (and expected (null (rest expected)))
+    (error ":to-solve requires exactly one expected solution list, got ~S."
+           expected))
+  (let ((wanted (first expected)))
+    (multiple-value-bind (missing unexpected)
+        (%solution-multiset-diff actual wanted)
+      (values (and (null missing) (null unexpected))
+              (list :solutions actual :missing missing :unexpected unexpected)
+              (list :solutions wanted :order :any)))))
 
 (defmacro assert-query (rulebase query kind &rest arguments)
   "Assert one literal QUERY against RULEBASE using a query assertion KIND."

@@ -52,7 +52,6 @@ holds of the resolved term, or fails to hold when NEGATE is true."
              collect
              (let ((predicate-list (if (listp predicates) predicates (list predicates))))
                `(define-builtin (,name term) (rulebase environment depth emit)
-                  (declare (cl:ignore rulebase depth))
                   (let ((resolved-term (%term-resolve term environment)))
                     (,(if negate 'unless 'when)
                      (or ,@(mapcar (lambda (predicate) `(,predicate resolved-term))
@@ -73,11 +72,9 @@ holds of the resolved term, or fails to hold when NEGATE is true."
   (callable (%term-atom-p %term-compound-p)))
 
 (define-builtin (acyclic_term term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (when (%term-acyclic-p term environment)
     (funcall emit environment)))
 
 (define-builtin (cyclic_term term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (unless (%term-acyclic-p term environment)
     (funcall emit environment)))

@@ -5,14 +5,14 @@
 
   # cl-weave is the testing library used by the cl-prolog/tests ASDF system.
   # suite.  It follows this flake's nixpkgs so both share a single SBCL.
-  inputs.cl-weave.url = "github:nerima-lisp/cl-weave/v0.4.0";
+  inputs.cl-weave.url = "github:nerima-lisp/cl-weave/v1.0.0";
   inputs.cl-weave.inputs.nixpkgs.follows = "nixpkgs";
   inputs.cl-weave.inputs.paredit-cli.follows = "paredit-cli";
 
   # paredit-cli provides structural S-expression tooling for this repo's
   # Lisp sources: a dev-shell binary for agent-driven refactors and a
   # structural-parse lint gate reused in `checks`.
-  inputs.paredit-cli.url = "github:nerima-lisp/paredit-cli";
+  inputs.paredit-cli.url = "github:nerima-lisp/paredit-cli/v0.7.0";
   inputs.paredit-cli.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs =
@@ -26,6 +26,7 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
+        "aarch64-darwin"
       ];
       forAllSystems =
         f:
@@ -116,7 +117,7 @@
           dontInstall = true;
           meta = {
             description = "Rendered MkDocs (Material) documentation for cl-prolog";
-            homepage = "https://github.com/takeokunn/cl-prolog";
+            homepage = "https://github.com/nerima-lisp/cl-prolog";
             license = pkgs.lib.licenses.mit;
           };
         };
@@ -172,11 +173,17 @@
             { name
             , extraEnv ? ""
             , operation
+            , seconds ? 600
             ,
             }:
             pkgs.runCommand name { nativeBuildInputs = [ pkgs.sbcl ]; } ''
               ${sbclCheckPrelude}${extraEnv}
-              timeout 600 sbcl --non-interactive \
+              # -k sends SIGKILL 30s after the SIGTERM deadline: SBCL defers
+              # signals to safepoints, so a tight compiled loop (a runaway
+              # Prolog backtracking bug is exactly this) can outlive a bare
+              # SIGTERM and fall through to the enclosing CI job timeout
+              # instead of failing here with an attributable error.
+              timeout -k 30 ${toString seconds} sbcl --non-interactive \
                 --eval '(require :asdf)' \
                 --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
                 --eval '${operation}'
@@ -206,6 +213,10 @@
           examples = mkSbclCheck {
             name = "cl-prolog-examples";
             operation = "(asdf:load-system :cl-prolog/examples)";
+            # A plain load-system has no backtracking search to run away;
+            # org convention (cl-weave) budgets similarly narrow checks well
+            # under the full suite's allowance.
+            seconds = 120;
           };
 
           # Fails if the MkDocs site does not build to a valid index.html.
@@ -224,6 +235,31 @@
               }
               ''
                 nixpkgs-fmt --check ${./flake.nix}
+                touch $out
+              '';
+
+          # `nix flake check` only evaluates `packages` and `apps`, it does
+          # not realise their derivations. README.md's headline command,
+          # `nix run github:nerima-lisp/cl-prolog`, resolves through
+          # packages.default -> apps.default -> the cl-weave-backed wrapper
+          # below; without this, neither ever actually gets built in CI.
+          # Mirrors the `package = self.packages.${system}.default;` check
+          # convention already used by paredit-cli's own flake.
+          package = self.packages.${system}.default;
+
+          # `checks.default` above runs the suite through a plain SBCL
+          # invocation with the compiled-in default dynamic space. The
+          # `apps.test` wrapper below runs the SAME suite through cl-weave's
+          # own CLI, which sets a 4096 MB dynamic space — a genuinely
+          # different code path that was previously never exercised by `nix
+          # flake check`, so a heap-pressure-sensitive test could pass one
+          # way and fail the other with no CI signal either way.
+          app-test =
+            pkgs.runCommand "cl-prolog-app-test"
+              { nativeBuildInputs = [ pkgs.sbcl ]; }
+              ''
+                ${sbclCheckPrelude}
+                timeout -k 30 600 ${self.apps.${system}.test.program}
                 touch $out
               '';
         }

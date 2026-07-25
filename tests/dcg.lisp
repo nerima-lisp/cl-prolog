@@ -121,38 +121,38 @@
     (assert-phrase nil t rulebase 'empty '())
     (assert-phrase '(:token) t rulebase 'empty '(:token))))
 
-(deftest prolog-dcg-expansion-is-a-difference-list-clause ()
-  (let* ((clause (cl-prolog::%expand-prolog-dcg-clause
-                  '(pair ?x)
-                  '(and (dcg-terminals (?x))
-                        (dcg-terminals (?x)))))
-         (rulebase (make-rulebase :clauses (list clause))))
-    (is (prolog-succeeds-p rulebase '(phrase (pair a) (a a))))
-    (is (prolog-succeeds-p rulebase '(phrase (pair b) (b b tail) (tail))))
-    (is (not (prolog-succeeds-p rulebase '(phrase (pair a) (a b)))))))
+(deftest-queries prolog-dcg-expansion-is-a-difference-list-clause
+    ((make-rulebase
+      :clauses (list (cl-prolog::%expand-prolog-dcg-clause
+                      '(pair ?x)
+                      '(and (dcg-terminals (?x))
+                            (dcg-terminals (?x)))))))
+  ((phrase (pair a) (a a))             :succeeds)
+  ((phrase (pair b) (b b tail) (tail)) :succeeds)
+  ((phrase (pair a) (a b))             :fails))
 
-(deftest prolog-dcg-if-then-else-threads-condition-stream ()
-  (let* ((clause
-           (cl-prolog::%expand-prolog-dcg-clause
-            'p
-            '(if-then-else
-              (dcg-terminals (a))
-              (dcg-terminals (b))
-              (dcg-terminals (c)))))
-         (rulebase (make-rulebase :clauses (list clause))))
-    (is (prolog-succeeds-p rulebase '(phrase p (a b))))
-    (is (prolog-succeeds-p rulebase '(phrase p (c))))
-    (is (not (prolog-succeeds-p rulebase '(phrase p (a c)))))
-    (is (not (prolog-succeeds-p rulebase '(phrase p (b)))))))
+(deftest-queries prolog-dcg-if-then-else-threads-condition-stream
+    ((make-rulebase
+      :clauses (list (cl-prolog::%expand-prolog-dcg-clause
+                      'p
+                      '(if-then-else
+                        (dcg-terminals (a))
+                        (dcg-terminals (b))
+                        (dcg-terminals (c)))))))
+  ((phrase p (a b)) :succeeds)
+  ((phrase p (c))   :succeeds)
+  ((phrase p (a c)) :fails)
+  ((phrase p (b))   :fails))
 
-(deftest prolog-dcg-goal-handles-empty-and-flat-conjunction-bodies ()
-  (let* ((empty-clause (cl-prolog::%expand-prolog-dcg-clause 'empty-rule nil))
-         (flat-clause
-           (cl-prolog::%expand-prolog-dcg-clause
-            'flat-rule
-            '(and (dcg-terminals (a)) (dcg-terminals (b)) (dcg-terminals (c)))))
-         (rulebase (make-rulebase :clauses (list empty-clause flat-clause))))
-    (is (prolog-succeeds-p rulebase '(phrase empty-rule ())))
-    (is (not (prolog-succeeds-p rulebase '(phrase empty-rule (a)))))
-    (is (prolog-succeeds-p rulebase '(phrase flat-rule (a b c))))
-    (is (not (prolog-succeeds-p rulebase '(phrase flat-rule (a b)))))))
+(deftest-queries prolog-dcg-goal-handles-empty-and-flat-conjunction-bodies
+    ((make-rulebase
+      :clauses (list (cl-prolog::%expand-prolog-dcg-clause 'empty-rule nil)
+                     (cl-prolog::%expand-prolog-dcg-clause
+                      'flat-rule
+                      '(and (dcg-terminals (a))
+                            (dcg-terminals (b))
+                            (dcg-terminals (c)))))))
+  ((phrase empty-rule ())    :succeeds)
+  ((phrase empty-rule (a))   :fails)
+  ((phrase flat-rule (a b c)) :succeeds)
+  ((phrase flat-rule (a b))  :fails))

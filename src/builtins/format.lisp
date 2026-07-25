@@ -12,20 +12,11 @@
 
 (defun %format-source-text (term environment operation)
   "Resolve a format-string argument to a Lisp string."
-  (let ((value (logic-substitute term environment)))
-    (cond
-      ((logic-var-p value)
-       (%raise-instantiation-error environment operation
-                                   "format string must be instantiated"))
-      ((stringp value) value)
-      ((%term-atom-p value) (%atom-text value))
-      ((null value) "")
-      ((consp value)
-       (if (every #'integerp value)
-           (%code-list-text value environment operation)
-           (%character-list-text value environment operation)))
-      (t (%raise-type-error "ATOM" value environment operation
-                            "format string must be an atom, code list, or char list")))))
+  (%text-of (logic-substitute term environment) environment operation
+            :accept :text
+            :instantiation "format string must be instantiated"
+            :type-message
+            "format string must be an atom, code list, or char list"))
 
 (defun %format-arguments (term environment)
   "Resolve the format arguments; a non-list value becomes a single argument."
@@ -40,26 +31,15 @@
 
 (defun %format-atomic-text (term environment operation)
   "Text of an atomic argument for ~a: atom name or number text."
-  (cond
-    ((stringp term) term)
-    ((%term-atom-p term) (%atom-text term))
-    ((integerp term) (%number-text term environment operation))
-    ((floatp term) (%number-text term environment operation))
-    (t (%raise-type-error "ATOMIC" term environment operation
-                          "~~a expects an atom or number"))))
+  (%text-of term environment operation
+            :accept :atomic :instantiation nil
+            :type "ATOMIC" :type-message "~~a expects an atom or number"))
 
 (defun %format-string-text (term environment operation)
   "Text of a ~s argument: an atom, a code list, or a character list."
-  (cond
-    ((stringp term) term)
-    ((%term-atom-p term) (%atom-text term))
-    ((null term) "")
-    ((consp term)
-     (if (every #'integerp term)
-         (%code-list-text term environment operation)
-         (%character-list-text term environment operation)))
-    (t (%raise-type-error "ATOM" term environment operation
-                          "~~s expects an atom, code list, or char list"))))
+  (%text-of term environment operation
+            :accept :text :instantiation nil
+            :type-message "~~s expects an atom, code list, or char list"))
 
 (defun %format-grouped-integer (integer)
   "Render INTEGER in base 10 with comma-separated thousands groups."
@@ -296,17 +276,14 @@ control (~t fill, ~| absolute column, ~+ relative column)."
     (funcall emit environment)))
 
 (define-builtin (format format-term) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (%format-goal (%io-current-output-entry rulebase)
                 format-term nil environment emit (%io-operation "FORMAT")))
 
 (define-builtin (format format-term arguments) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (%format-goal (%io-current-output-entry rulebase)
                 format-term arguments environment emit (%io-operation "FORMAT")))
 
 (define-builtin (format stream format-term arguments) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (let ((operation (%io-operation "FORMAT")))
     (%format-goal (%io-stream-entry rulebase stream :output environment operation)
                   format-term arguments environment emit operation)))
@@ -327,12 +304,10 @@ control (~t fill, ~| absolute column, ~+ relative column)."
     (funcall emit environment)))
 
 (define-builtin (tab count) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (%tab-goal (%io-current-output-entry rulebase) count environment emit
              (%io-operation "TAB")))
 
 (define-builtin (tab stream count) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (let ((operation (%io-operation "TAB")))
     (%tab-goal (%io-stream-entry rulebase stream :output environment operation)
                count environment emit operation)))
@@ -347,11 +322,9 @@ control (~t fill, ~| absolute column, ~+ relative column)."
   (funcall emit environment))
 
 (define-builtin (print term) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (%print-goal (%io-current-output-entry rulebase) term environment emit))
 
 (define-builtin (print stream term) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (%print-goal (%io-stream-entry rulebase stream :output environment
                                  (%io-operation "PRINT"))
                term environment emit))

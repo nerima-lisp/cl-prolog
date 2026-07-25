@@ -64,12 +64,10 @@ kind-only match."
               (%unify-emit rest (rest tokens) value-env emit))))))))
 
 (define-builtin (dcg-token-match expected input rest) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%dcg-match-token expected (fresh-logic-variable) input rest environment emit))
 
 (define-builtin (dcg-token-match-value expected-kind expected-value input rest)
                 (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%dcg-match-token expected-kind expected-value input rest environment emit))
 
 (define-builtin (dcg-error-recovery input rest) (rulebase environment depth emit)

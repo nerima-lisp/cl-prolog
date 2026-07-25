@@ -33,7 +33,8 @@
   (let* ((goal (list 'retract clause))
          (pattern (logic-substitute clause environment))
          (head (%dynamic-clause-head pattern environment 'retract))
-         (normalized-pattern (if (symbolp pattern) head pattern)))
+         (normalized-pattern (%dynamic-pattern-term pattern head))
+         (prolog-shape-p (%prolog-rule-term-p pattern)))
     (%ensure-dynamic-predicate rulebase (first head) (length (rest head)) goal environment)
     (multiple-value-bind (snapshot entries) (%rulebase-snapshot rulebase)
       (declare (cl:ignore snapshot))
@@ -41,10 +42,7 @@
         (when (eq (%stored-clause-module entry) *current-prolog-module*)
           (let* ((clause-entry (%stored-clause-clause entry))
                  (fresh (%freshen-dynamic-clause clause-entry))
-                 (stored (if (null (clause-body fresh))
-                             (%entry-head fresh)
-                             (list* ':- (%entry-head fresh)
-                                    (clause-body fresh)))))
+                 (stored (%dynamic-pattern-clause-term fresh prolog-shape-p)))
             (multiple-value-bind (extended ok)
                 (unify normalized-pattern stored environment)
               (when (and ok (%rulebase-retract-entry! rulebase entry))
@@ -54,7 +52,8 @@
   (let* ((goal (list 'retractall clause))
          (pattern (logic-substitute clause environment))
          (head (%dynamic-clause-head pattern environment 'retractall))
-         (normalized-pattern (if (symbolp pattern) head pattern)))
+         (normalized-pattern (%dynamic-pattern-term pattern head))
+         (prolog-shape-p (%prolog-rule-term-p pattern)))
     (%ensure-dynamic-predicate rulebase (first head) (length (rest head)) goal environment)
     (multiple-value-bind (snapshot entries) (%rulebase-snapshot rulebase)
       (declare (cl:ignore snapshot))
@@ -62,10 +61,7 @@
         (dolist (entry entries)
           (when (eq (%stored-clause-module entry) *current-prolog-module*)
             (let* ((fresh (%freshen-dynamic-clause (%stored-clause-clause entry)))
-                   (stored (if (null (clause-body fresh))
-                               (%entry-head fresh)
-                               (list* ':- (%entry-head fresh)
-                                      (clause-body fresh)))))
+                   (stored (%dynamic-pattern-clause-term fresh prolog-shape-p)))
               (multiple-value-bind (extended ok)
                   (unify normalized-pattern stored environment)
                 (declare (cl:ignore extended))
@@ -121,25 +117,18 @@ indicator to T for O(1) membership checks."
           (%raise-type-error "PREDICATE_INDICATOR" resolved
                              environment 'current_predicate
                              "expected a predicate indicator"))
-        (unless (or (integerp (third resolved))
-                    (logic-var-p (third resolved)))
-          (%raise-type-error "INTEGER" (third resolved)
-                             environment 'current_predicate
-                             "predicate arity must be an integer"))
-        (when (and (integerp (third resolved))
-                   (minusp (third resolved)))
-          (%raise-domain-error "NOT_LESS_THAN_ZERO" (third resolved)
-                               environment 'current_predicate
-                               "predicate arity cannot be negative")))
+        (%require-bounded-integer (third resolved) environment
+                                  'current_predicate "predicate arity"
+                                  :allow-variable t))
       (if (or (logic-var-p resolved)
               (%term-has-variables-p resolved))
           (dolist (candidate (nreverse indicators))
             (%unify-emit indicator candidate environment emit))
           (progn
-            ;; Dispatch also covers valid arities of variadic builtins, which
-            ;; cannot all be represented by the finite enumeration above.
-            (when (or (gethash resolved seen)
-                      (%builtin-predicate-p (second resolved) (third resolved)))
+            ;; ISO 13211-1 8.8.2 enumerates the *user-defined* procedures, so a
+            ;; builtin's indicator does not succeed here even though the
+            ;; predicate exists -- `predicate_property/2' is what reports those.
+            (when (gethash resolved seen)
               (funcall emit environment)))))))
 
 (defun %predicate-clause-count (rulebase predicate arity module)
@@ -223,13 +212,20 @@ indicator to T for O(1) membership checks."
                                   "predicate indicator must be instantiated"))
     (unless (and (%proper-list-p resolved)
                  (= (length resolved) 3)
-                 (eq (first resolved) '/)
-                 (symbolp (second resolved)))
+                 (eq (first resolved) '/))
       (%raise-type-error "PREDICATE_INDICATOR" resolved environment 'abolish
                          "expected a predicate indicator"))
+    ;; ISO 13211-1 8.9.4.3 reports the offending *part* of the indicator: a
+    ;; non-atom name is a type_error(atom, Name), not one about the whole term.
+    (unless (symbolp (second resolved))
+      (%raise-type-error "ATOM" (second resolved) environment 'abolish
+                         "predicate name must be an atom"))
     (unless (integerp (third resolved))
       (%raise-type-error "INTEGER" (third resolved) environment 'abolish
                          "predicate arity must be an integer"))
+    (when (> (third resolved) *max-prolog-term-arity*)
+      (%raise-representation-error "MAX_ARITY" environment 'abolish
+                                   "arity exceeds the max_arity flag"))
     (when (minusp (third resolved))
       (%raise-domain-error "NOT_LESS_THAN_ZERO" (third resolved)
                            environment 'abolish
@@ -256,7 +252,16 @@ indicator to T for O(1) membership checks."
 
 (define-builtin (clause head body) (rulebase environment depth emit)
   (let* ((resolved-head (logic-substitute head environment))
-         (callable (%ensure-callable resolved-head environment 'clause)))
+         (callable (%ensure-callable resolved-head environment 'clause))
+         (resolved-body (logic-substitute body environment)))
+    ;; ISO 13211-1 8.8.1.3: a bound Body that is not callable is a type_error,
+    ;; not a silent failure.
+    (unless (or (logic-var-p resolved-body)
+                (symbolp resolved-body)
+                (%goal-form-p resolved-body))
+      (%raise-type-error "CALLABLE" resolved-body environment
+                         (%iso-atom "CLAUSE")
+                         "clause/2 body must be a callable term"))
     (%ensure-dynamic-predicate rulebase (first callable)
                                (length (rest callable))
                                (list 'clause head body) environment

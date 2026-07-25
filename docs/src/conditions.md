@@ -64,6 +64,13 @@ These mirror the ISO error taxonomy. All are subtypes of
 - `prolog-evaluation-error` — an arithmetic evaluation failed (e.g. division
   by zero).
 - `prolog-resource-error` — a resource bound was exceeded.
+- `prolog-syntax-error` — text that had to be read as a term or a number was not
+  readable as one, as `read_term/2,3`, `term_to_atom/2`,
+  `read_term_from_atom/3`, `number_chars/2` and `number_codes/2` all report
+  (ISO 13211-1 8.14.1.3, 8.16.7.3, 8.16.8.3).
+- `prolog-representation-error` — a term is well formed but outside what this
+  implementation can represent, such as an integer that names no character
+  (ISO 13211-1 7.12.2 (e)).
 
 ## Arithmetic diagnostics
 

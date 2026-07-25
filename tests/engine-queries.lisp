@@ -16,8 +16,8 @@
                "atom_concat(hello, world, helloworld)"
                "sub_atom(abc, 1, 1, 1, b)"
                "atom_chars(abc, [a, b, c])"
-               "atom_codes(abc, [65, 66, 67])"
-               "char_code(a, 65)"
+               "atom_codes(abc, [97, 98, 99])"
+               "char_code(a, 97)"
                "number_chars(42, ['4', '2'])"
                "number_codes(42, [52, 50])"
                "current_predicate(atom_length/2)"
@@ -124,34 +124,21 @@
   ((throw ?unbound)              :signals)
   ((repeat)                      :ordered (nil nil nil) :limit 3))
 
-(deftest call-nth-validates-arguments ()
-  (let ((rulebase (make-rulebase)))
-    (dolist (goal '((call_nth ?goal 1)))
-      (signals-condition prolog-instantiation-error
-        (query-prolog rulebase goal)))
-    (dolist (goal '((call_nth 42 1)
-                    (call_nth true atom)
-                    (call_nth true 1.5)))
-      (signals-condition prolog-type-error
-        (query-prolog rulebase goal)))
-    (dolist (goal '((call_nth true 0)
-                    (call_nth true -1)))
-      (signals-condition prolog-domain-error
-        (query-prolog rulebase goal)))))
+(deftest-queries call-nth-validates-arguments ((make-rulebase))
+  ((call_nth ?goal 1)              :signals prolog-instantiation-error)
+  ((call_nth 42 1)                 :signals prolog-type-error)
+  ((call_nth true atom)            :signals prolog-type-error)
+  ((call_nth true 1.5)             :signals prolog-type-error)
+  ((call_nth true 0)               :signals prolog-domain-error)
+  ((call_nth true -1)              :signals prolog-domain-error))
 
-(deftest call-with-depth-limit-validates-arguments ()
-  (let ((rulebase (make-rulebase)))
-    (signals-condition prolog-instantiation-error
-      (query-prolog rulebase '(call_with_depth_limit true ?limit ?result)))
-    (signals-condition prolog-instantiation-error
-      (query-prolog rulebase '(call_with_depth_limit ?goal 0 ?result)))
-    (dolist (goal '((call_with_depth_limit true atom ?result)
-                    (call_with_depth_limit true 1.5 ?result)
-                    (call_with_depth_limit 42 0 ?result)))
-      (signals-condition prolog-type-error
-        (query-prolog rulebase goal)))
-    (signals-condition prolog-domain-error
-      (query-prolog rulebase '(call_with_depth_limit true -1 ?result)))))
+(deftest-queries call-with-depth-limit-validates-arguments ((make-rulebase))
+  ((call_with_depth_limit true ?limit ?result) :signals prolog-instantiation-error)
+  ((call_with_depth_limit ?goal 0 ?result)     :signals prolog-instantiation-error)
+  ((call_with_depth_limit true atom ?result)   :signals prolog-type-error)
+  ((call_with_depth_limit true 1.5 ?result)    :signals prolog-type-error)
+  ((call_with_depth_limit 42 0 ?result)        :signals prolog-type-error)
+  ((call_with_depth_limit true -1 ?result)     :signals prolog-domain-error))
 
 (deftest call-nth-ground-index-stops-inner-search ()
   (let ((rulebase (make-rulebase)))

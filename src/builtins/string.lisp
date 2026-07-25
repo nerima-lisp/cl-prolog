@@ -9,7 +9,6 @@
 ;;; string_length/2
 
 (define-builtin (string_length string length) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((text (%text-of (logic-substitute string environment)
                         environment (%iso-atom "STRING_LENGTH"))))
     (%unify-emit length (length text) environment emit)))
@@ -17,7 +16,6 @@
 ;;; atom_string/2, string_to_atom/2, number_string/2
 
 (define-builtin (atom_string atom string) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "ATOM_STRING"))
          (atom-value (logic-substitute atom environment)))
     (if (logic-var-p atom-value)
@@ -30,7 +28,6 @@
                      environment emit))))
 
 (define-builtin (string_to_atom string atom) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "STRING_TO_ATOM"))
          (string-value (logic-substitute string environment)))
     (if (logic-var-p string-value)
@@ -43,7 +40,6 @@
                      environment emit))))
 
 (define-builtin (number_string number string) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "NUMBER_STRING"))
          (number-value (logic-substitute number environment)))
     (if (logic-var-p number-value)
@@ -76,14 +72,12 @@
                      environment emit))))
 
 (define-builtin (string_chars string chars) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%string-list-builtin
    string chars environment emit (%iso-atom "STRING_CHARS")
    #'%character-list-text
    (lambda (text) (map 'list (lambda (c) (%text-atom (string c))) text))))
 
 (define-builtin (string_codes string codes) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%string-list-builtin
    string codes environment emit (%iso-atom "STRING_CODES")
    #'%code-list-text
@@ -92,7 +86,6 @@
 ;;; term_string/2
 
 (define-builtin (term_string term string) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (let* ((operation (%iso-atom "TERM_STRING"))
          (resolved-term (logic-substitute term environment)))
     (if (logic-var-p resolved-term)
@@ -149,7 +142,6 @@ MAKE-RESULT wraps a CL string as the emitted term (string or atom)."
                       environment emit)))))))))
 
 (define-builtin (string_concat left right whole) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((operation (%iso-atom "STRING_CONCAT")))
     (%concat-goal left right whole environment emit operation
                   ;; Cap the result length like the atom/text builtins, so a
@@ -163,7 +155,6 @@ MAKE-RESULT wraps a CL string as the emitted term (string or atom)."
                     text))))
 
 (define-builtin (text_concat left right whole) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%concat-goal left right whole environment emit (%iso-atom "TEXT_CONCAT")
                 (lambda (text) (%text-atom text))))
 
@@ -171,7 +162,6 @@ MAKE-RESULT wraps a CL string as the emitted term (string or atom)."
 
 (define-builtin (sub_string string before length after sub)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "SUB_STRING"))
          (text (%text-of (logic-substitute string environment) environment operation))
          (total (length text))
@@ -222,7 +212,6 @@ yields the whole TEXT as a single field."
 
 (define-builtin (split_string string separators pad parts)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "SPLIT_STRING"))
          (text (%text-of (logic-substitute string environment) environment operation))
          (sep (%text-of (logic-substitute separators environment) environment operation))

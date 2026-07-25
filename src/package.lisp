@@ -3,6 +3,14 @@
   (:documentation
    "Interned Prolog atoms kept separate from CL-PROLOG symbols, including inherited Common Lisp names and quoted names reserved for logic-variable syntax."))
 
+(defpackage #:cl-prolog.verbatim-atoms
+  (:use)
+  (:documentation
+   "Prolog atoms whose text holds an upper-case letter, interned under that
+exact text rather than the upcased spelling CL-PROLOG uses for a lower-case
+name.  The home package is what tells the two encodings apart, so `'ABC'' here
+and CL-PROLOG::ABC (the atom `abc') stay distinct.  See src/atom-name.lisp."))
+
 (defpackage #:cl-prolog
   (:use #:cl)
   (:shadow #:! #:assert #:catch #:throw)
@@ -26,6 +34,9 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:copy-rulebase
    #:rulebase-extend
    #:rulebase-insert-clause!
+   ;; atoms
+   #:prolog-atom
+   #:prolog-atom-text
    ;; unification
    #:logic-var-p
    #:fresh-logic-variable
@@ -49,6 +60,8 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:prolog-existence-error
    #:prolog-evaluation-error
    #:prolog-resource-error
+   #:prolog-representation-error
+   #:prolog-syntax-error
    #:prolog-halt
    #:prolog-halt-code
    #:arithmetic-evaluation-error

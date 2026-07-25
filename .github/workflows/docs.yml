@@ -7,6 +7,7 @@ on:
       - "docs/**"
       - "flake.nix"
       - "flake.lock"
+      - "cl-prolog.asd"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 

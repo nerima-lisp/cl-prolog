@@ -19,7 +19,7 @@
 (defun %pair-term-p (term)
   (and (%proper-list-p term) (= (length term) 3)
        (symbolp (first term))
-       (string= (symbol-name (first term)) "-")))
+       (%same-atom-text-p (first term) (%pair-functor))))
 
 (defun %make-assoc (sorted-pairs)
   (list (%assoc-functor) sorted-pairs))
@@ -36,7 +36,7 @@ letting a host walk diverge."
       ((and (%proper-list-p resolved)
             (= (length resolved) 2)
             (symbolp (first resolved))
-            (string= (symbol-name (first resolved)) "assoc")
+            (%same-atom-text-p (first resolved) (%assoc-functor))
             (%proper-list-p (second resolved)))
        (let ((pairs (second resolved)))
          (dolist (pair pairs pairs)
@@ -84,11 +84,9 @@ raising on duplicate keys as SWI's list_to_assoc/2 does."
       sorted)))
 
 (define-builtin (empty_assoc assoc) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%unify-emit assoc (%make-assoc '()) environment emit))
 
 (define-builtin (get_assoc key assoc value) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "GET_ASSOC"))
          (key-value (logic-substitute key environment))
          (pairs (%assoc-pairs assoc environment operation))
@@ -98,7 +96,6 @@ raising on duplicate keys as SWI's list_to_assoc/2 does."
 
 (define-builtin (put_assoc key assoc value new-assoc)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "PUT_ASSOC"))
          (key-value (logic-substitute key environment))
          (value-value (logic-substitute value environment))
@@ -111,7 +108,6 @@ raising on duplicate keys as SWI's list_to_assoc/2 does."
 
 (define-builtin (del_assoc key assoc value new-assoc)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "DEL_ASSOC"))
          (key-value (logic-substitute key environment))
          (pairs (%assoc-pairs assoc environment operation))
@@ -124,28 +120,27 @@ raising on duplicate keys as SWI's list_to_assoc/2 does."
        environment emit))))
 
 (define-builtin (list_to_assoc pairs assoc) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%unify-emit assoc
                (%make-assoc (%require-assoc-input-pairs
                              pairs environment (%iso-atom "LIST_TO_ASSOC")))
                environment emit))
 
-(define-builtin (assoc_to_list assoc pairs) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (%unify-emit pairs
-               (%assoc-pairs assoc environment (%iso-atom "ASSOC_TO_LIST"))
-               environment emit))
-
-(define-builtin (assoc_to_keys assoc keys) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (%unify-emit keys
-               (mapcar #'%pair-key
-                       (%assoc-pairs assoc environment (%iso-atom "ASSOC_TO_KEYS")))
-               environment emit))
-
-(define-builtin (assoc_to_values assoc values) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (%unify-emit values
-               (mapcar #'%pair-value
-                       (%assoc-pairs assoc environment (%iso-atom "ASSOC_TO_VALUES")))
-               environment emit))
+(macrolet ((define-assoc-projection-builtins (&body specifications)
+             ;; Each specification is (NAME RESULT OPERATION PROJECTION); a NIL
+             ;; PROJECTION yields the sorted pairs themselves.
+             `(progn
+                ,@(loop for (name result operation projection) in specifications
+                        collect
+                        `(define-builtin (,name assoc ,result)
+                             (rulebase environment depth emit)
+                           (let ((entries (%assoc-pairs assoc environment
+                                                        (%iso-atom ,operation))))
+                             (%unify-emit ,result
+                                          ,(if projection
+                                               `(mapcar ,projection entries)
+                                               'entries)
+                                          environment emit)))))))
+  (define-assoc-projection-builtins
+    (assoc_to_list pairs "ASSOC_TO_LIST" nil)
+    (assoc_to_keys keys "ASSOC_TO_KEYS" #'%pair-key)
+    (assoc_to_values values "ASSOC_TO_VALUES" #'%pair-value)))

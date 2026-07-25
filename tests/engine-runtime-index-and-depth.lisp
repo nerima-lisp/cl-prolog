@@ -335,31 +335,13 @@
       1 ?outer-depth)
      :ordered (((?inner-depth . 2) (?outer-depth . 1))))))
 
-(progn (deftest call-with-depth-limit-does-not-scope-over-the-caller-continuation ()
+(deftest call-with-depth-limit-does-not-scope-over-the-caller-continuation ()
   (let ((rb (make-rulebase)))
     (assert-query
      rb
      (and (call_with_depth_limit true 1 ?depth)
           (= ?side ok))
-     :ordered (((?depth . 1) (?side . ok)))))) (deftest first-argument-index-preserves-wildcard-order-and-fallback ()
-  (let ((rulebase (make-rulebase)))
-    (rulebase-insert-clause! rulebase (make-clause (quote (indexed target exact-first))))
-    (rulebase-insert-clause! rulebase (make-clause (quote (indexed ?head wildcard))))
-    (rulebase-insert-clause! rulebase (make-clause (quote (indexed other excluded))))
-    (rulebase-insert-clause! rulebase (make-clause (quote (indexed target exact-last))))
-    (let ((revision (cl-prolog::rulebase-revision rulebase)))
-      (is-equal (quote ((indexed target exact-first)
-                        (indexed ?head wildcard)
-                        (indexed target exact-last)))
-                (stored-clause-heads
-                 (cl-prolog::%rulebase-first-argument-entries-at-revision
-                  rulebase cl-prolog::+default-prolog-module+ (quote indexed) 2
-                  (cl-prolog::%first-argument-index-key (quote target)) revision))))
-    (is-equal (quote (((?result . exact-first))
-                      ((?result . wildcard))
-                      ((?result . exact-last))))
-              (query-prolog rulebase (quote (indexed target ?result))))
-    (is-equal 4 (length (query-prolog rulebase (quote (indexed ?key ?result))))))))
+     :ordered (((?depth . 1) (?side . ok))))))
 
 (progn
 (progn

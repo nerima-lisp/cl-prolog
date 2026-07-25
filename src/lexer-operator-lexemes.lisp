@@ -11,6 +11,16 @@
 (defun %operator-lexeme (definition)
   (string-downcase (symbol-name (operator-definition-name definition))))
 
+(defparameter +prolog-graphic-characters+ "#$&*+-./:<=>?@^~\\"
+  "The ISO 13211-1 6.4.2 graphic characters.
+
+A maximal run of them is one graphic token, and a graphic token is an atom
+whether or not it has been declared an operator -- which is what lets
+`:- op(700, xfx, ===).' name an operator that does not exist yet.")
+
+(defun %prolog-graphic-character-p (character)
+  (and character (find character +prolog-graphic-characters+ :test #'char=) t))
+
 (defun %plain-prolog-atom-name-p (lexeme)
   (and (plusp (length lexeme))
        (lower-case-p (char lexeme 0))

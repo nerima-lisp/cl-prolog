@@ -4,29 +4,26 @@
 
 (in-package #:cl-prolog)
 
-(defun %prolog-symbol (name &key preserve-case (position 0) track-resource-p)
-  (let ((canonical-name (if preserve-case name (string-upcase name)))
+(defun %prolog-symbol (name &key (position 0) track-resource-p)
+  "Intern NAME as an engine-internal CL-PROLOG symbol (an operator or control
+functor), which is always the upcased spelling."
+  (let ((canonical-name (string-upcase name))
         (package (find-package '#:cl-prolog)))
     (if track-resource-p
         (%intern-parser-symbol canonical-name package position)
         (intern canonical-name package))))
 
-(defun %prolog-atom-symbol
-    (name &key preserve-case (position 0) track-resource-p)
-  (let* ((canonical-name (if preserve-case name (string-upcase name)))
-         (package (find-package '#:cl-prolog)))
-    (flet ((intern-name (symbol-name target-package)
-             (if track-resource-p
-                 (%intern-parser-symbol symbol-name target-package position)
-                 (intern symbol-name target-package))))
-      (multiple-value-bind (symbol status) (find-symbol canonical-name package)
-        (if (or (eq status :inherited)
-                (and (plusp (length canonical-name))
-                     (char= (char canonical-name 0) #\?)))
-            (intern-name canonical-name
-                         (find-package '#:cl-prolog.user-atoms))
-            (or symbol
-                (intern-name canonical-name package)))))))
+(defun %prolog-atom-symbol (name &key (position 0) track-resource-p)
+  "Return the Prolog atom whose text is NAME, accounting the interning against
+the parser's symbol budget when TRACK-RESOURCE-P.  See src/atom-name.lisp for
+the text/symbol mapping this uses; quoting is not part of it, so `'foo'' and
+`foo' return the same atom."
+  (%intern-prolog-atom
+   name
+   (if track-resource-p
+       (lambda (symbol-name target-package)
+         (%intern-parser-symbol symbol-name target-package position))
+       #'intern)))
 
 (defun %variable-symbol (name variables &key (position 0))
   (if (string= name "_")
@@ -88,12 +85,42 @@ the direct reader APIs default to :codes.")
     (:codes (map 'list #'char-code text))
     (:chars (map 'list
                  (lambda (character)
-                   (%prolog-atom-symbol (string character)
-                                        :preserve-case t :position position))
+                   (%prolog-atom-symbol (string character) :position position))
                  text))
-    (:atom (%prolog-atom-symbol text :preserve-case t :position position
-                                     :track-resource-p t))
+    (:atom (%prolog-atom-symbol text :position position
+                                :track-resource-p t))
     (:string text)))
+
+(defparameter +structural-operator-lexemes+ '(")" "]" "}" "," "|" ".")
+  "Operator lexemes that never stand for an atom where a term is expected.
+
+Each closes or separates a construct, so meeting one in a term position is a
+syntax error rather than the atom of the same name.  The quoted spellings
+(`','', `'|'') still read as atoms, since quoting bypasses this table.")
+
+(defun %term-start-token-p (token)
+  "True when TOKEN could begin a term, so a preceding operator has an operand."
+  (not (or (eq :eof (%token-kind token))
+           (and (eq :operator (%token-kind token))
+                (member (%token-value token) +structural-operator-lexemes+
+                        :test #'string=)))))
+
+(defun %operator-token-is-atom-p (parser token)
+  "True when the operator TOKEN denotes the atom of the same name.
+
+ISO 13211-1 6.3.3.1 admits an atom that is an operator as an argument and
+6.3.4.3 admits it bracketed, so `functor(T, +, 2)', `T =.. [+, 1, 2]',
+`sort(0, @<, L, S)' and `X = (+)' are all well-formed.  Those cases look alike
+from here: no operand follows, so the operator has nothing to apply to and the
+only reading left is the atom.
+
+An operator used as the left operand of another operator (`+ == '+'') is not
+covered -- ISO requires brackets there, and guessing would change how a
+genuine prefix operator parses."
+  (and (eq :operator (%token-kind token))
+       (not (member (%token-value token) +structural-operator-lexemes+
+                    :test #'string=))
+       (not (%term-start-token-p (%peek-token parser)))))
 
 (defun %parse-primary (parser variables minimum-precedence)
   (let ((token (%current-token parser)))
@@ -105,9 +132,21 @@ the direct reader APIs default to :codes.")
        (let ((list (%parse-list parser variables)))
          (if *parsing-dcg-body-p* (list 'dcg-terminals list) list)))
       ((%accept-token parser :operator "{")
-       (prog1 (list 'brace (let ((*parsing-dcg-body-p* nil))
-                            (%parse-expression parser variables 0)))
-         (%expect-token parser :operator "}")))
+       ;; ISO 13211-1 6.3.6 makes a bare `{}' the atom of that name; only a
+       ;; non-empty `{T}' is the curly-brace term.
+       (if (%accept-token parser :operator "}")
+           (%prolog-atom-symbol "{}" :position (%token-position token)
+                                     :track-resource-p t)
+           (prog1 (list 'brace (let ((*parsing-dcg-body-p* nil))
+                                 (%parse-expression parser variables 0)))
+             (%expect-token parser :operator "}"))))
+      ;; Checked before the prefix-operator branch: `- 1' is prefix minus
+      ;; because a term follows, while the `-' in `f(-, 1)' is the atom.
+      ((%operator-token-is-atom-p parser token)
+       (incf (%parser-position parser))
+       (%prolog-atom-symbol (%token-value token)
+                            :position (%token-position token)
+                            :track-resource-p t))
       ((%prefix-operator-definition parser token)
        (let* ((definition (%prefix-operator-definition parser token))
               (binding-power (%operator-binding-power definition)))
@@ -146,7 +185,6 @@ the direct reader APIs default to :codes.")
        (incf (%parser-position parser))
        (let ((atom (%prolog-atom-symbol
                     (%token-value token)
-                    :preserve-case (eq :quoted-atom (%token-kind token))
                     :position (%token-position token)
                     :track-resource-p t)))
          (if (%accept-token parser :operator "(")

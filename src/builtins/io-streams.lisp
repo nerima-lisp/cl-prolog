@@ -51,33 +51,19 @@
         (%io-unify-read-results term value parsed variables names singletons
                                 environment emit)))))
 
-(%define-io-dual-builtin (read_term (term options) (term options) "READ_TERM")
+(%define-io-dual-builtin (read_term (term options) :input "READ_TERM")
     (rulebase environment depth emit)
-  :current
-  (%io-read-term-goal
-   rulebase (%io-current-input-entry rulebase)
-   term options environment emit)
-  :explicit
-  (%io-read-term-goal
-   rulebase (%io-stream-entry rulebase stream :input environment operation)
-   term options environment emit))
+  (%io-read-term-goal rulebase entry term options environment emit))
 
-(%define-io-dual-builtin (read (term) (term) "READ")
+(%define-io-dual-builtin (read (term) :input "READ")
     (rulebase environment depth emit)
-  :current
-  (%io-read-term-goal
-   rulebase (%io-current-input-entry rulebase)
-   term '() environment emit operation)
-  :explicit
-  (%io-read-term-goal
-   rulebase (%io-stream-entry rulebase stream :input environment operation)
-   term '() environment emit operation))
+  (%io-read-term-goal rulebase entry term '() environment emit operation))
 
 (defun %io-write-term-goal (entry term options environment emit
                             &optional (operation (%io-operation "WRITE_TERM")))
   (let* (
-         (parsed (%io-options options environment operation
-                              '("quoted" "ignore_ops" "numbervars")))
+         (parsed (%io-write-options options environment operation
+                                    '("quoted" "ignore_ops" "numbervars")))
          (ignore-ops (%io-boolean
                       (%io-option "ignore_ops" parsed (%iso-atom "false"))
                       environment operation))
@@ -94,16 +80,9 @@
                                        :ignore-ops ignore-ops))
     (funcall emit environment)))
 
-(%define-io-dual-builtin (write_term (term options) (term options) "WRITE_TERM")
+(%define-io-dual-builtin (write_term (term options) :output "WRITE_TERM")
     (rulebase environment depth emit)
-  :current
-  (%io-write-term-goal
-   (%io-current-output-entry rulebase)
-   term options environment emit)
-  :explicit
-  (%io-write-term-goal
-   (%io-stream-entry rulebase stream :output environment operation)
-   term options environment emit))
+  (%io-write-term-goal entry term options environment emit))
 
 (defun %io-write-facade-goal (entry term quoted environment emit operation)
   (%io-write-term-goal
@@ -112,27 +91,13 @@
          (list (%iso-atom "numbervars") (%iso-atom "true")))
    environment emit operation))
 
-(%define-io-dual-builtin (write (term) (term) "WRITE")
+(%define-io-dual-builtin (write (term) :output "WRITE")
     (rulebase environment depth emit)
-  :current
-  (%io-write-facade-goal
-   (%io-current-output-entry rulebase)
-   term nil environment emit operation)
-  :explicit
-  (%io-write-facade-goal
-   (%io-stream-entry rulebase stream :output environment operation)
-   term nil environment emit operation))
+  (%io-write-facade-goal entry term nil environment emit operation))
 
-(%define-io-dual-builtin (writeq (term) (term) "WRITEQ")
+(%define-io-dual-builtin (writeq (term) :output "WRITEQ")
     (rulebase environment depth emit)
-  :current
-  (%io-write-facade-goal
-   (%io-current-output-entry rulebase)
-   term t environment emit operation)
-  :explicit
-  (%io-write-facade-goal
-   (%io-stream-entry rulebase stream :output environment operation)
-   term t environment emit operation))
+  (%io-write-facade-goal entry term t environment emit operation))
 
 (defun %io-write-canonical-goal (entry term environment emit operation)
   ;; ISO write_canonical/1,2: quoted, operator-free, no numbervars, so the
@@ -143,59 +108,34 @@
          (list (%iso-atom "ignore_ops") (%iso-atom "true")))
    environment emit operation))
 
-(%define-io-dual-builtin (write_canonical (term) (term) "WRITE_CANONICAL")
+(%define-io-dual-builtin (write_canonical (term) :output "WRITE_CANONICAL")
     (rulebase environment depth emit)
-  :current
-  (%io-write-canonical-goal
-   (%io-current-output-entry rulebase)
-   term environment emit operation)
-  :explicit
-  (%io-write-canonical-goal
-   (%io-stream-entry rulebase stream :output environment operation)
-   term environment emit operation))
+  (%io-write-canonical-goal entry term environment emit operation))
 
-(defun %io-newline (rulebase entry)
-  (terpri (prolog-stream-stream
-           (or entry (prolog-io-context-current-output (%io-context rulebase))))))
-
-(defun %io-newline-goal (rulebase stream environment emit)
-  (%io-newline rulebase stream)
+(defun %io-newline-goal (entry environment emit)
+  (terpri (prolog-stream-stream entry))
   (funcall emit environment))
 
-(%define-io-dual-builtin (nl () () "NL")
+(%define-io-dual-builtin (nl () :output "NL")
     (rulebase environment depth emit)
-  :current
-  (%io-newline-goal rulebase nil environment emit)
-  :explicit
-  (%io-newline-goal
-   rulebase
-   (%io-stream-entry rulebase stream :output environment operation)
-   environment emit))
+  (%io-newline-goal entry environment emit))
 
-(%define-io-dual-builtin (flush_output () () "FLUSH_OUTPUT")
+(%define-io-dual-builtin (flush_output () :output "FLUSH_OUTPUT")
     (rulebase environment depth emit)
-  :current
-  (%io-flush-goal rulebase nil environment emit)
-  :explicit
-  (%io-flush-goal
-   rulebase
-   (%io-stream-entry rulebase stream :output environment operation)
-   environment emit))
+  (%io-flush-goal entry environment emit))
 
-(defun %io-flush (rulebase entry)
-  (finish-output
-   (prolog-stream-stream
-    (or entry (prolog-io-context-current-output (%io-context rulebase))))))
-
-(defun %io-flush-goal (rulebase stream environment emit)
-  (%io-flush rulebase stream)
+(defun %io-flush-goal (entry environment emit)
+  (finish-output (prolog-stream-stream entry))
   (funcall emit environment))
 
 (defun %io-require-stream-type (entry type environment operation)
+  ;; ISO 13211-1 8.12/8.13 name the stream's *actual* type as the culprit -- a
+  ;; byte read from a text stream is permission_error(input, text_stream, S) --
+  ;; because that is the property that makes the operation illegal.
   (unless (eq (prolog-stream-type entry) type)
     (%raise-permission-error
      (if (eq (prolog-stream-direction entry) :input) "INPUT" "OUTPUT")
-     (if (eq type :text) "TEXT_STREAM" "BINARY_STREAM")
+     (if (eq (prolog-stream-type entry) :text) "TEXT_STREAM" "BINARY_STREAM")
      (%io-public-designator entry) environment operation
      (if (eq type :text)
          "Character operation requires a text stream"
@@ -216,41 +156,35 @@ must. Returns the character, or NIL at end of stream."
                 (t :past)))
     character))
 
+(defun %io-require-in-character (term environment operation)
+  "Check get_char/peek_char's output argument per ISO 13211-1 8.12.1.3.
+
+A bound argument that is neither a one-character atom nor `end_of_file' is a
+type_error(in_character, C); leaving it to unification would fail silently."
+  (let ((value (logic-substitute term environment)))
+    (unless (or (logic-var-p value)
+                (%character-atom-p value)
+                (and (%term-atom-p value)
+                     (string= "end_of_file" (%atom-text value))))
+      (%raise-type-error "IN_CHARACTER" value environment operation
+                         "expected a character or end_of_file"))))
+
 (defun %io-character-input (entry environment operation &key peek)
   (let ((character (%io-read-character entry environment operation :peek peek)))
     (if character (%character-atom character) (%iso-atom "end_of_file"))))
 
-(%define-io-dual-builtin (get_char (character) (character) "GET_CHAR")
+(%define-io-dual-builtin (get_char (character) :input "GET_CHAR")
     (rulebase environment depth emit)
-  :current
-  (%unify-emit character
-               (%io-character-input
-                (%io-current-input-entry rulebase)
-                environment operation)
-               environment emit)
-  :explicit
-  (%unify-emit character
-               (%io-character-input
-                (%io-stream-entry rulebase stream :input environment operation)
-                environment operation)
+  (%io-require-in-character character environment operation)
+  (%unify-emit character (%io-character-input entry environment operation)
                environment emit))
 
-(%define-io-dual-builtin (peek_char (character) (character) "PEEK_CHAR")
+(%define-io-dual-builtin (peek_char (character) :input "PEEK_CHAR")
     (rulebase environment depth emit)
-  :current
-  (%unify-emit
-   character
-   (%io-character-input
-    (%io-current-input-entry rulebase)
-    environment operation :peek t)
-   environment emit)
-  :explicit
-  (%unify-emit
-   character
-   (%io-character-input
-    (%io-stream-entry rulebase stream :input environment operation)
-    environment operation :peek t)
-   environment emit))
+  (%io-require-in-character character environment operation)
+  (%unify-emit character
+               (%io-character-input entry environment operation :peek t)
+               environment emit))
 
 (defun %io-write-text-unit (entry term environment operation converter)
   "Write TERM's single text unit (a character or character-code atom, per
@@ -286,70 +220,48 @@ src/builtins/io-code.lisp)."
 
 (defun %io-byte (term environment operation)
   (let ((value (%io-resolve-term term environment operation)))
-    (unless (integerp value)
-      (%raise-type-error "INTEGER" value environment operation
-                         "Byte must be an integer"))
-    (unless (<= 0 value 255)
-      (%raise-domain-error "BYTE" value environment operation
-                           "Byte must be between 0 and 255"))
+    ;; ISO 13211-1 8.13.3.3 uses one class for both shapes: anything that is
+    ;; not a byte is type_error(byte, B).
+    (unless (and (integerp value) (<= 0 value 255))
+      (%raise-type-error "BYTE" value environment operation
+                         "Byte must be an integer between 0 and 255"))
     value))
 
 (defun %io-byte-input-goal (entry byte environment emit operation peek)
+  ;; ISO 13211-1 8.13.1.3: a bound argument that is no in-byte is a
+  ;; type_error(in_byte, B), checked before the stream's type.
+  (let ((value (logic-substitute byte environment)))
+    (unless (or (logic-var-p value)
+                (and (integerp value) (<= -1 value 255)))
+      (%raise-type-error "IN_BYTE" value environment operation
+                         "expected a byte or -1 for end of file")))
   (%unify-emit byte (%io-read-byte entry environment operation :peek peek)
                environment emit))
 
-(%define-io-dual-builtin (put_char (character) (character) "PUT_CHAR")
+(%define-io-dual-builtin (put_char (character) :output "PUT_CHAR")
     (rulebase environment depth emit)
-  :current
-  (progn
-    (%io-write-character
-     (%io-current-output-entry rulebase)
-     character environment operation)
-    (funcall emit environment))
-  :explicit
-  (progn
-    (%io-write-character
-     (%io-stream-entry rulebase stream :output environment operation)
-     character environment operation)
-    (funcall emit environment)))
+  (%io-write-character entry character environment operation)
+  (funcall emit environment))
 
-(%define-io-dual-builtin (get_byte (byte) (byte) "GET_BYTE")
+(%define-io-dual-builtin (get_byte (byte) :input "GET_BYTE")
     (rulebase environment depth emit)
-  :current
-  (%io-byte-input-goal
-   (%io-current-input-entry rulebase)
-   byte environment emit operation nil)
-  :explicit
-  (%io-byte-input-goal
-   (%io-stream-entry rulebase stream :input environment operation)
-   byte environment emit operation nil))
+  (%io-byte-input-goal entry byte environment emit operation nil))
 
-(%define-io-dual-builtin (peek_byte (byte) (byte) "PEEK_BYTE")
+(%define-io-dual-builtin (peek_byte (byte) :input "PEEK_BYTE")
     (rulebase environment depth emit)
-  :current
-  (%io-byte-input-goal
-   (%io-current-input-entry rulebase)
-   byte environment emit operation t)
-  :explicit
-  (%io-byte-input-goal
-   (%io-stream-entry rulebase stream :input environment operation)
-   byte environment emit operation t))
+  (%io-byte-input-goal entry byte environment emit operation t))
 
 (defun %io-write-byte-goal (entry byte environment emit operation)
-  (%io-require-stream-type entry :binary environment operation)
-  (write-byte (%io-byte byte environment operation)
-              (prolog-stream-stream entry))
+  ;; ISO 13211-1 8.13.3.3 checks the argument before the stream: `put_byte(a)'
+  ;; on a text stream is a type_error(byte, a), not a permission error about
+  ;; the stream, because the argument is wrong whatever the stream is.
+  (let ((value (%io-byte byte environment operation)))
+    (%io-require-stream-type entry :binary environment operation)
+    (write-byte value (prolog-stream-stream entry)))
   (funcall emit environment))
-(%define-io-dual-builtin (put_byte (byte) (byte) "PUT_BYTE")
+(%define-io-dual-builtin (put_byte (byte) :output "PUT_BYTE")
     (rulebase environment depth emit)
-  :current
-  (%io-write-byte-goal
-   (%io-current-output-entry rulebase)
-   byte environment emit operation)
-  :explicit
-  (%io-write-byte-goal
-   (%io-stream-entry rulebase stream :output environment operation)
-   byte environment emit operation))
+  (%io-write-byte-goal entry byte environment emit operation))
 
 (defun %io-at-end-p (entry environment operation)
   (if (eq (prolog-stream-end-of-stream entry) :past)
@@ -364,15 +276,7 @@ src/builtins/io-code.lisp)."
               (if at-end-p :at :not))
         at-end-p)))
 
-(%define-io-dual-builtin (at_end_of_stream () () "AT_END_OF_STREAM")
+(%define-io-dual-builtin (at_end_of_stream () :input "AT_END_OF_STREAM")
     (rulebase environment depth emit)
-  :current
-  (when (%io-at-end-p
-         (%io-current-input-entry rulebase)
-         environment operation)
-    (funcall emit environment))
-  :explicit
-  (when (%io-at-end-p
-         (%io-stream-entry rulebase stream :input environment operation)
-         environment operation)
+  (when (%io-at-end-p entry environment operation)
     (funcall emit environment)))

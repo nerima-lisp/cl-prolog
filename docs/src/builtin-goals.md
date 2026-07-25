@@ -27,7 +27,9 @@ Lisp package symbols.
   `setof` also removes duplicates and sorts.
 - **Dynamic database:** `(asserta c)`, `(assertz c)`, `(retract c)`,
   `(abolish (p / n))`, and `(clause h b)` inspect or mutate clauses in the
-  rulebase passed to the query.
+  rulebase passed to the query. A clause may be a fact, the Lisp shape
+  `(:- HEAD GOAL...)`, or the `:-`/2 term Prolog source text reads a rule as,
+  so `assertz((h :- a, b))` asserts a rule either way.
 - **Arithmetic:** `(is ?x expr)`, `(=:= a b)`, `(=\= a b)`, `(< a b)`,
   `(=< a b)`, `(> a b)`, and `(>= a b)` evaluate arithmetic expressions and
   compare their numeric values. See

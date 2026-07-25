@@ -19,71 +19,89 @@ facility of a standalone ISO Prolog system.
 `cl-prolog.asd` is serial. The production system loads these components in
 this exact dependency order, which groups into layers:
 
-**Foundations** — packages, operator/module/source registries, and the clause
-and tabling data models:
+**Foundations** — packages, operator/module/source registries, the clause and
+predicate-index data models, the tabling data model, and unification:
 
 1. `package.lisp`
-2. `operator-table.lisp`
-3. `module-system.lisp`
-4. `source-registry.lisp`
-5. `data.lisp`
-6. `table-variant.lisp`
-7. `unification.lisp`
+2. `atom-name.lisp`
+3. `operator-table.lisp`
+4. `module-system.lisp`
+5. `source-registry.lisp`
+6. `logic-variable.lisp`
+7. `clause.lisp`
+8. `predicate-index.lisp`
+9. `data.lisp`
+10. `table-variant.lisp`
+11. `environment-index.lisp`
+12. `unification.lisp`
 
 **Text front end** — the lexer/parser split and the term writer:
 
-8. `lexer.lisp`
-9. `lexer-operator-lexemes.lisp`
-10. `lexer-tokenizer.lisp`
-11. `grammar.lisp`
-12. `term-writer.lisp`
+13. `lexer.lisp`
+14. `lexer-operator-lexemes.lisp`
+15. `lexer-tokenizer.lisp`
+16. `grammar.lisp`
+17. `term-writer.lisp`
 
-**Search core** — conditions and registries, the I/O context, the CPS prover,
-and the tabling layer:
+**Search core** — conditions and registries, the I/O context, proof state,
+the CPS prover, and the tabling layer:
 
-13. `engine.lisp`
-14. `io-context.lisp`
-15. `prover.lisp`
-16. `tabling.lisp`
+18. `engine.lisp`
+19. `io-context.lisp`
+20. `proof-state.lisp`
+21. `prover.lisp`
+22. `tabling.lisp`
 
 **Builtin goal set** — the `define-builtin` machinery and the builtin modules:
 
-17. `builtins/core.lisp`
-18. `builtins/control.lisp`
-19. `builtins/collection.lisp`
-20. `builtins/dynamic.lisp`
-21. `builtins/arithmetic.lisp`
-22. `builtins/list.lisp`
-23. `builtins/text-conversion.lisp`
-24. `builtins/atom-ops.lisp`
-25. `builtins/atom-number-conversion.lisp`
-26. `builtins/operator.lisp`
-27. `builtins/io.lisp`
-28. `builtins/io-streams.lisp`
-29. `builtins/io-code.lisp`
-30. `fd-store.lisp`
-31. `builtins/fd.lisp`
-32. `term-inspect.lisp`
-33. `term-compare.lisp`
-34. `term-construct.lisp`
+23. `builtins/core.lisp`
+24. `builtins/control.lisp`
+25. `builtins/collection.lisp`
+26. `builtins/dynamic.lisp`
+27. `builtins/arithmetic.lisp`
+28. `builtins/list.lisp`
+29. `builtins/text-conversion.lisp`
+30. `builtins/atom-ops.lisp`
+31. `builtins/atom-number-conversion.lisp`
+32. `builtins/operator.lisp`
+33. `builtins/io.lisp`
+34. `builtins/io-streams.lisp`
+35. `builtins/io-code.lisp`
+36. `fd-store.lisp`
+37. `builtins/fd.lisp`
+38. `term-inspect.lisp`
+39. `term-compare.lisp`
+40. `term-construct.lisp`
 
 **Front ends** — DCG runtime, the public query API, the transactional source
 loader, and the authoring macros:
 
-35. `dcg-runtime.lisp`
-36. `query.lisp`
-37. `source-io.lisp`
-38. `source-directives.lisp`
-39. `source-rollback.lisp`
-40. `source-loader.lisp`
-41. `dsl-compiler.lisp`
-42. `dsl.lisp`
-43. `dcg.lisp`
+41. `dcg-runtime.lisp`
+42. `query.lisp`
+43. `source-io.lisp`
+44. `source-directives.lisp`
+45. `source-rollback.lisp`
+46. `source-loader.lisp`
+47. `dsl-compiler.lisp`
+48. `dsl.lisp`
+49. `dcg.lisp`
 
 The important boundaries are:
 
-- `data.lisp` owns clauses, the logical-update rulebase, the predicate index,
-  and mutable registries; `table-variant.lisp` owns the tabling data model
+- `atom-name.lisp` owns the bijection between an atom's text and the Common
+  Lisp symbol that represents it, and the text-based equality and ordering the
+  rest of the engine decides atom identity with. It sits directly on
+  `package.lisp` because the parser, the writer, unification, the standard
+  order, and the text-conversion builtins all have to agree on it
+- `logic-variable.lisp` owns what a logic variable is and its creation-order
+  bookkeeping; `clause.lisp` owns the clause representation and its compiled
+  instantiation templates; `predicate-index.lisp` owns the per-predicate
+  descriptor index built on top of clauses; `data.lisp` owns the rulebase
+  container itself (construction, copy, insert/retract, revisions) built on
+  all three; `table-variant.lisp` owns the tabling data model;
+  `environment-index.lisp` owns the indexed-substitution structure used
+  during proof search; `unification.lisp` owns the unification algorithm and
+  term substitution/freshening built on `environment-index.lisp`
 - `lexer.lisp` tokenizes source text and enforces the parser resource limits,
   `lexer-operator-lexemes.lisp` holds the standard/symbolic operator lexeme
   tables the tokenizer matches against, and `lexer-tokenizer.lisp` is the
@@ -91,9 +109,11 @@ The important boundaries are:
   and exposes the public reader API
 - `engine.lisp` owns conditions plus the builtin and foreign-predicate
   registries and the CPS `emit` protocol
-- `prover.lisp` owns normalization, proof state, dispatch, clause resolution,
-  cut barriers, and depth accounting; `tabling.lisp` layers memoized resolution
-  and left-recursion detection on top
+- `proof-state.lisp` owns the pure `proof-state` representation threaded
+  through the search; `prover.lisp` owns normalization, dispatch, clause
+  resolution, cut barriers, and depth accounting built on top of it;
+  `tabling.lisp` layers memoized resolution and left-recursion detection on
+  top of `prover.lisp`
 - `query.lisp` turns the continuation protocol into the public mapping and
   result APIs
 - the builtin set is split by concern — control, collection, dynamic database,
@@ -227,7 +247,7 @@ converge on the same runtime terms and rulebase.
 
 ## Verification Layers
 
-1. `nix run .` — run the cl-weave-backed ASDF regression behavior on Linux
+1. `nix run .` — run the cl-weave-backed ASDF regression behavior
 2. `nix flake check` — verify packaging and clean-source behavior
 
 When architecture changes, update the narrowest affected verification layer

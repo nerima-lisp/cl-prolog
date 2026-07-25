@@ -14,8 +14,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Metadata guards below (tag-matches-version, changelog-has-a-section) only
+  # catch mistagged releases, not a red build: nothing previously stopped a
+  # tag pushed onto a broken main from publishing. Re-run the same flake
+  # checks as CI on the tagged commit itself before anything is published.
+  verify:
+    name: Verify flake checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix with Cachix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run flake checks
+        timeout-minutes: 25
+        run: nix flake check --print-build-logs
+
   release:
     name: Publish GitHub Release
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -35,7 +63,10 @@ jobs:
         run: |
           set -euo pipefail
           tag="${REF_NAME#v}"
-          asd_version="$(sed -n 's/.*:version[[:space:]]*"\([^"]*\)".*/\1/p' cl-prolog.asd | head -n1)"
+          # Anchored to line start so a comment or docstring merely
+          # mentioning :version can never shadow the real field — same
+          # hazard flake.nix's projectVersion already guards against.
+          asd_version="$(sed -n 's/^[[:space:]]*:version[[:space:]]\+"\([^"]*\)".*/\1/p' cl-prolog.asd | head -n1)"
           if [[ -z "$asd_version" ]]; then
             echo "::error::Could not read :version from cl-prolog.asd"
             exit 1

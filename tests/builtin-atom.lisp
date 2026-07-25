@@ -67,13 +67,15 @@ The macro expands each case into two DEFTEST-QUERIES specs."
    (((?chars cl-prolog::a cl-prolog::b cl-prolog::c)))
    ?atom (cl-prolog::a cl-prolog::b cl-prolog::c)
    (((?atom . cl-prolog::abc))))
+  ;; The codes of the atom's text, `abc', not of the upcased symbol name that
+  ;; happens to represent it: ISO 13211-1 8.16.5.
   (cl-prolog::atom_codes cl-prolog::abc ?codes
-   (((?codes 65 66 67)))
-   ?atom (65 66 67)
+   (((?codes 97 98 99)))
+   ?atom (97 98 99)
    (((?atom . cl-prolog::abc))))
   (cl-prolog::char_code cl-prolog::a ?code
-   (((?code . 65)))
-   ?character 65
+   (((?code . 97)))
+   ?character 97
    (((?character . cl-prolog::a))))
   (cl-prolog::number_chars 42 ?chars
    (((?chars cl-prolog::|4| cl-prolog::|2|)))
@@ -123,16 +125,21 @@ The macro expands each case into two DEFTEST-QUERIES specs."
   (:equal 12.5d0 (parse-number-codes '(49 50 46 53)))
   (:equal 1250.0d0 (parse-number-codes '(49 46 50 53 69 43 51)))
   (:equal 0.0125d0 (parse-number-codes '(49 46 50 53 101 45 50)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 47 50)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 46)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(46 53)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 101)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 50 120)))
+  ;; ISO 13211-1 8.16.8.3: codes that do not spell a number are a syntax_error,
+  ;; the same class the reader raises for unreadable text.
+  (:equal 'prolog-syntax-error (number-codes-error-type '(49 47 50)))
+  (:equal 'prolog-syntax-error (number-codes-error-type '(49 46)))
+  (:equal 'prolog-syntax-error (number-codes-error-type '(46 53)))
+  (:equal 'prolog-syntax-error (number-codes-error-type '(49 101)))
+  (:equal 'prolog-syntax-error (number-codes-error-type '(49 50 120)))
   (:equal 'prolog-resource-error
           (number-codes-error-type
            (map 'list #'char-code
                 (format nil "1e~A" (make-string 40 :initial-element #\9)))))
-  (:equal 'prolog-resource-error
+  ;; An exponent within the magnitude bound but beyond what a double can hold is
+  ;; rejected by the reader as an ill-formed number token.  The bound above is
+  ;; what stops unbounded work; this one only has to be refused, not classified.
+  (:equal 'prolog-syntax-error
           (number-codes-error-type
            (map 'list #'char-code "1.0e4095"))))
 
@@ -230,11 +237,15 @@ The macro expands each case into two DEFTEST-QUERIES specs."
           (atom-builtin-error-summary '(cl-prolog::char_code ?character ?code)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CHARACTER" "AB"))
           (atom-builtin-error-summary '(cl-prolog::char_code ab ?code)))
-  (:equal '(prolog-domain-error ("DOMAIN_ERROR" "CHARACTER_CODE" -1))
+  ;; ISO 13211-1 8.16.6.3: an integer that names no character is a
+  ;; representation_error, which reports only the flag, not the culprit.
+  (:equal '(prolog-representation-error ("REPRESENTATION_ERROR" "CHARACTER_CODE"))
           (atom-builtin-error-summary '(cl-prolog::char_code ?character -1)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "NUMBER" "ATOM"))
           (atom-builtin-error-summary '(cl-prolog::number_chars atom ?chars)))
-  (:equal '(prolog-domain-error ("DOMAIN_ERROR" "NUMBER_TEXT" "bad"))
+  ;; ISO 13211-1 8.16.8.3 classifies unreadable numeric text as a syntax_error,
+  ;; whose culprit is the offending text itself.
+  (:equal '(prolog-syntax-error ("SYNTAX_ERROR" "bad"))
           (atom-builtin-error-summary '(cl-prolog::number_codes ?number (98 97 100))))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
           (atom-builtin-error-summary '(cl-prolog::atom_number ?atom ?number)))

@@ -7,11 +7,11 @@
 (in-package #:cl-prolog.tests)
 
 (deftest-queries term-to-atom-write ((make-rulebase))
-  ((cl-prolog::term_to_atom (foo a b) ?a) :ordered (((?a . cl-prolog::|foo(a,b)|))))
-  ((cl-prolog::term_to_atom (foo (a b) 1) ?a) :ordered (((?a . cl-prolog::|foo(a(b),1)|))))
+  ((cl-prolog::term_to_atom (foo a b) ?a) :ordered (((?a . #.(cl-prolog:prolog-atom "foo(a,b)")))))
+  ((cl-prolog::term_to_atom (foo (a b) 1) ?a) :ordered (((?a . #.(cl-prolog:prolog-atom "foo(a(b),1)")))))
   ((cl-prolog::term_to_atom 42 ?a)         :ordered (((?a . cl-prolog::|42|))))
   ;; operator notation is rendered with spaces.
-  ((cl-prolog::term_to_atom (+ 1 2) ?a)    :ordered (((?a . cl-prolog::|1 + 2|)))))
+  ((cl-prolog::term_to_atom (+ 1 2) ?a)    :ordered (((?a . #.(cl-prolog:prolog-atom "1 + 2"))))))
 
 (deftest-queries term-to-atom-parse ((make-rulebase))
   ((cl-prolog::term_to_atom ?t "foo(a, b)") :ordered (((?t cl-prolog::foo cl-prolog::a cl-prolog::b))))
@@ -20,7 +20,7 @@
   ((cl-prolog::term_to_atom ?t "1+2")       :ordered (((?t + 1 2))))
   ;; round trip through write then parse.
   ((and (cl-prolog::term_to_atom (foo a b) ?a) (cl-prolog::term_to_atom ?t ?a))
-   :ordered (((?a . cl-prolog::|foo(a,b)|) (?t cl-prolog::foo cl-prolog::a cl-prolog::b))))
+   :ordered (((?a . #.(cl-prolog:prolog-atom "foo(a,b)")) (?t cl-prolog::foo cl-prolog::a cl-prolog::b))))
   ((cl-prolog::term_to_atom ?t "foo((")     :signals)
   ((cl-prolog::term_to_atom ?t ?a)          :signals))
 

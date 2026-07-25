@@ -54,7 +54,6 @@ for OPERATION-NAME, then splices in BODY."
                              `(,(intern (format nil "RESOLVED-~A" parameter))
                                (%term-resolve ,parameter environment))))))
     `(define-builtin (,name ,@parameter-names) (rulebase environment depth emit)
-       (declare (cl:ignore rulebase depth))
        (let* ((operation (%iso-atom ,operation-name))
               ,@resolved-bindings)
          ,@body))))
@@ -88,6 +87,51 @@ for OPERATION-NAME, then splices in BODY."
       ((null body) 'true)
       ((null (rest body)) (first body))
       (t (cons 'and body)))))
+
+(defparameter +prolog-rule-functor+ (%intern-prolog-atom ":-")
+  "The atom `:-'.
+
+Prolog source text reads a rule as the `:-'/2 term this heads, so it is the
+shape `assertz/1', `retract/1' and `retractall/1' exchange with Prolog code.
+It is a different object from the keyword :- of the Lisp-level clause shape
+(:- HEAD . BODY-GOALS), which stays the engine's internal spelling.")
+
+(defun %prolog-rule-term-p (term)
+  "True when TERM is a `:-'/2 rule term rather than a fact or the Lisp shape."
+  (and (%proper-list-p term)
+       (= 3 (length term))
+       (symbolp (first term))
+       (not (eq (first term) ':-))
+       (%same-atom-text-p (first term) +prolog-rule-functor+)))
+
+(defun %clause-rule-term (clause)
+  "Render CLAUSE as the `:-'/2 term a Prolog-shaped retract/1 pattern matches.
+
+A fact renders with the body `true', as ISO 13211-1 7.6.1 requires, so
+`retract((h :- true))' finds the fact `h'."
+  (list +prolog-rule-functor+ (%entry-head clause) (%entry-body-term clause)))
+
+(defun %dynamic-pattern-term (pattern head)
+  "Normalize a retract/1 or retractall/1 PATTERN to the shape stored clauses are
+rendered in by %DYNAMIC-PATTERN-CLAUSE-TERM.
+
+HEAD is PATTERN's head already in goal form, which a zero-arity head needs:
+source text spells it as the bare atom `h' while the clause stores `(h)'."
+  (cond
+    ((symbolp pattern) head)
+    ((%prolog-rule-term-p pattern) (list (first pattern) head (third pattern)))
+    (t pattern)))
+
+(defun %dynamic-pattern-clause-term (clause prolog-shape-p)
+  "Render CLAUSE as the term a retract/1 or retractall/1 pattern unifies with.
+
+A Prolog-shaped pattern -- what `(h :- B)' reads as -- matches the `:-'/2
+rendering, in which a fact's body is `true'.  A Lisp-shaped pattern matches the
+internal (:- HEAD . BODY-GOALS) shape, and a fact by its head alone."
+  (cond
+    (prolog-shape-p (%clause-rule-term clause))
+    ((null (clause-body clause)) (%entry-head clause))
+    (t (list* ':- (%entry-head clause) (clause-body clause)))))
 
 (defun %freshen-dynamic-clause (clause)
   (%freshen-clause clause))
@@ -137,24 +181,6 @@ over one module's stored clauses."
                        "expected a callable term"))
   (%ensure-goal-form term))
 
-(defun %require-non-negative-integer (value environment operation predicate-indicator field-name)
-  "Validate that VALUE is a non-negative integer for PREDICATE-INDICATOR's
-FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
-  (cond
-    ((logic-var-p value)
-     (%raise-instantiation-error
-      environment operation
-      (format nil "~A requires an instantiated ~A" predicate-indicator field-name)))
-    ((not (integerp value))
-     (%raise-type-error
-      "INTEGER" value environment operation
-      (format nil "~A ~A must be an integer" predicate-indicator field-name)))
-    ((minusp value)
-     (%raise-domain-error
-      "NOT_LESS_THAN_ZERO" value environment operation
-      (format nil "~A ~A must not be negative" predicate-indicator field-name)))
-    (t value)))
-
 (defun %dynamic-clause-head (term environment operation)
   "Validate TERM as a fact or rule and return its callable head."
   (when (logic-var-p term)
@@ -163,13 +189,15 @@ FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
   (unless (or (symbolp term) (%proper-list-p term))
     (%raise-type-error "CALLABLE" term environment operation
                        "dynamic clause must be a proper callable term"))
-  (if (and (consp term) (eq (first term) ':-))
-      (progn
-        (unless (consp (rest term))
-          (%raise-type-error "CALLABLE" term environment operation
-                             "rule must contain a callable head"))
-        (%ensure-callable (second term) environment operation))
-      (%ensure-callable term environment operation)))
+  (cond
+    ((and (consp term) (eq (first term) ':-))
+     (unless (consp (rest term))
+       (%raise-type-error "CALLABLE" term environment operation
+                          "rule must contain a callable head"))
+     (%ensure-callable (second term) environment operation))
+    ((%prolog-rule-term-p term)
+     (%ensure-callable (second term) environment operation))
+    (t (%ensure-callable term environment operation))))
 
 ;;;; ISO Prolog flags
 
@@ -189,7 +217,10 @@ FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
 
 (define-prolog-flags
   (bounded "FALSE" ())
-  (max_arity "UNBOUNDED" ())
+  ;; ISO 8.17 admits `unbounded', but every other resource this engine exposes
+  ;; carries a configurable bound, and an unbounded arity is the one hole in
+  ;; that: `functor(T, foo, HUGE)' would allocate without limit.
+  (max_arity *max-prolog-term-arity* ())
   (integer_rounding_function "TOWARD_ZERO" ())
   (char_conversion "OFF" ("ON" "OFF"))
   (debug "OFF" ("ON" "OFF"))
@@ -214,15 +245,13 @@ FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
                               rulebase (%find-prolog-flag "CHAR_CONVERSION"))))
       table)))
 
-(defun %prolog-flag-name (term environment operation)
-  (let ((resolved (logic-substitute term environment)))
-    (when (logic-var-p resolved)
-      (%raise-instantiation-error environment operation
-                                  "flag name must be instantiated"))
-    (unless (symbolp resolved)
-      (%raise-type-error "ATOM" resolved environment operation
-                         "flag name must be an atom"))
-    (string-upcase (symbol-name resolved))))
+(define-term-guard %prolog-flag-name (term)
+  :resolve t
+  :instantiation "flag name must be instantiated"
+  :accept (symbolp term)
+  :type "ATOM"
+  :type-message "flag name must be an atom"
+  :result (string-upcase (symbol-name term)))
 
 (defun %find-prolog-flag (name)
   (find name *prolog-flag-specifications*
@@ -240,14 +269,10 @@ FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
 (defun %external-prolog-flag-value (value)
   (if (stringp value) (%iso-atom value) value))
 
-(defun %resolve-prolog-flag-value (term environment operation)
-  (let ((resolved (logic-substitute term environment)))
-    (when (logic-var-p resolved)
-      (%raise-instantiation-error environment operation
-                                  "flag value must be instantiated"))
-    (if (symbolp resolved)
-        (string-upcase (symbol-name resolved))
-        resolved)))
+(define-term-guard %resolve-prolog-flag-value (term)
+  :resolve t
+  :instantiation "flag value must be instantiated"
+  :result (if (symbolp term) (string-upcase (symbol-name term)) term))
 
 (define-builtin (current_prolog_flag name value)
     (rulebase environment depth emit)
@@ -261,9 +286,14 @@ FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
                           (%external-prolog-flag-value
                           (%prolog-flag-value rulebase flag))
                           named-environment emit))))
-        (let ((flag (%find-prolog-flag
-                     (%prolog-flag-name name environment
-                                        (%iso-atom "CURRENT_PROLOG_FLAG")))))
+        (let* ((operation (%iso-atom "CURRENT_PROLOG_FLAG"))
+               (flag (%find-prolog-flag
+                      (%prolog-flag-name name environment operation))))
+          ;; ISO 13211-1 8.17.2.3: an atom that names no flag is a
+          ;; domain_error(prolog_flag, Name), not a silent failure.
+          (unless flag
+            (%raise-domain-error "PROLOG_FLAG" resolved-name environment
+                                 operation "unknown Prolog flag"))
           (when flag
             (%unify-emit value
                          (%external-prolog-flag-value
@@ -284,23 +314,71 @@ FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
                                "implementation-defined flag is read-only"))
     (let ((new-value (%resolve-prolog-flag-value value environment operation)))
       (unless (member new-value (prolog-flag-allowed-values flag) :test #'equal)
-        (%raise-domain-error "FLAG_VALUE" (logic-substitute value environment)
+        ;; ISO 13211-1 8.17.1.3 blames the pair: which value is wrong only means
+        ;; something together with the flag it was offered to.
+        (%raise-domain-error "FLAG_VALUE"
+                             (%iso-term "+" (logic-substitute name environment)
+                                        (logic-substitute value environment))
                              environment operation "invalid Prolog flag value"))
       (setf (gethash flag-name (rulebase-prolog-flag-values rulebase)) new-value)
       (funcall emit environment))))
 
+(defun %clause-rule-entry (head body rulebase goal environment)
+  "Build a freshly renamed clause entry from a rule's HEAD and BODY goal list.
+
+HEAD is normalized to goal form, but BODY is stored exactly as it arrived --
+the same asymmetry the source loader produces, so a zero-arity body goal stays
+the bare atom Prolog text spells and `clause/2' hands it back unchanged."
+  (when (logic-var-p head)
+    (%raise-instantiation-error environment (first goal)
+                                "a rule's head must be instantiated"))
+  (let ((callable-head (%ensure-goal-form head)))
+    (unless (%goal-form-p callable-head)
+      (%raise-type-error "CALLABLE" head environment (first goal)
+                         "a rule's head must be callable"))
+    (%ensure-dynamic-predicate rulebase (first callable-head)
+                               (length (rest callable-head)) goal environment)
+    (unless (every #'%goal-form-p (mapcar #'%ensure-goal-form body))
+      (%raise-type-error "CALLABLE"
+                         (find-if-not (lambda (element)
+                                        (%goal-form-p (%ensure-goal-form element)))
+                                      body)
+                         environment (first goal)
+                         "every rule body element must be callable"))
+    (%freshen-clause (make-clause callable-head body))))
+
 (defun %clause-term-entry (term rulebase goal environment)
-  "Convert a substituted dynamic clause TERM to a freshly renamed entry."
+  "Convert a substituted dynamic clause TERM to a freshly renamed entry.
+
+TERM may be a fact, the Lisp clause shape (:- HEAD . BODY-GOALS), or the `:-'/2
+term Prolog source text reads a rule as.  ISO 13211-1 7.6.1 converts all three
+to a clause, so `assertz((h :- a, b))' asserts a rule instead of a fact whose
+functor happens to be `:-'."
+  ;; Checked before anything else: a logic variable is a symbol, so without this
+  ;; `assertz(X)' fell through to the fact branch and stored a clause whose head
+  ;; was a fresh variable.  ISO 13211-1 8.9.1.3 requires an instantiation_error.
+  (when (logic-var-p term)
+    (%raise-instantiation-error environment (first goal)
+                                "a dynamic clause must be instantiated"))
   (cond
+    ((%prolog-rule-term-p term)
+     (%clause-rule-entry (second term) (%body-goals (third term))
+                         rulebase goal environment))
     ((and (%proper-list-p term) (eq (first term) ':-))
      (unless (and (consp (rest term))
                   (%goal-form-p (second term)))
-       (%invalid-goal goal "a rule must have shape (:- (PREDICATE . ARGS) GOAL...)"))
+       (%raise-type-error "CALLABLE" head environment (first goal)
+                         "a rule's head must be callable"))
      (%ensure-dynamic-predicate rulebase (first (second term))
                                 (length (rest (second term))) goal environment)
      (let ((body (cddr term)))
        (unless (every #'%goal-form-p (mapcar #'%ensure-goal-form body))
-         (%invalid-goal goal "every rule body element must be a callable goal"))
+         (%raise-type-error "CALLABLE"
+                         (find-if-not (lambda (element)
+                                        (%goal-form-p (%ensure-goal-form element)))
+                                      body)
+                         environment (first goal)
+                         "every rule body element must be callable"))
        (%freshen-clause (make-clause (second term) body))))
     ((or (symbolp term) (%goal-form-p term))
      (let ((normalized (%ensure-goal-form term)))
@@ -309,7 +387,10 @@ FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
        (let ((table (make-hash-table :test #'eq)))
          (make-clause (%freshen-term normalized table)))))
     (t
-     (%invalid-goal goal "a dynamic clause must be a fact or (:- HEAD BODY...)"))))
+     ;; ISO 13211-1 8.9.1.3: the culprit is the clause term itself, not the
+     ;; assert goal that carried it.
+     (%raise-type-error "CALLABLE" term environment (first goal)
+                        "a dynamic clause must be a fact or a rule"))))
 
 (defun %entry-predicate-arity (entry)
   (let ((head (%entry-head entry)))
