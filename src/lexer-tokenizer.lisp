@@ -54,6 +54,22 @@
                  (ecase state
                    (:code
                     (cond
+                      ;; `0'c' is a character-code constant (ISO 6.4.4), not the
+                      ;; start of a quoted atom, so its `'' must not put the
+                      ;; splitter into :QUOTED and swallow the rest of the term.
+                      ((and (char= character #\') (eql previous #\0))
+                       (let ((next (read-char stream nil nil)))
+                         (when next
+                           (record-character next out)
+                           (cond
+                             ((char= next #\\)
+                              (let ((escaped (read-char stream nil nil)))
+                                (when escaped (record-character escaped out))))
+                             ;; `0''' spells the quote character itself.
+                             ((and (char= next #\')
+                                   (eql (peek-char nil stream nil nil) #\'))
+                              (record-character (read-char stream) out)))
+                           (setf character next))))
                       ((char= character #\') (setf state :quoted))
                       ((char= character #\") (setf state :dquoted))
                       ((char= character #\%) (setf state :line-comment))
@@ -191,6 +207,43 @@
                              (1+ (- position start))
                              position)
                             (write-char (take) out)))))
+             (scan-radix-escape (radix terminated-p)
+               "Read the digits of a `\\xHH\\' or `\\OOO\\' escape as a character."
+               (let ((digits (with-output-to-string (out)
+                               (loop while (and (peek) (digit-char-p (peek) radix))
+                                     do (write-char (take) out)))))
+                 (when (zerop (length digits))
+                   (%parse-error "Malformed Prolog character escape at position ~D."
+                                 position))
+                 ;; ISO 6.4.2.1 closes both forms with `\', which SWI also
+                 ;; accepts without; tolerate the missing one either way.
+                 (when (and terminated-p (eql (peek) #\\)) (take))
+                 (let ((code (parse-integer digits :radix radix)))
+                   (unless (< code char-code-limit)
+                     (%parse-error "Prolog character escape ~S is out of range."
+                                   digits))
+                   (code-char code))))
+             (scan-escape ()
+               "Decode the escape sequence after a `\\', per ISO 6.4.2.1.
+
+Returns NIL for a `\\'-newline continuation, which contributes no character."
+               (let ((character (take)))
+                 (case character
+                   (#\a (code-char 7))
+                   (#\b #\Backspace)
+                   (#\f #\Page)
+                   (#\n #\Newline)
+                   (#\r #\Return)
+                   (#\t #\Tab)
+                   (#\v (code-char 11))
+                   (#\e (code-char 27))
+                   (#\0 (code-char 0))
+                   (#\x (scan-radix-escape 16 t))
+                   (#\Newline nil)
+                   (t (if (digit-char-p character 8)
+                          (progn (decf position) (scan-radix-escape 8 t))
+                          ;; \\ \' \" \` and anything else stand for themselves.
+                          character)))))
              (scan-quoted ()
                (take)
                (setf raw-mode t)
@@ -218,13 +271,14 @@
                                 ((char= character #\')
                                  (return))
                                 ((and (char= character #\\) (peek))
-                                 (write-content (take) out))
+                                 (let ((decoded (scan-escape)))
+                                   (when decoded (write-content decoded out))))
                                 (t
                                  (write-content character out))))))))
                  (setf raw-mode nil)))
              (scan-string ()
                ;; A "..." literal, mirroring SCAN-QUOTED but delimited by #\".
-               ;; A doubled "" is a literal quote; \\-escapes pass the next char.
+               ;; A doubled "" is a literal quote; \\-escapes are decoded.
                (take)
                (setf raw-mode t)
                (unwind-protect
@@ -251,7 +305,8 @@
                                 ((char= character #\")
                                  (return))
                                 ((and (char= character #\\) (peek))
-                                 (write-content (take) out))
+                                 (let ((decoded (scan-escape)))
+                                   (when decoded (write-content decoded out))))
                                 (t
                                  (write-content character out))))))))
                  (setf raw-mode nil)))
@@ -280,7 +335,52 @@ requires layout text, a comment, or end of input after the end token."
                  (or (null next)
                      (member next '(#\Space #\Tab #\Return #\Newline))
                      (char= next #\%))))
+             (radix-digit-p (character radix)
+               (and character (digit-char-p character radix)))
+             (scan-radix-integer (radix)
+               "Read the digits of an `0x'/`0o'/`0b' integer constant."
+               (incf position 2)
+               (let ((start position))
+                 (loop while (radix-digit-p (peek) radix)
+                       do (%check-parser-limit
+                           "NUMERIC_LEXEME_LENGTH"
+                           *max-prolog-numeric-lexeme-length*
+                           (1+ (- position start))
+                           position)
+                          (take))
+                 (parse-integer (subseq text start position) :radix radix)))
+             (scan-character-code ()
+               "Read an `0'c' character-code constant, per ISO 6.4.4."
+               (incf position 2)
+               (let ((character (peek)))
+                 (cond
+                   ((null character)
+                    (%parse-error "Unterminated Prolog character-code constant."))
+                   ;; `0''' is the quote itself, doubled as inside a quoted atom.
+                   ((char= character #\')
+                    (take)
+                    (when (eql (peek) #\') (take))
+                    (char-code #\'))
+                   ((char= character #\\)
+                    (take)
+                    (let ((decoded (scan-escape)))
+                      (unless decoded
+                        (%parse-error
+                         "A `\\'-newline continuation is not a character code."))
+                      (char-code decoded)))
+                   (t (take) (char-code character)))))
              (scan-number ()
+               ;; ISO 6.4.4's non-decimal integer constants all begin with `0'.
+               (when (and (char= (peek) #\0) (peek 1))
+                 (let ((marker (char-downcase (peek 1))))
+                   (case marker
+                     (#\' (return-from scan-number (scan-character-code)))
+                     (#\x (when (radix-digit-p (peek 2) 16)
+                            (return-from scan-number (scan-radix-integer 16))))
+                     (#\o (when (radix-digit-p (peek 2) 8)
+                            (return-from scan-number (scan-radix-integer 8))))
+                     (#\b (when (radix-digit-p (peek 2) 2)
+                            (return-from scan-number (scan-radix-integer 2)))))))
                (let ((start position))
                  (labels ((take-number-character ()
                             (%check-parser-limit
