@@ -5,7 +5,7 @@ All notable changes to `cl-prolog` are recorded in this file.
 The format follows a simple Keep a Changelog style with an `Unreleased`
 section at the top of the file.
 
-## Unreleased
+## 0.8.0 - 2026-07-25
 
 ### Added
 

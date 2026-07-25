@@ -14,7 +14,7 @@ consult the full file for the complete, per-entry history.
     embed the root `CHANGELOG.md` directly. To avoid drift, this page links to
     the source of truth and lists only headline changes.
 
-## Unreleased
+## 0.8.0 - 2026-07-25
 
 - **`library(lists)`** predicates: `sum_list/2` (with the `sumlist/2` alias),
   `max_list/2`, `min_list/2`, `numlist/3`, `list_to_set/2`, `subtract/3`,
