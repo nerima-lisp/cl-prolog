@@ -37,7 +37,7 @@ nix flake check
 
 - ASDF/cl-weave regression suite
 - Nix packaging check when Nix is part of the release process
-- the MkDocs documentation build (`checks.documentation`)
+- the MkDocs documentation build (`checks.docs`)
 
 ## Refuse To Ship When
 

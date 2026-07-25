@@ -11,7 +11,7 @@ The flake defines outputs for `x86_64-linux`, `aarch64-linux`, and
 environment with:
 
 ```sh
-nix develop        # sbcl, cl-weave, paredit-cli, nixpkgs-fmt, mkdocs-material
+nix develop        # sbcl, cl-weave, paredit-cli, treefmt, mkdocs-material
 ```
 
 !!! info "Other platforms have no flake outputs"
@@ -37,8 +37,10 @@ load the `cl-prolog` package. See [Examples](examples.md) for a walkthrough.
 ## Testing at a glance
 
 ```sh
-nix run .          # cl-weave regression suite
-nix flake check    # full verification suite
+nix run .                     # cl-weave regression suite, via the cl-weave CLI
+sbcl --script run-tests.lisp  # the same suite, plain SBCL, no Nix
+nix flake check               # full verification suite
+nix fmt                       # format Nix sources (treefmt)
 ```
 
 `nix flake check` also runs the structural parse gate, the examples check, and
@@ -76,7 +78,7 @@ The config lives in `docs/mkdocs.yml` and content in `docs/src/`.
     ```
 
 `--strict` promotes broken links and unlisted pages to build failures, matching
-the Nix build and the `checks.documentation` gate. The published site deploys to
+the Nix build and the `checks.docs` gate. The published site deploys to
 GitHub Pages from `.github/workflows/docs.yml` on every push to `main` that
 touches `docs/`, `flake.nix`, `flake.lock`, or the workflow itself.
 

@@ -46,9 +46,10 @@ nix flake check
   `.lisp`/`.asd` file, failing if any is not a balanced S-expression document.
 - **`checks.examples`** — loads every shipped example through ASDF
   ([Examples](examples.md)).
-- **`checks.documentation`** — builds the MkDocs site and fails if it does not
-  produce a valid `index.html`.
-- **`checks.formatting`** — checks `flake.nix` against `nixpkgs-fmt`.
+- **`checks.docs`** — builds the MkDocs site with `--strict` and fails if it
+  does not produce a valid `index.html`.
+- **`checks.formatting`** — checks every Nix file against `nixfmt`, via
+  treefmt. `nix fmt` fixes what it reports.
 - **`checks.package`** — builds `packages.default`, so the package README.md
   advertises (`nix run github:nerima-lisp/cl-prolog`) is actually realised,
   not merely evaluated.
