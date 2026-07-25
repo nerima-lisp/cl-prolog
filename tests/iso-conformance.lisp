@@ -348,3 +348,14 @@
   ("8.16.4.3" "atom_chars(A, [a|_])" "instantiation_error")
   ("8.16.6.3" "char_code(ab, C)" "type_error(character")
   ("8.16.6.3" "char_code(C, -1)" "representation_error(character_code"))
+
+;;; 7.11.2.4 -- the `unknown' flag decides what calling an undefined procedure
+;;; does, which is what makes a partially written program runnable.
+
+(deftest-iso iso-unknown-flag
+  ("7.11.2.4" "current_prolog_flag(unknown, error)" :true)
+  ("7.7.7" "undefined_procedure_xyz" "existence_error(procedure")
+  ("7.11.2.4" "set_prolog_flag(unknown, fail), undefined_procedure_xyz" :false)
+  ("7.11.2.4" "set_prolog_flag(unknown, warning), undefined_procedure_xyz" :false)
+  ;; ...and the default is restored per rulebase, not left global.
+  ("7.11.2.4" "undefined_procedure_xyz" "existence_error(procedure"))

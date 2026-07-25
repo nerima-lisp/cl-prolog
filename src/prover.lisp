@@ -286,10 +286,18 @@ Return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
                (%prove-clauses/k resolved-user-goal
                                  (%state-with state :module defining-module)
                                  succeed)
-               (%raise-existence-error
-                "PROCEDURE" (%goal-predicate-indicator normalized-goal)
-                environment context
-                "the invoked predicate is not defined"))))))))
+               ;; ISO 13211-1 7.7.7 and 7.11.2.4: what an undefined procedure
+               ;; does is the `unknown' flag's to decide.  `error' (the default)
+               ;; raises; `fail' and `warning' let the call simply fail, which
+               ;; is what makes a partially written program runnable.
+               (let ((mode (%prolog-flag-value (proof-state-rulebase state)
+                                               (%find-prolog-flag "UNKNOWN"))))
+                 (when (string= mode "ERROR")
+                   (%raise-existence-error
+                    "PROCEDURE" (%goal-predicate-indicator normalized-goal)
+                    environment context
+                    "the invoked predicate is not defined"))
+                 nil))))))))
 
 (defun %prove-goal/k (goal state succeed)
   "Prove GOAL, counting every dispatched call for local depth limits."
