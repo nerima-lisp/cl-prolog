@@ -91,6 +91,7 @@
                              (:file "fixtures")))
                (:file "unification")
                (:file "iso-conformance")
+               (:file "iso-inria")
                (:file "atom-canonicalization")
                (:file "operator-table")
                (:file "parser")
