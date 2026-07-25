@@ -132,9 +132,14 @@ genuine prefix operator parses."
        (let ((list (%parse-list parser variables)))
          (if *parsing-dcg-body-p* (list 'dcg-terminals list) list)))
       ((%accept-token parser :operator "{")
-       (prog1 (list 'brace (let ((*parsing-dcg-body-p* nil))
-                            (%parse-expression parser variables 0)))
-         (%expect-token parser :operator "}")))
+       ;; ISO 13211-1 6.3.6 makes a bare `{}' the atom of that name; only a
+       ;; non-empty `{T}' is the curly-brace term.
+       (if (%accept-token parser :operator "}")
+           (%prolog-atom-symbol "{}" :position (%token-position token)
+                                     :track-resource-p t)
+           (prog1 (list 'brace (let ((*parsing-dcg-body-p* nil))
+                                 (%parse-expression parser variables 0)))
+             (%expect-token parser :operator "}"))))
       ;; Checked before the prefix-operator branch: `- 1' is prefix minus
       ;; because a term follows, while the `-' in `f(-, 1)' is the atom.
       ((%operator-token-is-atom-p parser token)

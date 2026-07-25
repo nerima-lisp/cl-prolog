@@ -59,14 +59,16 @@ literal with \" and \\ escaped for writeq/write_canonical."
   "True when NAME reads back as this atom without quotes, per ISO 13211-1 6.4.2.
 
 Besides a plain atom name, that covers a graphic token -- a non-empty run of
-graphic characters, so `+', `=..' and `\\+' print bare -- and the solo chars
-`!' and `;'.  Deliberately excluded: `,' and `|', which would be read back as
-separators; `{}', which this parser does not yet read as an atom; and a lone
-`.', which ISO 6.4.8 makes the end token when layout or end of input follows
-it, so it has no bare reading at all (a longer run such as `..' does)."
+graphic characters, so `+', `=..' and `\\+' print bare -- the solo chars `!' and
+`;', and the bracket pairs `[]' and `{}'.  Deliberately excluded: `,' and `|',
+which would be read back as separators, and a lone `.', which ISO 6.4.8 makes
+the end token when layout or end of input follows it, so it has no bare reading
+at all (a longer run such as `..' does)."
   (or (%plain-prolog-atom-name-p name)
       (string= name "!")
       (string= name ";")
+      (string= name "[]")
+      (string= name "{}")
       (and (plusp (length name))
            (not (string= name "."))
            (every #'%prolog-graphic-character-p name))))
