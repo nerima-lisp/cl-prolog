@@ -15,10 +15,48 @@ the [API Reference](api-reference.md).
   `:max-depth` to a non-negative integer to bound user-rule resolution;
   exhaustion signals `prolog-depth-limit-exceeded` rather than masquerading as
   logical failure.
-- **Occurs check** — always on; unification never introduces cyclic terms.
-  Host-provided cyclic cons structures are nevertheless handled safely:
-  unification compares them coinductively, substitution preserves cycles and
-  sharing, and variable collection terminates.
+- **Occurs check** — on during clause resolution, so the engine never
+  introduces a cyclic term behind your back; the `occurs_check` flag (default
+  `true`) governs `=/2` and `\=/2` specifically, see
+  [below](#occurs_check-and-cyclic-terms). Host-provided cyclic cons structures
+  are handled safely either way: unification compares them coinductively,
+  substitution preserves cycles and sharing, and variable collection
+  terminates.
+
+## Atoms
+
+**An atom is its text.** Two atoms are the same atom exactly when they print
+the same, and `=/2`, `==/2`, `compare/3`, and `sort/2` all agree on that.
+Quoting is therefore invisible, as ISO 13211-1 6.4.2 requires — `hello ==
+'hello'` — while case is significant: `'FooBar'`, `fooBar`, and `foobar` are
+three distinct atoms, each of which `writeq/1` renders so that reading the
+output back yields it again.
+
+`[]` is an atom (ISO 6.3.5) of text `"[]"`, represented as Common Lisp `NIL`,
+so `[] == '[]'` holds and `atom_length([], 2)` succeeds.
+
+### Atoms in Lisp-authored rulebases
+
+An atom is an ordinary Common Lisp symbol, which is what lets a Lisp-authored
+rulebase and a Prolog-authored one denote the same predicate: `(parent ?x ?y)`
+read by the Common Lisp reader and `parent(X, Y).` read by this engine's parser
+both arrive as `CL-PROLOG::PARENT`. The consequence is that a **symbol's name
+is not its atom's text**: the text of `CL-PROLOG::PARENT` is `"parent"`.
+
+Write a bare symbol for any atom whose text is lower case. For anything else,
+call `prolog-atom` rather than writing a symbol literal, and `prolog-atom-text`
+to go back:
+
+```lisp
+(prolog-atom "FooBar")             ; the atom Prolog source spells 'FooBar'
+(prolog-atom-text (prolog-atom "FooBar"))
+;; => "FooBar"
+```
+
+`cl-prolog::|FooBar|` is *not* that atom — its text is `"foobar"`, because the
+bar syntax only escapes the Common Lisp reader, which is a different question
+from what the atom is called. Inside quoted data, where `prolog-atom` cannot be
+called, `#.(cl-prolog:prolog-atom "FooBar")` reads it at read time.
 
 ## Proof-search semantics
 
@@ -114,17 +152,33 @@ but differ deliberately in a few edge modes:
   `code_type/2` yields codes. `graphic` is the Prolog symbol-char class
   (distinct from `graph`), and `space`/`white` and `end_of_line`/`newline` are
   treated as synonyms.
-- **`term_to_atom/2` writes atoms in Prolog display form**: an unquoted-style
-  all-uppercase symbol name is lowercased for output (so a term read from
-  unquoted source round-trips), which means a case-preserved atom such as
-  `'FooBar'` is not recovered verbatim. Unquoted `foo` and quoted `'FOO'` both
-  intern to the same symbol and are therefore indistinguishable on output.
 - **`aggregate_all/3`** evaluates the `sum`/`max`/`min` template as an
   arithmetic expression (so `sum(X*2)` works), but does not support the
   `max(Expr, Witness)`/`min(Expr, Witness)` witness forms. `read_term_from_atom/3`
   validates but ignores its options list (`variable_names` etc. are not
   honored). `predsort/3` fails (rather than raising) when its comparison
   predicate has no proof, matching SWI.
+
+## ISO conformance
+
+`tests/iso-conformance.lisp` states the ISO 13211-1 requirements this engine is
+checked against as goals in Prolog source text, each citing its subclause, so a
+regression names the requirement it broke. The knowingly divergent cases are
+asserted there too, so a change of behavior surfaces as a failure rather than
+drifting:
+
+- **A non-empty `{T}` is not `'{}'(T)`** (ISO 6.3.6). It is the engine's internal
+  `brace` term, which DCG bodies are built on. A bare `{}` *is* the atom of that
+  name.
+- **A functor is not required to be followed immediately by `(`** (ISO 6.3.3), so
+  a bare `+(1,2)` reads as the prefix operator `+` applied to `(1,2)`. The writer
+  compensates by quoting a compound's functor unless it is a plain atom name,
+  which keeps `write_canonical/1` output re-readable.
+- **`,`/2, `;`/2 and `\+`/1 are represented internally as `and`, `or` and
+  `not`**, so `write_canonical((a;b))` emits `or(a,b)`. That reads back as the
+  same term here, but is not portable to another system.
+- **`occurs_check` defaults to `true`**, so `X = f(X)` fails where ISO would let
+  it build a cyclic term — see below.
 
 ## occurs_check and cyclic terms
 

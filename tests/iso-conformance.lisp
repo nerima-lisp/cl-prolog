@@ -170,3 +170,181 @@
   ;; bare +(1,2) reads as the prefix operator applied to (1,2) and the writer
   ;; quotes such a functor to keep write_canonical/1 output re-readable.
   ("6.3.3*" "X = +(1,2), X == 1 + 2" :false))
+
+;;; 9.x -- evaluable functors.  The standard fixes results and rounding exactly,
+;;; and this is where systems most often quietly differ from each other.
+
+(deftest-iso iso-arithmetic
+  ;; 9.3.1 vs 9.3.10: `**' is the float power, `^' preserves integers.
+  ("9.3.1" "X is 2 ** 3, X == 8.0" :true)
+  ("9.3.1" "X is 2 ** 0.5, X > 1.41" :true)
+  ("9.3.10" "X is 2 ^ 3, X == 8" :true)
+  ("9.3.10" "X is 2 ^ (-1)" "type_error(float")
+  ("9.3.10" "X is 1 ^ (-1), X == 1" :true)
+  ;; 9.1.3: dividing integers exactly stays integral.
+  ("9.1.3" "X is 4 / 2, X == 2" :true)
+  ("9.1.3" "X is 1 / 2, X == 0.5" :true)
+  ;; 9.1.3 with integer_rounding_function = toward_zero.
+  ("9.1.3" "X is 7 // -2, X == -3" :true)
+  ("9.1.3" "X is 7 rem -2, X == 1" :true)
+  ("9.1.3" "X is 7 mod -2, X == -1" :true)
+  ("9.1.3" "X is -7 div 2, X == -4" :true)
+  ;; 9.1.6 the type-preserving and rounding functions.
+  ("9.1.6" "X is abs(-3), X == 3" :true)
+  ("9.1.6" "X is sign(-3), X == -1" :true)
+  ("9.1.6" "X is sign(-3.0), X == -1.0" :true)
+  ("9.1.6" "X is min(2, 3), X == 2" :true)
+  ("9.1.6" "X is truncate(1.5), X == 1" :true)
+  ("9.1.6" "X is round(1.5), X == 2" :true)
+  ("9.1.6" "X is ceiling(1.1), X == 2" :true)
+  ("9.1.6" "X is floor(-1.1), X == -2" :true)
+  ("9.1.6" "X is float(1), X == 1.0" :true)
+  ("9.1.6" "X is float_integer_part(1.5), X == 1.0" :true)
+  ("9.1.6" "X is float_fractional_part(1.5), X == 0.5" :true)
+  ("9.1.6" "X is pi, X > 3.14" :true)
+  ("9.1.2" "X is gcd(12, 8), X == 4" :true)
+  ;; 9.1.4.2: the evaluation errors, all catchable.
+  ("9.3.10" "X is sqrt(-1.0)" "evaluation_error(undefined")
+  ("9.3.7" "X is log(0.0)" "evaluation_error(undefined")
+  ("9.1.4.2" "X is 1.0 / 0.0" "evaluation_error(zero_divisor")
+  ("9.1.4.2" "X is 1 / 0" "evaluation_error(zero_divisor")
+  ("9.1.4.2" "X is 1.0e300 * 1.0e300" "evaluation_error(float_overflow")
+  ("9.1.4.2" "X is exp(1000.0)" "evaluation_error(float_overflow")
+  ;; The exponent-magnitude resource bound is this engine's own DoS guard and
+  ;; fires before the float would overflow.
+  ("9.1.4.2*" "X is 2.0 ** 100000" "resource_error(exponent_magnitude")
+  ("9.1.1" "X is foo(1)" "type_error(evaluable")
+  ("9.1.1" "X is [1]" "type_error"))
+
+;;; 8.10 -- all-solutions predicates, whose free-variable grouping is subtle
+;;; enough that an engine can look right on the simple cases and still be wrong.
+
+(deftest-iso iso-all-solutions
+  ("8.10.1" "findall(X, member(X,[a,a]), [a,a])" :true)
+  ("8.10.1" "findall(X, fail, [])" :true)
+  ("8.10.2" "bagof(X, member(X-Y,[1-a,2-b]), L), Y == a, L == [1]" :true)
+  ("8.10.2" "findall(Y-L, bagof(X, member(X-Y,[1-a,2-b]), L), [a-[1], b-[2]])" :true)
+  ("8.10.2" "bagof(X, Y^member(X-Y,[1-a,2-b]), [1,2])" :true)
+  ("8.10.2" "bagof(X, fail, L)" :false)
+  ("8.10.3" "setof(X, member(X,[c,a,b,a]), [a,b,c])" :true)
+  ("8.10.3" "findall(Y-L, setof(X, member(X-Y,[2-a,1-a]), L), [a-[1,2]])" :true)
+  ("8.10.4" "forall(member(X,[1,2]), X > 0)" :true)
+  ("8.10.4" "forall(member(X,[1,-2]), X > 0)" :false))
+
+;;; 7.8 -- control constructs.
+
+(deftest-iso iso-control
+  ("7.8.1" "true" :true)
+  ("7.8.2" "fail" :false)
+  ;; 7.8.7: if-then is its own construct and fails when the condition fails --
+  ;; it is not only the left half of if-then-else.
+  ("7.8.7" "( fail -> true )" :false)
+  ("7.8.7" "( true -> true )" :true)
+  ("7.8.7" "( member(X,[1,2]) -> X == 1 )" :true)
+  ("7.8.8" "( fail -> true ; true )" :true)
+  ("7.8.8" "( member(X,[1,2]) -> X == 1 ; fail )" :true)
+  ;; The soft cut keeps every solution of its condition.
+  ("7.8.8" "findall(X, ( member(X,[1,2]) *-> true ; fail ), [1,2])" :true)
+  ("7.8.8" "( fail *-> true ; true )" :true)
+  ("7.8.7" "( fail *-> true )" :false)
+  ;; 7.8.4: a cut inside call/1 is local to it.
+  ("7.8.4" "( call((!, fail)) ; true )" :true)
+  ("7.8.3" "call(plus(1), 2, X), X == 3" :true)
+  ("7.8.9" "catch(throw(f(1)), f(Y), Y == 1)" :true)
+  ("7.8.9" "catch(catch(throw(a), b, true), a, true)" :true))
+
+;;; 8.17 -- the flags the standard requires an implementation to report.
+
+(deftest-iso iso-flags
+  ("8.17.2" "current_prolog_flag(bounded, false)" :true)
+  ("8.17.2" "current_prolog_flag(integer_rounding_function, toward_zero)" :true)
+  ("8.17.2" "current_prolog_flag(double_quotes, codes)" :true)
+  ("8.17.2" "current_prolog_flag(max_arity, A)" :true)
+  ("8.17.2.3" "current_prolog_flag(bogus_flag, V)" "domain_error(prolog_flag"))
+
+;;; 8.4 -- sorting, whose stability and error contracts are specified.
+
+(deftest-iso iso-sorting
+  ("8.4.3" "keysort([b-1,a-2,b-3], [a-2, b-1, b-3])" :true)
+  ("8.4.3" "keysort([a], L)" "type_error(pair")
+  ("8.4.4" "sort([b,a,b], [a,b])" :true)
+  ("8.4.4" "msort([b,a,b], [a,b,b])" :true))
+
+;;; 8.11-8.13 -- streams.  The error class here is load-bearing: a program that
+;;; misspells an alias must be able to tell that from an ordinary failure.
+
+(deftest-iso iso-streams
+  ("8.11.5.3" "set_input(S)" "instantiation_error")
+  ("8.11.5.3" "set_input(1)" "domain_error(stream_or_alias")
+  ("8.11.5.3" "set_input(nosuch)" "existence_error(stream")
+  ("8.11.6.3" "set_output(nosuch)" "existence_error(stream")
+  ("8.11.6.3" "open(F, read, S)" "instantiation_error")
+  ("8.11.6.3" "open('/tmp/cl-prolog-nonexistent', 1, S)" "type_error(atom")
+  ("8.11.6.3" "open('/tmp/cl-prolog-nonexistent', bogus, S)" "domain_error(io_mode")
+  ("8.11.6.3" "open('/tmp/cl-prolog-nonexistent', read, S, bogus)" "type_error(list")
+  ("8.11.7.3" "close(S)" "instantiation_error")
+  ("8.11.7.3" "close(nosuch)" "existence_error(stream")
+  ("8.11.8" "stream_property(S, P), nonvar(S)" :true)
+  ("8.11.8.3" "stream_property(user_input, bogus)" "domain_error(stream_property")
+  ("8.11.9.3" "flush_output(nosuch)" "existence_error(stream")
+  ("8.11.9.3" "at_end_of_stream(nosuch)" "existence_error(stream")
+  ("8.11.10.3" "set_stream_position(user_input, P)" "instantiation_error")
+  ;; 8.12 character I/O.
+  ("8.12.1.3" "get_char(nosuch, C)" "existence_error(stream")
+  ("8.12.1.3" "get_char(user_input, 1)" "type_error(in_character")
+  ("8.12.2.3" "peek_char(user_input, 1)" "type_error(in_character")
+  ("8.12.3.3" "put_char(C)" "instantiation_error")
+  ("8.12.3.3" "put_char(1)" "type_error(character")
+  ("8.12.3.3" "put_char(ab)" "type_error(character")
+  ("8.12.4.3" "nl(nosuch)" "existence_error(stream")
+  ;; 8.13 byte I/O.  The argument is checked before the stream's type, and the
+  ;; permission error names the stream's actual type as the culprit.
+  ("8.13.1.3" "get_byte(user_input, a)" "type_error(in_byte")
+  ("8.13.3.3" "put_byte(a)" "type_error(byte")
+  ("8.13.3.3" "put_byte(256)" "type_error(byte")
+  ("8.13.3.3" "put_byte(1)" "permission_error(output,text_stream"))
+
+;;; 8.14 -- term input/output options, op/3 and char_conversion/2.
+
+(deftest-iso iso-term-io
+  ("8.14.1.3" "read_term_from_atom('a', T, O)" "instantiation_error")
+  ("8.14.1.3" "read_term_from_atom('a', T, bogus)" "type_error(list")
+  ("8.14.1" "read_term_from_atom('f(X)', T, [variable_names(V)]), V = ['X'=_]" :true)
+  ("8.14.1" "read_term_from_atom('f(X,Y)', T, [variables(V)]), V = [_,_]" :true)
+  ("8.14.1" "read_term_from_atom('f(X,Y,Y)', T, [singletons(S)]), S = ['X'=_]" :true)
+  ("8.14.2.3" "write_term(user_output, foo, bogus)" "type_error(list")
+  ("8.14.2.3" "write_term(user_output, foo, [bogus(true)])" "domain_error(write_option")
+  ("8.14.3.3" "op(P, xfx, foo)" "instantiation_error")
+  ("8.14.3.3" "op(700, xfx, 1)" "type_error(list")
+  ("8.14.3" "op(700, xfx, [a,b]), current_op(700, xfx, a)" :true)
+  ("8.14.4.3" "current_op(a, xfx, foo)" "type_error(integer")
+  ("8.14.4.3" "current_op(700, bogus, foo)" "domain_error(operator_specifier")
+  ("8.14.4.3" "current_op(P, T, 1)" "type_error(atom")
+  ("8.14.5.3" "char_conversion(A, b)" "instantiation_error")
+  ("8.14.6.3" "current_char_conversion(1, B)" "type_error(character"))
+
+;;; 8.3 and 8.16 -- type testing and atom processing, including the
+;;; enumeration modes, where a missing solution is invisible without a count.
+
+(deftest-iso iso-type-testing-and-atoms
+  ("8.3.1" "var(_)" :true)
+  ("8.3.2" "\\+ atom(\"x\")" :true)
+  ("8.3.3" "\\+ integer(1.0)" :true)
+  ("8.3.4" "float(1.0)" :true)
+  ("8.3.5" "atomic(1)" :true)
+  ("8.3.5" "\\+ atomic(f(x))" :true)
+  ("8.3.6" "compound([a])" :true)
+  ("8.3.6" "\\+ compound([])" :true)
+  ("8.3.7" "nonvar(f(_))" :true)
+  ("8.3.8" "number(1.0)" :true)
+  ("8.3.9" "callable(foo)" :true)
+  ("8.3.9" "callable(f(x))" :true)
+  ("8.3.9" "\\+ callable(1)" :true)
+  ("8.3.10" "\\+ is_list([a|_])" :true)
+  ;; abc has 3+2+1 substrings plus the 4 empty ones: 10 solutions in all.
+  ("8.16.3" "findall(S, sub_atom(abc, _, _, _, S), L), length(L, 10)" :true)
+  ("8.16.2" "findall(A-B, atom_concat(A, B, abc), L), length(L, 4)" :true)
+  ("8.16.1.3" "atom_length(\"ab\", L)" "type_error")
+  ("8.16.4.3" "atom_chars(A, [a|_])" "instantiation_error")
+  ("8.16.6.3" "char_code(ab, C)" "type_error(character")
+  ("8.16.6.3" "char_code(C, -1)" "representation_error(character_code"))

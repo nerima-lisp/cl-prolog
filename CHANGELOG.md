@@ -2,8 +2,215 @@
 
 All notable changes to `cl-prolog` are recorded in this file.
 
-The format follows a simple Keep a Changelog style with an `Unreleased`
-section at the top of the file.
+The format follows a simple Keep a Changelog style.  Unreleased work
+accumulates in an `Unreleased` section at the top of the file, which is renamed
+to the version being cut at release time.
+
+## 1.0.0 - 2026-07-25
+
+First stable release: the exported surface is now considered stable.
+
+This release fixes the ISO 13211-1 conformance defects a first systematic audit
+of the standard's syntax and builtin error contracts turned up — reachable from
+ordinary Prolog source text, and each now covered by
+`tests/iso-conformance.lisp`, which states its cases as the standard does.
+
+### Fixed
+
+- **atoms are now identified by their text**, as ISO 13211-1 6.4.2 requires.
+  Quoting an atom used to produce a *different* atom — `hello == 'hello'` was
+  false — because an unquoted name was interned upcased while a quoted one kept
+  its spelling. The two encodings now live in different packages
+  (`cl-prolog.verbatim-atoms` holds any text containing an upper-case letter),
+  which makes the text/symbol mapping a bijection, and `=/2`, `==/2`,
+  `compare/3` and `sort/2` all decide identity on text. Consequences, each a
+  behavior change:
+    - `writeq/1` and `print/1` no longer lose case: `'FooBar'` printed as
+      `foobar`, so `term_to_atom/2` could not round-trip a mixed-case atom
+    - `atom_codes/2`, `atom_chars/2`, `char_code/2`, `atom_string/2`,
+      `upcase_atom/2`, `downcase_atom/2`, `char_type/2` and `format/2`'s `~a`
+      and `~s` report the atom's text rather than its upcased symbol name —
+      `atom_codes(abc, X)` gave `[65,66,67]` and `format("~a", [hello])`
+      printed `HELLO`
+    - the standard order of terms ranks atoms by their characters (ISO 7.2.3),
+      so `'B' @< a` holds; it previously compared upcased symbol names, then
+      home packages, then creation order, which also let `X == Y` be false for
+      a pair `X = Y` unified
+    - `[]` is the atom of text `"[]"`: `[] == '[]'` and `atom_length([], 2)`
+    - `char_conversion/2` and `open/3` receive the character and pathname their
+      argument spells, not an upcased one
+  New exported `prolog-atom` and `prolog-atom-text` name an atom by its text
+  from Lisp, which is now the only way to write one whose text is not lower
+  case; see [Semantics](docs/src/semantics.md#atoms).
+- **an atom that is an operator can now be written as a term**, per ISO 6.3.3.1
+  (as an argument) and 6.3.4.3 (bracketed). `functor(T, +, 2)`,
+  `T =.. [+, 1, 2]`, `X = (-)`, `atom_length(-, 1)`, `current_op(P, T, +)`,
+  `compare(<, A, B)` and `sort(0, @<, L, S)` all raised a syntax error, which
+  made `op/3`, `sort/4`, `predsort/3` and `compare/3` unusable from Prolog
+  source. An operator with no operand after it now reads as its atom; an
+  operator used unbracketed as another operator's left operand still does not,
+  as ISO requires the brackets there
+- **a run of graphic characters is now one token**, per ISO 6.4.2, and an
+  undeclared one is an atom. The tokenizer matched the longest *declared*
+  operator instead, so `:- op(700, xfx, ===).` — declaring an operator that by
+  definition does not exist yet — split `===` into `==` and `=` and failed to
+  parse
+- **`assertz/1`, `asserta/1`, `retract/1` and `retractall/1` now convert a
+  `:-`/2 term to a clause**, per ISO 7.6.1. Only the Lisp-level
+  `(:- HEAD . BODY-GOALS)` shape was recognized, so `assertz((h :- Body))` from
+  Prolog source stored the whole `:-`/2 term as a *fact head* and left `h`
+  undefined; runtime rule assertion was broken outright. `clause/2` returns the
+  body in the shape source text spells it, and a fact matches
+  `retract((h :- true))`
+- **an atom is now quoted only when it cannot read back bare**, per ISO 6.4.2.
+  `writeq/1`, `print/1`, `~q` and `write_canonical/1` quoted every atom that was
+  not a plain atom name, so a graphic token printed as `'+'`, `'=..'`, `'@<'`,
+  `'\+'` and the solo chars as `'!'`, `';'` — all of which are name tokens
+  needing no quotes. Still quoted, each because the reader forces it: `,` and
+  `|` (they would read back as separators), `{}` (not yet read as an atom), a
+  lone `.` (the end token per ISO 6.4.8), and a compound's functor unless it is
+  a plain name (this reader does not yet require `(` to follow a functor with no
+  layout, so a bare `+(1,2)` would read as the prefix operator applied to
+  `(1,2)`, and `write_canonical/1` output has to stay re-readable)
+- **the lexer now reads the numeric notations of ISO 6.4.4**: the character-code
+  constant `0'c` (including `0''`, `0'\n` and `0'\x41\`) and the radix constants
+  `0x`, `0o`, `0b`. None of them parsed, so `X is 0'a` — the way a character code
+  is written — was a syntax error, and so was reading a term containing one from
+  a stream, since the source splitter also mistook `0'`'s quote for the start of
+  a quoted atom
+- **escape sequences in a quoted token are now decoded**, per ISO 6.4.2.1. A
+  `\` passed the following character through verbatim instead, so `'a\nb'` held
+  the letter `n` rather than a newline. `\a \b \e \f \n \r \t \v \0`, the radix
+  forms `\xHH\` and `\OOO\`, `\\ \' \" \``, and the `\`-newline continuation are
+  all honored, in `'...'` and `"..."` alike
+- **the bitwise operators of ISO 6.3.4.4 table 7 are now declared**: `/\`, `\/`,
+  `xor` at 500 yfx, `<<` and `>>` at 400 yfx, and prefix `\` at 200 fy. Their
+  evaluable functors already existed, so `X is 1 << 3` and `X is 12 /\ 10` were
+  computable but unwritable
+- `asserta/1` and `assertz/1` **no longer accept an unbound argument**: they
+  stored a clause whose head was a fresh variable, which no call could ever
+  match, instead of raising the instantiation_error ISO 8.9.1.3 requires. A
+  rule with a variable head is rejected the same way
+- `compare/3` validates a bound Order argument (ISO 8.4.2.3): a non-atom is a
+  `type_error(atom, _)` and an atom other than `<`, `=`, `>` a
+  `domain_error(order, _)`, where both silently failed
+- `clause/2` rejects a non-callable Body with `type_error(callable, _)` (ISO
+  8.8.1.3) instead of failing, and `current_input/1` and `current_output/1`
+  reject a non-stream argument with `domain_error(stream, _)` (ISO 8.11.1.3),
+  which used to fail silently and hide a misspelled alias
+- `number_chars/2` and `number_codes/2` raise `syntax_error/1` for text that
+  spells no number, as ISO 8.16.7.3 and 8.16.8.3 require, rather than
+  `domain_error(number_text, _)`; the `prolog-syntax-error` condition is now
+  exported. `read_term_from_atom/3` validates its options through the same
+  read-option checker `read_term/2,3` uses, so an unsupported option is a
+  `domain_error(read_option, _)` instead of being accepted and ignored
+- `atom_number/2` still fails rather than raising on unparseable text, and now
+  decides that before running its continuation, so an error raised by a later
+  goal is no longer mistaken for its own and swallowed
+- a bare `{}` reads as the atom of that name (ISO 6.3.6)
+- **`(If -> Then)` without an else branch now works.** ISO 7.8.7 makes if-then a
+  control construct in its own right, which fails when the condition fails; only
+  the if-then-*else* form had a solver, so the common `( Cond -> Then )` raised
+  `existence_error(procedure, (->)/2)`. `(If *-> Then)` likewise
+- **arithmetic now follows ISO 9.x where it had drifted**: `**` is 9.3.1's float
+  power (`2 ** 3` is `8.0`) while `^` is 9.3.10's integer-preserving one (`2 ^ 3`
+  is `8`), raising an integer to a negative integer power is
+  `type_error(float, Base)`, and dividing two integers exactly stays integral
+  (`4 / 2` was `2.0`). Float overflow and underflow reach Prolog as
+  `evaluation_error(float_overflow)` / `(underflow)` instead of escaping as a
+  host condition
+- **stream and I/O error contracts corrected** across ISO 8.11-8.14: a
+  designator that could never name a stream is `domain_error(stream_or_alias)`
+  rather than `existence_error`; `open/3,4` reports a non-atom mode as
+  `type_error(atom)`; `get_char/2` and `peek_char/2` reject a bound non-character
+  argument with `type_error(in_character)` where they silently failed;
+  `get_byte`/`put_byte` use `type_error(in_byte)` / `type_error(byte)` and check
+  the argument *before* the stream, and the stream's permission error names the
+  stream's actual type as the culprit (`text_stream`) rather than the required
+  one; `write_term/2,3` reports an unsupported option in the `write_option`
+  domain; and `current_char_conversion/2` rejects a non-character argument
+- `char_code/2` raises `representation_error(character_code)` for an integer that
+  names no character, per ISO 8.16.6.3, rather than a domain error; the
+  `prolog-representation-error` condition is new and exported
+- `current_prolog_flag/2` raises `domain_error(prolog_flag, F)` for an atom that
+  names no flag (ISO 8.17.2.3) instead of failing
+- one operator name now means one operator in the operator table, whichever
+  symbol spells it, so redefining a standard operator through `op/3` replaces
+  its entry instead of adding a second invisible one at a different priority
+- `numbervars/3` uses the ISO 8.14.2 functor `'$VAR'`, whose text is upper
+  case; the distinct lower-case atom `'$var'` is no longer written as a
+  variable name
+- CI: the SBCL check timeout now sends a follow-up `SIGKILL`, since SBCL can
+  defer a bare `SIGTERM` past a tight compiled loop; `nix flake check`'s step
+  now carries its own budget narrower than the job's, so a hang reports an
+  attributable timeout instead of an ambiguous job cancellation
+- CI: `packages.default` and `apps.test` (the two entry points README.md
+  documents) are now actually built by `nix flake check`, not merely
+  evaluated — `apps.test` in particular exercises a genuinely different code
+  path (cl-weave's own dynamic-space sizing) that was previously untested
+- CI: tag releases now require a green `nix flake check` on the tagged commit
+  before publishing, closing a gap where a red `main` could still be tagged
+  and released; the release workflow's `:version` extraction is now anchored
+  the same way `flake.nix`'s already was, so a comment merely mentioning
+  `:version` can no longer shadow the real field
+- CI: a missing `CACHIX_CACHE` repository variable now emits a build warning
+  instead of silently falling back to an uncached build with no other signal
+- `docs.yml`'s path filter now includes `cl-prolog.asd`, so a version-only
+  bump reliably retriggers a documentation rebuild
+
+### Added
+
+- `tests/atom-canonicalization.lisp`: the atom text/symbol bijection, quoting
+  invisibility, case significance, `writeq` round-tripping (including a
+  property test over generated mixed-case texts), text-based ordering, and the
+  agreement of `=/2`, `==/2` and `compare/3`
+- regression coverage for operator atoms as arguments, graphic-token lexing,
+  and `:-`/2 clause conversion through `assertz`/`retract`/`clause`
+- `.github/dependabot.yml` for the `github-actions` ecosystem (root workflows
+  and the `setup-nix` composite action)
+- `.github/workflows/benchmarks.yml`: runs the self-contained micro-benchmarks
+  on `workflow_dispatch` and a weekly schedule only — never on push or pull
+  request, consistent with benchmarks being diagnostic rather than a gate
+
+### Changed
+
+- split three of the largest source files along existing internal seams,
+  with no behavior change: `data.lisp` into `logic-variable.lisp` /
+  `clause.lisp` / `predicate-index.lisp` / `data.lisp`; `unification.lisp`
+  into `environment-index.lisp` / `unification.lisp`; `prover.lisp` into
+  `proof-state.lisp` / `prover.lisp`
+- consolidated repeated macro-shaped code across the engine and builtins:
+  duplicated constraint-hook and first-solution proof-search prologues in
+  `prover.lisp`/`builtins/control.lisp`; the dual `:current`/`:explicit`
+  stream builtin bodies in `builtins/io-streams.lisp`/`builtins/io-code.lisp`;
+  the `aggregate_all/3` reducer dispatch, several scalar-argument guard
+  checks, and three-way duplicated builtin triples across `builtins/*.lisp`;
+  the runtime-error condition classes and their `%raise-*` wrappers now
+  generate from one shared table instead of two hand-maintained lists
+- removed an unused clause-indexing structure (four `rulebase` slots plus
+  their maintenance code) that was superseded by the predicate-descriptor
+  index and had no production reader; removed a vestigial cycle-detection
+  parameter from the unification indexer left over from before the
+  tortoise-and-hare occurs-check
+- upgraded `cl-weave` `v0.4.0` → `v1.0.0` (additive; fixes an integer-shrinker
+  bug and a swallowed-hook-timeout bug relevant to this suite) and pinned
+  `paredit-cli` to `v0.7.0` (previously an unpinned input silently frozen
+  three commits behind what it appeared to track)
+- `src/weave.lisp`'s `:set` query-assertion kind now reports structured
+  missing/unexpected solutions on failure via a `cl-weave:defmatcher`
+  (`:to-solve`) instead of collapsing to a bare pass/fail boolean
+- rewrote several `tests/*.lisp` cases to use the existing `deftest-queries`/
+  `assert-query` helpers instead of hand-rolled `dolist`/`signals-condition`
+  boilerplate, and added coverage for five previously-untested branches
+  (string-scanner escape handling, `%text-of` coercion arms, `sub_string/5`'s
+  fully-enumerated mode, a decimal-digit-limit boundary, and a `format/2`
+  column directive)
+- `flake.nix` now also builds on `aarch64-darwin`, verified locally end to
+  end (`nix build`, `nix develop`, `nix flake check`) — the prior
+  Linux-only restriction was self-imposed, not inherited from either flake
+  input
+- all in-repo `github.com/takeokunn/cl-prolog` references now point at
+  `github.com/nerima-lisp/cl-prolog`, the project's current org
 
 ## 0.8.0 - 2026-07-25
 

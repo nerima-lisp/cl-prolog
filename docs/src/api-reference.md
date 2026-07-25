@@ -27,13 +27,24 @@ metadata to be shared.
 The exported symbol `clause` names the clause type/accessor API and is also
 the Lisp representation of the exported `clause/2` builtin goal.
 
+## Atoms
+
+- `prolog-atom` — `(prolog-atom text)` returns the atom whose printed text is
+  the string `text`
+- `prolog-atom-text` — the inverse: the string an atom prints as
+
+An atom is a Common Lisp symbol, but its symbol name is not its text — the text
+of `CL-PROLOG::PARENT` is `"parent"`. Bare symbols therefore spell exactly the
+lower-case atoms; use `prolog-atom` for any other spelling. See
+[Semantics](semantics.md#atoms).
+
 ## Unification
 
 - `logic-var-p` — true for `?`-prefixed non-keyword symbols
 - `fresh-logic-variable` — return a fresh symbol satisfying `logic-var-p`
-- `unify` — `(unify left right &optional environment)` returns
+- `unify` — `(unify left right &optional environment occurs-check)` returns
   `(values extended-environment t)` on success and `(values nil nil)` on
-  failure; the occurs check is always enabled
+  failure; the occurs check defaults to enabled
 - `logic-substitute` — apply an environment to a term while preserving dotted
   structure
 
