@@ -179,6 +179,12 @@ drifting:
   same term here, but is not portable to another system.
 - **`occurs_check` defaults to `true`**, so `X = f(X)` fails where ISO would let
   it build a cyclic term — see below.
+- **The character set is the host's, so Unicode.** ISO 6.5 leaves it
+  implementation-defined; a code past 255 is a character here rather than a
+  `representation_error`, which is what lets an atom hold text in any script.
+  The 1999 conformance corpus assumes a 256-character set and expects the error
+  on two of its cases; keeping Unicode is a deliberate choice, asserted in
+  `tests/iso-conformance.lisp`.
 
 ## occurs_check and cyclic terms
 

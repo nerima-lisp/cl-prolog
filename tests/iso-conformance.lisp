@@ -169,7 +169,14 @@
   ;; 6.3.3: a functor is not required to be followed immediately by `(', so a
   ;; bare +(1,2) reads as the prefix operator applied to (1,2) and the writer
   ;; quotes such a functor to keep write_canonical/1 output re-readable.
-  ("6.3.3*" "X = +(1,2), X == 1 + 2" :false))
+  ("6.3.3*" "X = +(1,2), X == 1 + 2" :false)
+  ;; 6.5: the character set is implementation-defined, and this engine chooses
+  ;; the host's -- Unicode.  A code past 255 is therefore a character, not a
+  ;; representation_error.  The 1999 conformance corpus assumes a 256-character
+  ;; set and expects the error; passing it would cost the engine every atom
+  ;; that is not Latin-1.  Asserted so the choice stays a choice.
+  ("6.5*" "atom_codes(A, [12354]), atom_length(A, 1)" :true)
+  ("6.5*" "char_code(C, 12354), atom_length(C, 1)" :true))
 
 ;;; 9.x -- evaluable functors.  The standard fixes results and rounding exactly,
 ;;; and this is where systems most often quietly differ from each other.
