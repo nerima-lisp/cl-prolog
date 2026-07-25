@@ -259,45 +259,65 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
        rulebase environment depth)
     (funcall emit (if succeeded-p goal-environment environment))))
 
-(define-builtin (if-then-else condition then else)
-    (rulebase environment depth emit)
-  ;; The condition is opaque to cut (ONCE semantics); the taken branch
-  ;; shares the caller's cut barrier, as ISO requires.
-  (let ((caller-cut-tag *caller-cut-tag*))
-    (multiple-value-bind (condition-environment matched-p)
-        (%first-proof-environment
-         (%resolve-callable-goal condition environment
-                                 (%iso-atom "IF_THEN_ELSE"))
-         rulebase environment depth)
-      (let ((branch-environment
-              (if matched-p condition-environment environment)))
-        (%prove-with-cut-tag/k
-         (%resolve-callable-goal (if matched-p then else)
-                                 branch-environment
-                                 (%iso-atom "IF_THEN_ELSE"))
-         rulebase branch-environment depth caller-cut-tag emit)))))
+(defun %solve-if-then-else
+    (condition then else rulebase environment depth caller-cut-tag emit operation)
+  "Prove ISO 7.8.8's if-then-else.
 
-(define-builtin (soft-if-then-else condition then else)
-    (rulebase environment depth emit)
-  ;; Unlike IF-THEN-ELSE the condition keeps all its solutions; the taken
-  ;; branch still shares the caller's cut barrier.
-  (let ((caller-cut-tag *caller-cut-tag*)
-        (matched-p nil))
+The condition is opaque to cut (once semantics); the taken branch shares the
+caller's cut barrier, as ISO requires."
+  (multiple-value-bind (condition-environment matched-p)
+      (%first-proof-environment
+       (%resolve-callable-goal condition environment operation)
+       rulebase environment depth)
+    (let ((branch-environment
+            (if matched-p condition-environment environment)))
+      (%prove-with-cut-tag/k
+       (%resolve-callable-goal (if matched-p then else)
+                               branch-environment operation)
+       rulebase branch-environment depth caller-cut-tag emit))))
+
+(defun %solve-soft-if-then-else
+    (condition then else rulebase environment depth caller-cut-tag emit operation)
+  "Prove ISO 7.8.8's soft-cut if-then-else.
+
+Unlike if-then-else the condition keeps all its solutions; the taken branch
+still shares the caller's cut barrier."
+  (let ((matched-p nil))
     (%prove-bindings/k
-     (%resolve-callable-goal condition environment
-                             (%iso-atom "SOFT_IF_THEN_ELSE"))
+     (%resolve-callable-goal condition environment operation)
      rulebase environment depth
      (lambda (condition-environment)
        (setf matched-p t)
        (%prove-with-cut-tag/k
-        (%resolve-callable-goal then condition-environment
-                                (%iso-atom "SOFT_IF_THEN_ELSE"))
+        (%resolve-callable-goal then condition-environment operation)
         rulebase condition-environment depth caller-cut-tag emit)))
     (unless matched-p
       (%prove-with-cut-tag/k
-       (%resolve-callable-goal else environment
-                               (%iso-atom "SOFT_IF_THEN_ELSE"))
+       (%resolve-callable-goal else environment operation)
        rulebase environment depth caller-cut-tag emit))))
+
+;;; ISO 7.8.7's if-then, `(If -> Then)', is a control construct in its own right
+;;; and not only the left half of if-then-else: it fails when If fails.  The
+;;; parser produces the two-argument shape whenever no `;' follows, so without
+;;; the `->'/2 and `*->'/2 entries below a bare `( Cond -> Then )' raised
+;;; existence_error(procedure, (->)/2).  `fail' as the else branch is exactly
+;;; ISO's reading and inherits each construct's cut and solution-count behavior.
+(macrolet ((define-if-then-else-builtins (&body specifications)
+             `(progn
+                ,@(loop for (name arity solver operation) in specifications
+                        collect
+                        `(define-builtin
+                             (,name condition then
+                                    ,@(when (= arity 3) '(else)))
+                             (rulebase environment depth emit)
+                           (,solver condition then ,(if (= arity 3) 'else ''fail)
+                                    rulebase environment depth *caller-cut-tag*
+                                    emit (%iso-atom ,operation)))))))
+  (define-if-then-else-builtins
+    (if-then-else 3 %solve-if-then-else "IF_THEN_ELSE")
+    (-> 2 %solve-if-then-else "IF_THEN")
+    (soft-if-then-else 3 %solve-soft-if-then-else "SOFT_IF_THEN_ELSE")
+    (*-> 2 %solve-soft-if-then-else "SOFT_IF_THEN")))
 
 (define-builtin (throw ball) (rulebase environment depth emit)
   (let ((resolved-ball (logic-substitute ball environment)))
