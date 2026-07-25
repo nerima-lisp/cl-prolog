@@ -125,10 +125,15 @@ Priority zero removes the matching NAME and SPECIFIER definition."
     (700 :xfx |=\\=|) (700 :xfx <) (700 :xfx =<) (700 :xfx >) (700 :xfx >=)
     (700 :xfx in) (700 :xfx |#=|) (700 :xfx |#\\=|)
     (700 :xfx |#<|) (700 :xfx |#=<|) (700 :xfx |#>|) (700 :xfx |#>=|)
-    (500 :yfx +) (500 :yfx -) (450 :xfx |..|)
+    (500 :yfx +) (500 :yfx -)
+    ;; The bitwise operators of ISO 13211-1 6.3.4.4 table 7.  Their evaluable
+    ;; functors already existed; without these declarations `X is 1 << 3' and
+    ;; `X is 12 /\ 10' were unwritable, since nothing parsed the operator.
+    (500 :yfx |/\\|) (500 :yfx |\\/|) (500 :yfx xor)
+    (450 :xfx |..|)
     (400 :yfx *) (400 :yfx /) (400 :yfx //) (400 :yfx div)
-    (400 :yfx mod) (400 :yfx rem)
-    (200 :xfx **) (200 :xfy ^) (200 :fy +) (200 :fy -)))
+    (400 :yfx mod) (400 :yfx rem) (400 :yfx |<<|) (400 :yfx |>>|)
+    (200 :xfx **) (200 :xfy ^) (200 :fy +) (200 :fy -) (200 :fy |\\|)))
 
 (defun %make-standard-operator-table ()
   (reduce (lambda (table declaration)
