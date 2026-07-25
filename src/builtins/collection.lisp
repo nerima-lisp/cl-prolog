@@ -1,15 +1,40 @@
 (in-package #:cl-prolog)
 
+(defun %existential-marker-p (goal)
+  "True when GOAL is a `^'/2 term, whatever spelling reached the engine."
+  (and (%proper-list-p goal)
+       (= (length goal) 3)
+       (symbolp (first goal))
+       (string= "^" (%atom-text (first goal)))))
+
+(defun %collect-existential-variables (goal variables)
+  "Add every variable `^'-quantified anywhere in GOAL to VARIABLES.
+
+ISO 13211-1 8.10.2 scopes `^' over the whole goal, not just its front: in
+`(Y^(X=1 ; Y=1) ; X=3)' the Y is existential even though the goal itself is a
+disjunction.  Only the control constructs a goal is built from are descended
+into -- a `^' inside an ordinary argument is data, not a quantifier."
+  (cond
+    ((%existential-marker-p goal)
+     (dolist (variable (%collect-variables (second goal)))
+       (pushnew variable variables :test #'eq))
+     (%collect-existential-variables (third goal) variables))
+    ((and (%proper-list-p goal) (symbolp (first goal)))
+     (if (member (%atom-text (first goal))
+                 '("," ";" "->" "*->" "and" "or"
+                   "if-then-else" "soft-if-then-else")
+                 :test #'string=)
+         (dolist (argument (rest goal) variables)
+           (setf variables (%collect-existential-variables argument variables)))
+         variables))
+    (t variables)))
+
 (defun %strip-existential-quantifiers (goal)
-  "Return GOAL without leading (^ QUANTIFIED GOAL) forms and their variables."
-  (let ((variables '()))
-    (loop while (and (%proper-list-p goal)
-                     (= (length goal) 3)
-                     (and (symbolp (first goal))
-                          (string= (symbol-name (first goal)) "^")))
-          do (dolist (variable (%collect-variables (second goal)))
-               (pushnew variable variables :test #'eq))
-             (setf goal (third goal)))
+  "Return GOAL without its leading `^'/2 wrappers, and every variable the goal
+existentially quantifies anywhere within it."
+  (let ((variables (%collect-existential-variables goal '())))
+    (loop while (%existential-marker-p goal)
+          do (setf goal (third goal)))
     (values goal (nreverse variables))))
 
 (defun %collect-template-solutions (template goal rulebase environment depth)

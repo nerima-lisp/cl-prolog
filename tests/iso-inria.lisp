@@ -20,7 +20,7 @@ Resolved through ASDF rather than *LOAD-PATHNAME*, which points at the fasl
 cache once the suite is compiled."
   (asdf:system-relative-pathname :cl-prolog/tests "tests/iso/inriasuite/"))
 
-(defparameter +inria-conformance-floor+ 422
+(defparameter +inria-conformance-floor+ 424
   "The corpus score this engine is known to reach.
 
 A floor rather than an exact count, so that fixing a builtin never fails the
