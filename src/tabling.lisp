@@ -214,6 +214,59 @@ and its transpose REVERSE-ADJACENCY (Kosaraju's algorithm, second pass)."
                   (gethash cache-key cache) index)))
         (not (null (gethash target index)))))))
 
+(defun %table-key (state canonical-goal cyclic-goal-p)
+  "Return the session table key identifying CANONICAL-GOAL's variant."
+  (let ((rulebase (proof-state-rulebase state)))
+    (list* rulebase
+           (rulebase-revision rulebase)
+           (proof-state-module state)
+           (if cyclic-goal-p
+               (list :cyclic (%variant-graph-key canonical-goal))
+               (list canonical-goal)))))
+
+(defun %record-table-answer! (entry answer cyclic-p)
+  "Append ANSWER to ENTRY, returning true only when it was not already tabled."
+  (let ((index (if cyclic-p
+                   (%table-entry-cyclic-answer-index entry)
+                   (%table-entry-answer-index entry)))
+        (answer-key (if cyclic-p (%variant-graph-key answer) answer)))
+    (unless (nth-value 1 (gethash answer-key index))
+      (let ((cell (list answer))
+            (tail (%table-entry-answers-tail entry)))
+        (if tail
+            (setf (cdr tail) cell)
+            (setf (%table-entry-answers entry) cell))
+        (setf (%table-entry-answers-tail entry) cell
+              (gethash answer-key index) t)
+        (incf (%table-entry-answer-count entry))
+        t))))
+
+(defun %prove-tabled/k (goal state key entries succeed)
+  "Build GOAL's answer table at KEY by iterating to a fixpoint.
+A non-local exit before completion discards the partial table."
+  (let ((entry (%make-table-entry))
+        (completed-p nil))
+    (setf (gethash key entries) entry)
+    (unwind-protect
+         (progn
+           (loop
+             with changed-p
+             do (setf changed-p nil)
+                (%prove-raw-clauses/k
+                 goal state
+                 (lambda (answer-state)
+                   (multiple-value-bind (answer cyclic-answer-p)
+                       (%canonicalize-variant
+                        (logic-substitute
+                         goal (proof-state-bindings answer-state)))
+                     (when (%record-table-answer! entry answer cyclic-answer-p)
+                       (setf changed-p t)
+                       (funcall succeed answer-state)))))
+             while changed-p)
+           (setf completed-p t))
+      (unless completed-p
+        (remhash key entries)))))
+
 (defun %prove-clauses/k (goal state succeed)
   "Prove GOAL, tabling declared predicates and detected left recursion."
   (if (or *depth-limited-search-p*
@@ -224,77 +277,13 @@ and its transpose REVERSE-ADJACENCY (Kosaraju's algorithm, second pass)."
                     (length (rest goal)) (proof-state-module state))
                    (%left-recursive-p goal state))))
       (%prove-raw-clauses/k goal state succeed)
-      (let* ((session (proof-state-table-session state))
-             (resolved-goal
-               (logic-substitute goal (proof-state-bindings state))))
+      (let ((entries
+              (%table-session-entries (proof-state-table-session state))))
         (multiple-value-bind (canonical-goal cyclic-goal-p)
-            (%canonicalize-variant resolved-goal)
-          (let* ((key
-                   (if cyclic-goal-p
-                       (list (proof-state-rulebase state)
-                             (rulebase-revision
-                              (proof-state-rulebase state))
-                             (proof-state-module state)
-                             :cyclic
-                             (%variant-graph-key canonical-goal))
-                       (list (proof-state-rulebase state)
-                             (rulebase-revision
-                              (proof-state-rulebase state))
-                             (proof-state-module state)
-                             canonical-goal)))
-                 (entries (%table-session-entries session))
+            (%canonicalize-variant
+             (logic-substitute goal (proof-state-bindings state)))
+          (let* ((key (%table-key state canonical-goal cyclic-goal-p))
                  (entry (gethash key entries)))
             (if entry
                 (%replay-table-answers/k goal state entry succeed)
-                (let ((entry (%make-table-entry))
-                      (completed-p nil))
-                  (labels ((record-answer-p (answer cyclic-p)
-                             (let* ((index
-                                      (if cyclic-p
-                                          (%table-entry-cyclic-answer-index
-                                           entry)
-                                          (%table-entry-answer-index entry)))
-                                    (answer-key
-                                      (if cyclic-p
-                                          (%variant-graph-key answer)
-                                          answer)))
-                               (multiple-value-bind (stored present-p)
-                                   (gethash answer-key index)
-                                 (declare (ignore stored))
-                                 (unless present-p
-                                   (let ((cell (list answer))
-                                         (tail
-                                           (%table-entry-answers-tail entry)))
-                                     (if tail
-                                         (setf (cdr tail) cell)
-                                         (setf (%table-entry-answers entry)
-                                               cell))
-                                     (setf (%table-entry-answers-tail entry)
-                                           cell
-                                           (gethash answer-key index) t)
-                                     (incf (%table-entry-answer-count entry))
-                                     t))))))
-                    (setf (gethash key entries) entry)
-                    (unwind-protect
-                         (progn
-                           (loop
-                             with changed-p
-                             do (setf changed-p nil)
-                                (%prove-raw-clauses/k
-                                 goal state
-                                 (lambda (answer-state)
-                                   (multiple-value-bind
-                                         (answer cyclic-answer-p)
-                                       (%canonicalize-variant
-                                        (logic-substitute
-                                         goal
-                                         (proof-state-bindings
-                                          answer-state)))
-                                     (when (record-answer-p
-                                            answer cyclic-answer-p)
-                                       (setf changed-p t)
-                                       (funcall succeed answer-state)))))
-                             while changed-p)
-                           (setf completed-p t))
-                      (unless completed-p
-                        (remhash key entries)))))))))))
+                (%prove-tabled/k goal state key entries succeed)))))))

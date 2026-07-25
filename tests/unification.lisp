@@ -364,7 +364,7 @@
       (is
         (= -3
            (cdr (cl-prolog::%environment-index-entry z compacted))))
-      (is (eq z (cl-prolog::%walk-term-indexed x compacted nil)))))
+      (is (eq z (cl-prolog::%walk-term-indexed x compacted)))))
   (deftest environment-index-after-bindings-distinguishes-prefix-and-rebuild ()
     (let* ((variable (fresh-logic-variable "?PREFIX"))
            (parent-environment (list (cons variable :base)))
@@ -433,10 +433,7 @@
            (maximum-overlay-length 0))
       (is
         (eq :resolved
-            (cl-prolog::%walk-term-indexed
-              (car variables)
-              index
-              nil)))
+            (cl-prolog::%walk-term-indexed (car variables) index)))
       (loop repeat 17
             for variable = (fresh-logic-variable "?OVERLAY-BOUND")
             do (setf index
@@ -454,10 +451,7 @@
       (is (= 7 maximum-overlay-length))
       (is
         (eq :resolved
-            (cl-prolog::%walk-term-indexed
-              (car variables)
-              index
-              nil)))))))
+            (cl-prolog::%walk-term-indexed (car variables) index)))))))
 
 (progn
   (deftest

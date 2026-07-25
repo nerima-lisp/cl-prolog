@@ -9,10 +9,10 @@ site_description: >-
   A small, dependency-free Prolog engine for Common Lisp — macro-first rule
   definition, CPS proof search, and a compact, extensible builtin set.
 site_author: cl-prolog contributors
-site_url: https://takeokunn.github.io/cl-prolog/
+site_url: https://nerima-lisp.github.io/cl-prolog/
 
-repo_name: takeokunn/cl-prolog
-repo_url: https://github.com/takeokunn/cl-prolog
+repo_name: nerima-lisp/cl-prolog
+repo_url: https://github.com/nerima-lisp/cl-prolog
 edit_uri: edit/main/docs/src/
 
 # Content lives in docs/src (kept from the previous mdBook layout).
@@ -73,7 +73,7 @@ theme:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/takeokunn/cl-prolog
+      link: https://github.com/nerima-lisp/cl-prolog
       name: cl-prolog on GitHub
   generator: false
 

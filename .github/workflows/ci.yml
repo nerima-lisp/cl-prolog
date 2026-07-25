@@ -25,7 +25,7 @@ jobs:
           - system: aarch64-linux
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -39,5 +39,10 @@ jobs:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # A step-level budget narrower than the job's, so a hang here fails
+      # with an attributable "step timed out" instead of being
+      # indistinguishable from a slow cold-cache nixpkgs fetch eating the
+      # whole job budget.
       - name: Run flake checks
+        timeout-minutes: 25
         run: nix flake check --print-build-logs

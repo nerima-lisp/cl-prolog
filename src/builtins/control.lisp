@@ -5,8 +5,7 @@
 (define-builtin (true) (rulebase environment depth emit)
   (funcall emit environment))
 
-(define-builtin ((fail false)) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase environment depth emit)))
+(define-builtin ((fail false)) (rulebase environment depth emit))
 
 (defun %occurs-check-flag (rulebase)
   "The rulebase's occurs_check flag value (\"TRUE\", \"FALSE\", or \"ERROR\")."
@@ -97,23 +96,18 @@ ERROR raises when a cycle would form.  Shared by =/2 and \\=/2."
     (%prove-bindings/k
      (%resolve-callable-goal goal environment (%iso-atom "ONCE"))
      rulebase environment depth
-     (lambda (extended)
+     (%with-first-solution first-proof (extended)
        (funcall emit extended)
-       (return-from first-proof nil)))))
+       nil))))
 
 (define-builtin (call_nth goal n) (rulebase environment depth emit)
   (let* ((resolved-goal
            (%extend-callable-goal (logic-substitute goal environment)
                                   '() environment))
          (resolved-n (logic-substitute n environment)))
-    (unless (or (logic-var-p resolved-n) (integerp resolved-n))
-      (%raise-type-error "INTEGER" resolved-n environment
-                         (%iso-atom "CALL_NTH")
-                         "call_nth/2 requires an integer solution number"))
-    (when (and (integerp resolved-n) (< resolved-n 1))
-      (%raise-domain-error "NOT_LESS_THAN_ONE" resolved-n environment
-                           (%iso-atom "CALL_NTH")
-                           "call_nth/2 requires a positive solution number"))
+    (%require-bounded-integer resolved-n environment (%iso-atom "CALL_NTH")
+                              "call_nth/2 solution number"
+                              :minimum 1 :allow-variable t)
     (let ((count 0))
       (block requested-proof
         (%prove-bindings/k
@@ -126,16 +120,6 @@ ERROR raises when a cycle would form.  Shared by =/2 and \\=/2."
                  (funcall emit extended)
                  (return-from requested-proof nil)))))))))
 
-(defmacro %with-restored-call-depth-limit
-    ((outer-token outer-remaining outer-used outer-depth-limited-p) &body body)
-  "Run BODY with the four call-depth-limit dynamic variables restored to
-the caller's OUTER-* values, undoing CALL_WITH_DEPTH_LIMIT's own binding."
-  `(let ((*call-depth-limit-token* ,outer-token)
-         (*call-depth-limit-remaining* ,outer-remaining)
-         (*call-depth-limit-used* ,outer-used)
-         (*depth-limited-search-p* ,outer-depth-limited-p))
-     ,@body))
-
 (define-builtin (call_with_depth_limit goal limit result)
     (rulebase environment depth emit)
   (let* ((operation (%iso-atom "CALL_WITH_DEPTH_LIMIT"))
@@ -143,17 +127,8 @@ the caller's OUTER-* values, undoing CALL_WITH_DEPTH_LIMIT's own binding."
            (%extend-callable-goal (logic-substitute goal environment)
                                   '() environment operation))
          (resolved-limit (logic-substitute limit environment)))
-    (when (logic-var-p resolved-limit)
-      (%raise-instantiation-error
-       environment operation
-       "call_with_depth_limit/3 requires an instantiated depth limit"))
-    (unless (integerp resolved-limit)
-      (%raise-type-error "INTEGER" resolved-limit environment operation
-                         "call_with_depth_limit/3 requires an integer depth limit"))
-    (when (minusp resolved-limit)
-      (%raise-domain-error
-       "NOT_LESS_THAN_ZERO" resolved-limit environment operation
-       "call_with_depth_limit/3 requires a non-negative depth limit"))
+    (%require-bounded-integer resolved-limit environment operation
+                              "call_with_depth_limit/3 depth limit")
     (if (zerop resolved-limit)
         (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
                      environment emit)
@@ -162,25 +137,30 @@ the caller's OUTER-* values, undoing CALL_WITH_DEPTH_LIMIT's own binding."
               (outer-remaining *call-depth-limit-remaining*)
               (outer-used *call-depth-limit-used*)
               (outer-depth-limited-p *depth-limited-search-p*))
-          (let ((*call-depth-limit-token* token)
-                (*call-depth-limit-remaining* resolved-limit)
-                (*call-depth-limit-used* 0)
-                (*depth-limited-search-p* t))
-            (when (eq token
-                      (cl:catch token
-                        (%prove-bindings/k
-                         resolved-goal rulebase environment depth
-                         (lambda (extended)
-                           (let ((used *call-depth-limit-used*))
-                             (%with-restored-call-depth-limit
-                                 (outer-token outer-remaining outer-used
-                                  outer-depth-limited-p)
-                               (%unify-emit result used extended emit)))))
-                        nil))
-              (%with-restored-call-depth-limit
-                  (outer-token outer-remaining outer-used outer-depth-limited-p)
-                (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
-                             environment emit))))))))
+          (macrolet ((with-restored-limit (&body body)
+                       ;; Solutions escape to the caller, so undo this goal's
+                       ;; own binding of the four depth-limit variables first.
+                       `(let ((*call-depth-limit-token* outer-token)
+                              (*call-depth-limit-remaining* outer-remaining)
+                              (*call-depth-limit-used* outer-used)
+                              (*depth-limited-search-p* outer-depth-limited-p))
+                          ,@body)))
+            (let ((*call-depth-limit-token* token)
+                  (*call-depth-limit-remaining* resolved-limit)
+                  (*call-depth-limit-used* 0)
+                  (*depth-limited-search-p* t))
+              (when (eq token
+                        (cl:catch token
+                          (%prove-bindings/k
+                           resolved-goal rulebase environment depth
+                           (lambda (extended)
+                             (let ((used *call-depth-limit-used*))
+                               (with-restored-limit
+                                 (%unify-emit result used extended emit)))))
+                          nil))
+                (with-restored-limit
+                  (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
+                               environment emit)))))))))
 
 (defun %first-proof-environment (goal rulebase environment depth)
   "Return the first proof environment for GOAL and whether one exists."
@@ -190,10 +170,10 @@ the caller's OUTER-* values, undoing CALL_WITH_DEPTH_LIMIT's own binding."
       (%prove-bindings/k
        (logic-substitute goal environment)
        rulebase environment depth
-       (lambda (extended)
+       (%with-first-solution first-proof (extended)
          (setf matched-p t
                result extended)
-         (return-from first-proof))))
+         nil)))
     (values result matched-p)))
 
 (defparameter +cleanup-deterministic-builtin-names+
@@ -320,7 +300,6 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
        rulebase environment depth caller-cut-tag emit))))
 
 (define-builtin (throw ball) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth emit))
   (let ((resolved-ball (logic-substitute ball environment)))
     (when (logic-var-p resolved-ball)
       (%raise-instantiation-error environment (%iso-atom "THROW")
@@ -354,15 +333,12 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
               (error condition)))))))
 
 (define-builtin (repeat) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (loop (funcall emit environment)))
 
 (define-builtin (halt) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase environment depth emit))
   (error 'prolog-halt :code 0))
 
 (define-builtin (halt code) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth emit))
   (let ((resolved (logic-substitute code environment)))
     (when (logic-var-p resolved)
       (%raise-instantiation-error environment (%iso-atom "HALT")

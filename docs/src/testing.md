@@ -6,7 +6,8 @@ cases, per-query cases, fixtures, and generated relational properties.
 
 ## Run the suite
 
-The Nix runner is self-contained and is the authoritative Linux path:
+The Nix runner is self-contained and is the authoritative path on supported
+systems (`x86_64-linux`, `aarch64-linux`, `aarch64-darwin`):
 
 ```sh
 nix run .
@@ -18,16 +19,17 @@ Pass any cl-weave CLI options after `--`; for example, to produce a JSON result:
 nix run . -- --reporter json --output cl-prolog-weave-results.json
 ```
 
-The full Linux verification suite — including packaging, examples, the docs
-build, and the structural parse gate — is:
+The full verification suite — including packaging, examples, the docs build,
+and the structural parse gate — is:
 
 ```sh
 nix flake check
 ```
 
-!!! warning "Nix outputs are Linux-only"
-    All flake outputs are supported on Linux only. On Darwin, ensure `cl-weave`
-    is discoverable through ASDF and run the suite directly:
+!!! info "Unsupported platforms"
+    On platforms outside the three supported systems (e.g. Intel Mac,
+    Windows), ensure `cl-weave` is discoverable through ASDF and run the
+    suite directly:
 
     ```sh
     sbcl --non-interactive \
@@ -36,13 +38,12 @@ nix flake check
       --eval '(asdf:test-system :cl-prolog)'
     ```
 
-    Then rely on CI for the Linux `nix flake check` path. A local Darwin
-    invocation may report success after omitting all supported systems — do not
-    treat that as verification.
+    Then rely on CI for the Nix `nix flake check` path.
 
 ## What `nix flake check` runs
 
-- **`checks.default`** — the ASDF/cl-weave regression suite.
+- **`checks.default`** — the ASDF/cl-weave regression suite, via a plain SBCL
+  invocation with the compiled-in default dynamic space.
 - **`checks.paredit-lint`** — a structural parse gate over every tracked
   `.lisp`/`.asd` file, failing if any is not a balanced S-expression document.
 - **`checks.examples`** — loads every shipped example through ASDF
@@ -50,6 +51,11 @@ nix flake check
 - **`checks.documentation`** — builds the MkDocs site and fails if it does not
   produce a valid `index.html`.
 - **`checks.formatting`** — checks `flake.nix` against `nixpkgs-fmt`.
+- **`checks.package`** — builds `packages.default`, so the package README.md
+  advertises (`nix run github:nerima-lisp/cl-prolog`) is actually realised,
+  not merely evaluated.
+- **`checks.app-test`** — runs `apps.test`, the cl-weave CLI wrapper (a
+  distinct code path from `checks.default`: it sets a 4096 MB dynamic space).
 
 ## Query test helpers
 

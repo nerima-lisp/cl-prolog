@@ -2,103 +2,28 @@
 ;;;;
 ;;;; The engine keeps clause data and proof search separate: queries are
 ;;;; normalized here, then proven against the builtin registry, foreign
-;;;; predicate hook, facts, and rules.
+;;;; predicate hook, facts, and rules.  The state threaded through the
+;;;; continuation is defined in proof-state.lisp.
 
 (in-package #:cl-prolog)
 
 (declaim (ftype function %proper-list-p %prove-goal/k %prove-clauses/k %prove-rule/k))
 
-(defvar *current-prolog-module* +default-prolog-module+)
-(defvar *current-table-session* nil
-  "Table session inherited by proof searches nested through builtins.")
-(defvar *call-depth-limit-token* nil)
-(defvar *call-depth-limit-remaining* nil)
-(defvar *call-depth-limit-used* 0)
-(defvar *depth-limited-search-p* nil)
-(defvar *constraint-post-unify-hook* nil
-  "Function called after builtin =/2 extends an environment.")
-(defvar *constraints-active-p-hook* nil
-  "Function reporting whether a dynamically scoped constraint store is active.")
+(defmacro %with-propagated-bindings
+    ((propagated propagated-index extended extended-index) &body body)
+  "Evaluate BODY for EXTENDED's bindings, routing through the constraint hook.
 
-(defvar *caller-cut-tag* nil
-  "Cut barrier of the goal invocation currently dispatching a builtin solver.
-
-Cut-transparent control constructs (AND, OR, the THEN/ELSE branches of
-IF-THEN-ELSE) read this at solver entry so a cut inside them prunes the
-caller's clause alternatives, as ISO requires.")
-
-(defun %make-cut-tag ()
-  "Return a fresh CATCH tag identifying one cut barrier."
-  (list '%cut-barrier))
-
-(defstruct (proof-state
-            (:constructor %make-proof-state
-                (rulebase bindings environment-index remaining-depth module
-                 table-session cut-tag)))
-  "Immutable data carried through the proof-search continuation."
-  (rulebase (make-rulebase) :type rulebase :read-only t)
-  (bindings (quote ()) :type list :read-only t)
-  (environment-index (%make-environment-index (quote ()))
-                     :type %environment-index
-                     :read-only t)
-  (module +default-prolog-module+ :type symbol :read-only t)
-  (table-session nil :type (or null %table-session) :read-only t)
-  (cut-tag nil :type list :read-only t)
-  (remaining-depth *max-prolog-depth*
-                   :type (or null (integer 0 *))
-                   :read-only t))
-
-(defun %state-with (state &key (bindings nil bindings-p)
-                                (environment-index nil environment-index-p)
-                                (module nil module-p)
-                                (table-session nil table-session-p)
-                                (cut-tag nil cut-tag-p)
-                                (remaining-depth nil remaining-depth-p))
-  "Return STATE with supplied slots replaced while keeping bindings and their
-index synchronized. Supplying only an unchanged CUT-TAG returns STATE."
-  (if (and cut-tag-p (eq (proof-state-cut-tag state) cut-tag)
-           (not bindings-p) (not environment-index-p) (not module-p)
-           (not table-session-p) (not remaining-depth-p))
-      state
-      (let* ((old-bindings (proof-state-bindings state))
-             (old-index (proof-state-environment-index state))
-             (next-bindings (if bindings-p bindings old-bindings))
-             (next-index
-               (cond
-                 (environment-index-p environment-index)
-                 (bindings-p
-                  (%environment-index-after-bindings
-                   next-bindings old-bindings old-index))
-                 (t old-index))))
-        (%make-proof-state
-         (proof-state-rulebase state)
-         next-bindings
-         next-index
-         (if remaining-depth-p
-             remaining-depth
-             (proof-state-remaining-depth state))
-         (if module-p module (proof-state-module state))
-         (if table-session-p
-             table-session
-             (proof-state-table-session state))
-         (if cut-tag-p cut-tag (proof-state-cut-tag state))))))
-
-(defun %state-descending-into-rule
-    (state bindings environment-index goal cut-tag)
-  "Return the state for proving a matched rule body."
-  (let ((remaining (proof-state-remaining-depth state)))
-    (when (eql remaining 0)
-      (%raise-resource-error "DEPTH_LIMIT"
-                             (proof-state-bindings state)
-                             (%iso-atom "CALL")
-                             "explicit rule-resolution depth limit exceeded"
-                             :condition-type (quote prolog-depth-limit-exceeded)
-                             :goal goal))
-    (%state-with state
-                 :bindings bindings
-                 :environment-index environment-index
-                 :remaining-depth (and remaining (1- remaining))
-                 :cut-tag cut-tag)))
+BODY sees PROPAGATED and PROPAGATED-INDEX. When *CONSTRAINT-POST-UNIFY-HOOK*
+is set it decides which propagated bindings BODY runs on, and how often."
+  (let ((continue (gensym "CONTINUE")))
+    `(flet ((,continue (,propagated)
+              (let ((,propagated-index
+                      (%environment-index-after-bindings
+                       ,propagated ,extended ,extended-index)))
+                ,@body)))
+       (if *constraint-post-unify-hook*
+           (funcall *constraint-post-unify-hook* ,extended (function ,continue))
+           (,continue ,extended)))))
 
 (defun %conjunction-p (query)
   "True when QUERY is already a list of goals rather than a single goal."
@@ -247,20 +172,13 @@ index synchronized. Supplying only an unchanged CUT-TAG returns STATE."
                   (%unify-indexed
                    goal fresh-head parent-bindings parent-index nil)))
           (when ok
-            (flet ((continue-with-propagated-bindings (propagated)
-                     (let ((propagated-index
-                             (%environment-index-after-bindings
-                              propagated extended extended-index)))
-                       (funcall succeed
-                                (%state-with
-                                 state
-                                 :bindings propagated
-                                 :environment-index propagated-index)))))
-              (if *constraint-post-unify-hook*
-                  (funcall *constraint-post-unify-hook*
-                           extended
-                           (function continue-with-propagated-bindings))
-                  (continue-with-propagated-bindings extended)))))))))
+            (%with-propagated-bindings
+                (propagated propagated-index extended extended-index)
+              (funcall succeed
+                       (%state-with
+                        state
+                        :bindings propagated
+                        :environment-index propagated-index)))))))))
 
 (defun %matching-rule-p (goal clause)
   "True when CLAUSE can be considered for GOAL."
@@ -501,20 +419,13 @@ body throws here, abandoning the remaining clause alternatives."
           (%unify-rule-program-head
            goal program variables parent-bindings parent-index)
         (when ok
-          (flet ((prove-with-propagated-bindings (propagated)
-                   (let ((propagated-index
-                           (%environment-index-after-bindings
-                            propagated extended extended-index)))
-                     (%prove-rule-program-body/k
-                      program variables goal-cache 0
-                      (%state-descending-into-rule
-                       state propagated propagated-index goal cut-tag)
-                      succeed))))
-            (if *constraint-post-unify-hook*
-                (funcall *constraint-post-unify-hook*
-                         extended
-                         (function prove-with-propagated-bindings))
-                (prove-with-propagated-bindings extended)))))))
+          (%with-propagated-bindings
+              (propagated propagated-index extended extended-index)
+            (%prove-rule-program-body/k
+             program variables goal-cache 0
+             (%state-descending-into-rule
+              state propagated propagated-index goal cut-tag)
+             succeed))))))
   (defun %prove-generic-rule/k (goal entry state cut-tag succeed)
     "Resolve GOAL through the general graph-template rule path."
     (let ((fresh-rule (%materialize-stored-clause-for-proof
@@ -525,20 +436,13 @@ body throws here, abandoning the remaining clause alternatives."
           (%unify-indexed goal (clause-head fresh-rule)
                           parent-bindings parent-index nil)
         (when ok
-          (flet ((prove-with-propagated-bindings (propagated)
-                   (let ((propagated-index
-                           (%environment-index-after-bindings
-                            propagated extended extended-index)))
-                     (%prove-goals/k
-                      (clause-body fresh-rule)
-                      (%state-descending-into-rule
-                       state propagated propagated-index goal cut-tag)
-                      succeed))))
-            (if *constraint-post-unify-hook*
-                (funcall *constraint-post-unify-hook*
-                         extended
-                         (function prove-with-propagated-bindings))
-                (prove-with-propagated-bindings extended)))))))
+          (%with-propagated-bindings
+              (propagated propagated-index extended extended-index)
+            (%prove-goals/k
+             (clause-body fresh-rule)
+             (%state-descending-into-rule
+              state propagated propagated-index goal cut-tag)
+             succeed))))))
   (defun %prove-rule/k (goal entry state cut-tag succeed)
     "Resolve GOAL against one stored rule; a cut in the body prunes the clause list."
     (let* ((template (%stored-clause-template entry))
@@ -546,6 +450,18 @@ body throws here, abandoning the remaining clause alternatives."
       (if program
           (%prove-rule-program/k goal program state cut-tag succeed)
           (%prove-generic-rule/k goal entry state cut-tag succeed)))))
+
+(defmacro %with-first-solution (block-name (continuation-var) &body body)
+  "Return a one-shot success continuation for a proof search wrapped in
+BLOCK-NAME: run BODY once with CONTINUATION-VAR bound to the reached
+proof state, then unwind out of BLOCK-NAME with BODY's final value.
+
+All but the last form of BODY are spliced directly into the lambda body,
+so a leading (declare ...) stays legal; the last form supplies the value
+passed to (return-from BLOCK-NAME ...)."
+  `(lambda (,continuation-var)
+     ,@(butlast body)
+     (return-from ,block-name ,(car (last body)))))
 
 (defun %provable-p (query rulebase environment depth
                     &optional (module +default-prolog-module+))
@@ -566,7 +482,7 @@ body throws here, abandoning the remaining clause alternatives."
               module
               (%make-rulebase-table-session rulebase)
               cut-tag)
-             (lambda (state)
+             (%with-first-solution provable (state)
                (declare (cl:ignore state))
-               (return-from provable t)))))
+               t))))
         nil))))

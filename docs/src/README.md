@@ -109,7 +109,7 @@ configured in your
 [ASDF source registry](https://asdf.common-lisp.dev/asdf.html#Configuring-ASDF).
 
 ```sh
-git clone https://github.com/takeokunn/cl-prolog.git
+git clone https://github.com/nerima-lisp/cl-prolog.git
 cd cl-prolog
 sbcl --non-interactive \
   --eval '(require :asdf)' \
@@ -120,7 +120,7 @@ sbcl --non-interactive \
 To run the cl-weave regression suite through the Linux-only Nix app:
 
 ```sh
-nix run github:takeokunn/cl-prolog
+nix run github:nerima-lisp/cl-prolog
 ```
 
 See [Installation](installation.md) for the full matrix of load paths and the

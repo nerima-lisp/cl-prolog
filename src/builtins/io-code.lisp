@@ -21,46 +21,17 @@
 (defun %io-write-code (entry term environment operation)
   (%io-write-text-unit entry term environment operation #'%io-code-character))
 
-(%define-io-dual-builtin
-    (get_code (code) (code) "GET_CODE")
+(%define-io-dual-builtin (get_code (code) :input "GET_CODE")
     (rulebase environment depth emit)
-  :current (%unify-emit code
-                        (%io-read-code
-                         (%io-current-input-entry rulebase)
-                         environment operation)
-                        environment emit)
-  :explicit (%unify-emit code
-                         (%io-read-code
-                          (%io-stream-entry rulebase stream :input environment operation)
-                          environment operation)
-                         environment emit))
+  (%unify-emit code (%io-read-code entry environment operation)
+               environment emit))
 
-(%define-io-dual-builtin
-    (peek_code (code) (code) "PEEK_CODE")
+(%define-io-dual-builtin (peek_code (code) :input "PEEK_CODE")
     (rulebase environment depth emit)
-  :current (%unify-emit
-            code
-            (%io-read-code
-             (%io-current-input-entry rulebase)
-             environment operation :peek t)
-            environment emit)
-  :explicit (%unify-emit
-             code
-             (%io-read-code
-              (%io-stream-entry rulebase stream :input environment operation)
-              environment operation :peek t)
-             environment emit))
+  (%unify-emit code (%io-read-code entry environment operation :peek t)
+               environment emit))
 
-(%define-io-dual-builtin
-    (put_code (code) (code) "PUT_CODE")
+(%define-io-dual-builtin (put_code (code) :output "PUT_CODE")
     (rulebase environment depth emit)
-  :current (progn
-             (%io-write-code
-              (%io-current-output-entry rulebase)
-              code environment operation)
-             (funcall emit environment))
-  :explicit (progn
-              (%io-write-code
-               (%io-stream-entry rulebase stream :output environment operation)
-               code environment operation)
-              (funcall emit environment)))
+  (%io-write-code entry code environment operation)
+  (funcall emit environment))

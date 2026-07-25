@@ -16,18 +16,12 @@ double_quotes flag, converting parser failures into catchable ISO errors."
 
 (defun %term-text-source (value environment operation)
   "Return the textual source of VALUE (an atom, number, or CL string)."
-  (cond
-    ((logic-var-p value)
-     (%raise-instantiation-error environment operation
-                                 "the source text must be instantiated"))
-    ((stringp value) value)
-    ((%term-atom-p value) (%atom-text value))
-    ((or (integerp value) (floatp value)) (%number-text value environment operation))
-    (t (%raise-type-error "ATOM" value environment operation
-                          "expected an atom, number, or string"))))
+  (%text-of value environment operation
+            :accept :atomic
+            :instantiation "the source text must be instantiated"
+            :type-message "expected an atom, number, or string"))
 
 (define-builtin (term_to_atom term atom) (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (let* ((operation (%iso-atom "TERM_TO_ATOM"))
          (resolved-term (logic-substitute term environment)))
     (if (logic-var-p resolved-term)
@@ -43,7 +37,6 @@ double_quotes flag, converting parser failures into catchable ISO errors."
 
 (define-builtin (read_term_from_atom atom term options)
     (rulebase environment depth emit)
-  (declare (cl:ignore depth))
   (let* ((operation (%iso-atom "READ_TERM_FROM_ATOM"))
          (text (%term-text-source (logic-substitute atom environment)
                                   environment operation))

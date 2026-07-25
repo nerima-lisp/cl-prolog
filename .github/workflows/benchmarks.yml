@@ -1,0 +1,41 @@
+name: Benchmarks
+
+# Diagnostic only — never a merge gate. benchmarks/performance.lisp exists to
+# measure and compare, not to pass or fail (see docs/src/benchmarks.md).
+# Manual dispatch plus a weekly schedule keep it off the PR path entirely, so
+# runner-to-runner noise can never block a merge.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  performance:
+    name: In-process micro-benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix with Cachix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run micro-benchmarks
+        timeout-minutes: 15
+        run: |
+          timeout -k 30 900 nix develop --command \
+            sbcl --script benchmarks/performance.lisp

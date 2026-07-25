@@ -6,19 +6,19 @@ and benchmarks have their own pages: [Testing](testing.md) and
 
 ## Environment
 
-The flake defines outputs for `x86_64-linux` and `aarch64-linux` only. On Linux,
-enter the reproducible development environment with:
+The flake defines outputs for `x86_64-linux`, `aarch64-linux`, and
+`aarch64-darwin`. On any of those systems, enter the reproducible development
+environment with:
 
 ```sh
 nix develop        # sbcl, cl-weave, paredit-cli, nixpkgs-fmt, mkdocs-material
 ```
 
-!!! warning "Darwin has no flake outputs"
-    On Darwin and other platforms, the flake does not expose a development
-    shell, package, check, or app. Load the local checkout with ASDF instead and
-    use CI as the authoritative Linux Nix verification path. Do **not** treat a
-    successful `nix flake check` on Darwin as verification: Nix may omit every
-    Linux-only check and still exit successfully.
+!!! info "Other platforms have no flake outputs"
+    On platforms outside the three supported systems (e.g. Intel Mac,
+    Windows), the flake does not expose a development shell, package, check,
+    or app. Load the local checkout with ASDF instead (see
+    [Installation](installation.md)) and rely on CI for Nix verification.
 
 ## Running examples
 
@@ -37,14 +37,14 @@ load the `cl-prolog` package. See [Examples](examples.md) for a walkthrough.
 ## Testing at a glance
 
 ```sh
-nix run .          # cl-weave regression suite (Linux)
-nix flake check    # full verification suite (Linux)
+nix run .          # cl-weave regression suite
+nix flake check    # full verification suite
 ```
 
 `nix flake check` also runs the structural parse gate, the examples check, and
-the documentation build. The full testing workflow — including the Darwin ASDF
-path and the `cl-prolog/weave` query helpers — is on the [Testing](testing.md)
-page.
+the documentation build. The full testing workflow — including the ASDF
+fallback for unsupported platforms and the `cl-prolog/weave` query helpers —
+is on the [Testing](testing.md) page.
 
 ## Benchmarks at a glance
 
@@ -61,7 +61,7 @@ These are diagnostic tools, not part of `nix flake check`. See
 The site is built with [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
 The config lives in `docs/mkdocs.yml` and content in `docs/src/`.
 
-=== "Nix (Linux)"
+=== "Nix"
 
     ```sh
     nix build .#docs   # rendered site in ./result

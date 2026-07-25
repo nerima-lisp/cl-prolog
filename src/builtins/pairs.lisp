@@ -25,7 +25,6 @@ distinguished from an absent one)."
 
 (define-builtin (pairs_keys_values pairs keys values)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((operation (%iso-atom "PAIRS_KEYS_VALUES")))
     (multiple-value-bind (pair-list bound-p)
         (%require-pair-list pairs environment operation)
@@ -59,11 +58,9 @@ distinguished from an absent one)."
     (%unify-emit target (mapcar selector pair-list) environment emit)))
 
 (define-builtin (pairs_keys pairs keys) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%pairs-projection-goal pairs keys #'second environment emit
                           (%iso-atom "PAIRS_KEYS")))
 
 (define-builtin (pairs_values pairs values) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%pairs-projection-goal pairs values #'third environment emit
                           (%iso-atom "PAIRS_VALUES")))

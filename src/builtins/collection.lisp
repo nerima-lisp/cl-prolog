@@ -50,38 +50,43 @@
                solutions))))
     (nreverse solutions)))
 
+(defun %group-adjacent-by (items same-group-p)
+  "Split ITEMS into runs of adjacent elements, starting a new run whenever
+SAME-GROUP-P rejects the pair (run head, current item).  Runs and the items
+within them keep their original order."
+  (let ((groups '())
+        (current '())
+        (head nil))
+    (dolist (item items)
+      (if (and current (funcall same-group-p head item))
+          (push item current)
+          (progn
+            (when current (push (nreverse current) groups))
+            (setf head item
+                  current (list item)))))
+    (when current (push (nreverse current) groups))
+    (nreverse groups)))
+
 (defun %partition-solution-groups (solutions)
   "Partition SOLUTIONS by variant-equivalent keys in standard term order."
-  (let ((entries
-          (stable-sort
-           (mapcar (lambda (solution)
-                     (list (%canonicalize-variant (car solution))
-                           (car solution)
-                           (cdr solution)))
-                   solutions)
-           (lambda (left right)
-             (minusp (%compare-terms (first left) (first right)))))))
-    (let ((groups '())
-          (current-key nil)
-          (current-group nil)
-          (have-group nil))
-      (dolist (entry entries)
-        (let ((canonical-key (first entry)))
-          (if (and have-group
-                   (zerop (%compare-terms current-key canonical-key)))
-              (push (third entry) (cdr current-group))
-              (progn
-                (when have-group
-                  (setf (cdr current-group)
-                        (nreverse (cdr current-group)))
-                  (push current-group groups))
-                (setf current-key canonical-key
-                      current-group (list (second entry) (third entry))
-                      have-group t)))))
-      (when have-group
-        (setf (cdr current-group) (nreverse (cdr current-group)))
-        (push current-group groups))
-      (stable-sort groups #'%prolog-term< :key #'car))))
+  (let* ((entries
+           (stable-sort
+            (mapcar (lambda (solution)
+                      (list (%canonicalize-variant (car solution))
+                            (car solution)
+                            (cdr solution)))
+                    solutions)
+            (lambda (left right)
+              (minusp (%compare-terms (first left) (first right))))))
+         (groups (%group-adjacent-by
+                  entries
+                  (lambda (head entry)
+                    (zerop (%compare-terms (first head) (first entry)))))))
+    (stable-sort (mapcar (lambda (group)
+                           (cons (second (first group))
+                                 (mapcar #'third group)))
+                         groups)
+                 #'%prolog-term< :key #'car)))
 
 (defun %emit-solution-group (free-variables key values bag environment emit)
   "Unify one grouped KEY and VALUES with the caller and emit on success."
@@ -146,17 +151,6 @@
 (define-builtin (setof template goal bag) (rulebase environment depth emit)
   (%emit-bagof-solutions template goal bag t rulebase environment depth emit))
 
-(defun %resolved-collection-list (term environment predicate)
-  (let ((resolved (logic-substitute term environment)))
-    (cond
-      ((logic-var-p resolved)
-       (%raise-instantiation-error environment predicate
-                                   "The input list must be instantiated"))
-      ((not (%proper-list-p resolved))
-       (%raise-type-error "LIST" resolved environment predicate
-                          "The input must be a proper list"))
-      (t resolved))))
-
 (defun %key-value-term-p (term)
   (and (%proper-list-p term)
        (= (length term) 3)
@@ -173,9 +167,9 @@
   "Define NAME as a builtin resolving INPUT to a proper list and unifying
 SORTED with (SORT-FN list), reporting ISO errors under OPERATION-NAME."
   `(define-builtin (,name input sorted) (rulebase environment depth emit)
-     (declare (cl:ignore rulebase depth))
-     (let* ((values (%resolved-collection-list
-                     input environment (%iso-atom ,operation-name)))
+     (let* ((values (%require-proper-list
+                     (logic-substitute input environment)
+                     environment (%iso-atom ,operation-name) "the input list"))
             (ordered (,sort-fn values)))
        (%unify-emit sorted ordered environment emit))))
 
@@ -183,9 +177,9 @@ SORTED with (SORT-FN list), reporting ISO errors under OPERATION-NAME."
 (define-standard-order-sort-builtin msort "MSORT" %standard-term-sort)
 
 (define-builtin (keysort input sorted) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (let ((pairs (%resolved-collection-list input environment
-                                          (%iso-atom "KEYSORT"))))
+  (let ((pairs (%require-proper-list (logic-substitute input environment)
+                                       environment (%iso-atom "KEYSORT")
+                                       "the input list")))
     (dolist (pair pairs)
       (%keysort-key pair environment))
     (%unify-emit sorted
@@ -226,13 +220,13 @@ SORTED with (SORT-FN list), reporting ISO errors under OPERATION-NAME."
                               "sort/4 order must be @<, @=<, @> or @>=")))))
 
 (define-builtin (sort key order input sorted) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "SORT"))
          (key-value (logic-substitute key environment))
          (order-value (logic-substitute order environment))
-         (values (%resolved-collection-list input environment operation)))
-    (%require-non-negative-integer key-value environment operation
-                                   "sort/4" "key")
+         (values (%require-proper-list (logic-substitute input environment)
+                                              environment operation
+                                              "the input list")))
+    (%require-bounded-integer key-value environment operation "sort/4 key")
     (multiple-value-bind (ascending-p dedup-p)
         (%sort4-order order-value environment operation)
       ;; Extract every key up front so an out-of-range key is reported even for
@@ -284,7 +278,9 @@ fails (as in SWI) rather than raising."
 (define-builtin (predsort goal input sorted) (rulebase environment depth emit)
   (let* ((operation (%iso-atom "PREDSORT"))
          (closure (logic-substitute goal environment))
-         (values (%resolved-collection-list input environment operation))
+         (values (%require-proper-list (logic-substitute input environment)
+                                              environment operation
+                                              "the input list"))
          (fail-tag (list 'predsort-fail)))
     (when (logic-var-p closure)
       (%raise-instantiation-error environment operation
@@ -320,65 +316,68 @@ fails (as in SWI) rather than raising."
 
 ;;; aggregate_all/3 -- count/sum/max/min/bag/set reductions over a goal.
 
-(defun %aggregate-numbers (expr-template goal rulebase environment depth operation)
+(defun %aggregate-numbers (expr-template goal rulebase environment depth)
   "Collect the solutions of EXPR-TEMPLATE over GOAL and evaluate each as an
 arithmetic expression, matching SWI's sum/max/min templates (a bare number
 evaluates to itself)."
-  (declare (cl:ignore operation))
   (mapcar (lambda (value)
             (%evaluate-arithmetic-expression value environment))
           (%collect-template-solutions expr-template goal
                                        rulebase environment depth)))
 
+(defmacro define-aggregate-spec-table (name &body definitions)
+  `(defparameter ,name
+     (list ,@(loop for (tag . body) in definitions
+                   collect `(cons ,tag
+                                  (lambda (argument collect numbers)
+                                    (declare (cl:ignorable argument collect numbers))
+                                    ,@body))))
+     "Data table mapping each aggregate_all/3 tag to a reducer returning
+\(VALUES RESULT FOUNDP); a false FOUNDP fails the goal instead of unifying.
+COLLECT gathers ARGUMENT's solutions, NUMBERS additionally evaluates them."))
+
+(define-aggregate-spec-table +aggregate-specs+
+  ("count" (values (length (funcall collect argument)) t))
+  ("sum" (values (reduce #'+ (funcall numbers argument) :initial-value 0) t))
+  ;; max/min over no solutions fails rather than raising.
+  ("max" (let ((found (funcall numbers argument)))
+           (values (and found (reduce #'max found)) (and found t))))
+  ("min" (let ((found (funcall numbers argument)))
+           (values (and found (reduce #'min found)) (and found t))))
+  ("bag" (values (funcall collect argument) t))
+  ("set" (values (%standard-term-sort-unique (funcall collect argument)) t)))
+
 (define-builtin (aggregate_all spec goal result) (rulebase environment depth emit)
   (let* ((operation (%iso-atom "AGGREGATE_ALL"))
          (resolved-spec (logic-substitute spec environment)))
-    (flet ((numbers (expr)
-             (%aggregate-numbers expr goal rulebase environment depth operation)))
-      (cond
-        ;; count/0 as the bare atom `count'
-        ((and (%term-atom-p resolved-spec)
-              (string-equal (symbol-name resolved-spec) "count"))
-         (%unify-emit result
-                      (length (%collect-template-solutions t goal rulebase
-                                                           environment depth))
-                      environment emit))
-        ((and (%proper-list-p resolved-spec) (= (length resolved-spec) 2)
-              (%term-atom-p (first resolved-spec)))
-         (let ((tag (symbol-name (first resolved-spec)))
-               (arg (second resolved-spec)))
-           (cond
-             ((string-equal tag "count")
-              (%unify-emit result
-                           (length (%collect-template-solutions arg goal rulebase
-                                                                environment depth))
-                           environment emit))
-             ((string-equal tag "sum")
-              (%unify-emit result (reduce #'+ (numbers arg) :initial-value 0)
-                           environment emit))
-             ((string-equal tag "max")
-              (let ((ns (numbers arg))) (when ns (%unify-emit result (reduce #'max ns) environment emit))))
-             ((string-equal tag "min")
-              (let ((ns (numbers arg))) (when ns (%unify-emit result (reduce #'min ns) environment emit))))
-             ((string-equal tag "bag")
-              (%unify-emit result
-                           (%collect-template-solutions arg goal rulebase
-                                                        environment depth)
-                           environment emit))
-             ((string-equal tag "set")
-              (%unify-emit result
-                           (%standard-term-sort-unique
-                            (%collect-template-solutions arg goal rulebase
-                                                         environment depth))
-                           environment emit))
-             (t (%raise-domain-error "AGGREGATE_SPEC" resolved-spec environment
-                                     operation
-                                     "unsupported aggregate_all/3 template")))))
-        ((logic-var-p resolved-spec)
-         (%raise-instantiation-error environment operation
-                                     "aggregate_all/3 template must be instantiated"))
-        (t (%raise-domain-error "AGGREGATE_SPEC" resolved-spec environment operation
-                                "unsupported aggregate_all/3 template"))))))
+    (flet ((collect (expression)
+             (%collect-template-solutions expression goal rulebase
+                                          environment depth))
+           (numbers (expression)
+             (%aggregate-numbers expression goal rulebase environment depth)))
+      (multiple-value-bind (tag argument)
+          (cond
+            ;; count/0 as the bare atom `count'; any other bare atom is a
+            ;; domain error rather than a zero-argument reduction.
+            ((and (%term-atom-p resolved-spec)
+                  (string-equal (symbol-name resolved-spec) "count"))
+             (values "count" t))
+            ((and (%proper-list-p resolved-spec) (= (length resolved-spec) 2)
+                  (%term-atom-p (first resolved-spec)))
+             (values (symbol-name (first resolved-spec)) (second resolved-spec)))
+            ((logic-var-p resolved-spec)
+             (%raise-instantiation-error
+              environment operation
+              "aggregate_all/3 template must be instantiated")))
+        (let ((reducer (cdr (assoc tag +aggregate-specs+ :test #'string-equal))))
+          (unless reducer
+            (%raise-domain-error "AGGREGATE_SPEC" resolved-spec environment
+                                 operation
+                                 "unsupported aggregate_all/3 template"))
+          (multiple-value-bind (value foundp)
+              (funcall reducer argument #'collect #'numbers)
+            (when foundp
+              (%unify-emit result value environment emit))))))))
 
 (define-builtin (:when test &rest variables) (rulebase environment depth emit)
   ;; TEST receives the solved value of each of VARIABLES.  The DSL compiles

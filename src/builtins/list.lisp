@@ -21,7 +21,6 @@ BODY."
        ,@body)))
 
 (define-builtin (member item list-term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (labels ((visit (tail current-environment)
                (%unless-cyclic-list-cell (resolved tail current-environment seen)
@@ -36,7 +35,6 @@ BODY."
       (visit list-term environment))))
 
 (define-builtin (memberchk item list-term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (labels ((visit (tail current-environment)
                (%unless-cyclic-list-cell (resolved tail current-environment seen)
@@ -55,7 +53,6 @@ BODY."
 
 (define-builtin (select item list-term rest-term)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (labels ((visit (tail prefix current-environment seen)
              (let ((resolved (%walk-term tail current-environment)))
                (unless (and (consp resolved) (gethash resolved seen))
@@ -79,17 +76,9 @@ BODY."
   "Implement NTH0/3 and NTH1/3 with OFFSET as the first valid index."
   (let ((resolved-index (%walk-term index environment))
         (seen (make-hash-table :test #'eq)))
-    (unless (logic-var-p resolved-index)
-      (unless (integerp resolved-index)
-        (%raise-type-error "INTEGER" resolved-index environment operation
-                           "The list index must be an integer"))
-      (when (< resolved-index offset)
-        (%raise-domain-error (if (zerop offset)
-                                 "NOT_LESS_THAN_ZERO"
-                                 "NOT_LESS_THAN_ONE")
-                             resolved-index
-                             environment operation
-                             "The list index is below the valid range")))
+    (%require-bounded-integer resolved-index environment operation
+                              "The list index"
+                              :minimum offset :allow-variable t)
     (labels ((visit (tail position current-environment)
                (%unless-cyclic-list-cell (resolved tail current-environment seen)
                  (let ((head (fresh-logic-variable "?NTH-HEAD"))
@@ -109,15 +98,12 @@ BODY."
       (visit list-term offset environment))))
 
 (define-builtin (nth0 index list-term item) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%list-index index list-term item 0 environment emit (%iso-atom "NTH0")))
 
 (define-builtin (nth1 index list-term item) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (%list-index index list-term item 1 environment emit (%iso-atom "NTH1")))
 
 (define-builtin (last list-term item) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (labels ((visit (tail current-environment)
                (%unless-cyclic-list-cell (resolved tail current-environment seen)
@@ -135,7 +121,6 @@ BODY."
       (visit list-term environment))))
 
 (define-builtin (is_list list-term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (loop for tail = (%walk-term list-term environment) then (%walk-term (cdr tail)
                                                                         environment)
@@ -145,7 +130,6 @@ BODY."
                (t (setf (gethash tail seen) t))))))
 
 (define-builtin (append left right result) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (labels ((join (left-tail result-tail current-environment)
                (%unless-cyclic-list-cell
@@ -176,18 +160,11 @@ BODY."
        (%unify-emit forward (reverse backward-value) environment emit)))))
 
 (define-builtin (length list-term length-term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((length-value (%walk-term length-term environment))
         (operation (%iso-atom "LENGTH"))
         (seen (make-hash-table :test #'eq)))
-    (unless (logic-var-p length-value)
-      (unless (integerp length-value)
-        (%raise-type-error "INTEGER" length-value environment operation
-                           "length/2 length must be an integer"))
-      (when (minusp length-value)
-        (%raise-domain-error "NOT_LESS_THAN_ZERO" length-value
-                             environment operation
-                             "length/2 length must not be negative")))
+    (%require-bounded-integer length-value environment operation
+                              "length/2 length" :allow-variable t)
     (labels ((measure (tail count current-environment)
                (let ((resolved-tail (%walk-term tail current-environment)))
                  (unless (and (consp resolved-tail)

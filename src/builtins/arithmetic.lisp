@@ -15,24 +15,28 @@
                                   (%iso-atom "ARITHMETIC") message)
            :environment nil)))
 
-(defun %require-integer (value)
-  (unless (integerp value)
-    (%raise-type-error "INTEGER" value nil (%iso-atom "ARITHMETIC")
-                       "integer operand required")))
-
 (defun %prolog-number-p (value)
   "Return true for numeric types representable by ISO Prolog arithmetic."
   (or (integerp value) (floatp value)))
 
-(defun %require-prolog-number (value environment)
-  (unless (%prolog-number-p value)
-    (%raise-type-error "EVALUABLE" value environment (%iso-atom "ARITHMETIC")
-                       "integer or float operand required")))
-
-(defun %require-real (value)
-  (unless (and (%prolog-number-p value) (realp value))
-    (%raise-type-error "NUMBER" value nil (%iso-atom "ARITHMETIC")
-                       "real operand required")))
+(macrolet ((define-arithmetic-operand-guards (&body specifications)
+             ;; Each specification is (NAME ACCEPTED-P ISO-TYPE MESSAGE), where
+             ;; ACCEPTED-P is a form over VALUE.
+             `(progn
+                ,@(loop for (name accepted-p type message) in specifications
+                        collect
+                        `(defun ,name (value &optional environment)
+                           (unless ,accepted-p
+                             (%raise-type-error ,type value environment
+                                                (%iso-atom "ARITHMETIC")
+                                                ,message)))))))
+  (define-arithmetic-operand-guards
+    (%require-integer (integerp value) "INTEGER"
+                      "integer operand required")
+    (%require-prolog-number (%prolog-number-p value) "EVALUABLE"
+                            "integer or float operand required")
+    (%require-real (and (%prolog-number-p value) (realp value)) "NUMBER"
+                   "real operand required")))
 
 (progn
   (defparameter *max-prolog-arithmetic-exponent-magnitude*
@@ -335,13 +339,8 @@ CL-OPERATOR holds between the evaluated LEFT and RIGHT expressions."
     (%raise-instantiation-error environment operation
                                 "one argument must be instantiated"))
   (dolist (argument (list resolved-predecessor resolved-successor))
-    (unless (logic-var-p argument)
-      (unless (integerp argument)
-        (%raise-type-error "INTEGER" argument environment operation
-                           "arguments must be integers"))
-      (when (minusp argument)
-        (%raise-domain-error "NOT_LESS_THAN_ZERO" argument environment operation
-                             "arguments must not be negative"))))
+    (%require-bounded-integer argument environment operation "arguments"
+                              :allow-variable t))
   (cond
     ((not (logic-var-p resolved-predecessor))
      (%unify-emit successor (1+ resolved-predecessor) environment emit))

@@ -5,14 +5,12 @@
 
 (cl-prolog::define-builtin (test-twice input output)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (let ((value (logic-substitute input environment)))
     (when (numberp value)
       (cl-prolog::%unify-emit output (* 2 value) environment emit))))
 
 (cl-prolog::define-builtin ((test-collect test-collect-alias) output &rest arguments)
     (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (cl-prolog::%unify-emit output (copy-list arguments) environment emit))
 
 (deftest foreign-predicate-cps-solutions ()
@@ -44,7 +42,6 @@
   (with-macroexpansion (expansion
                         '(define-foreign-predicate (foreign-example value)
                              (rulebase environment depth emit)
-                           (declare (cl:ignore rulebase depth))
                            (funcall emit environment)))
     (is (%tree-contains-p expansion 'defmethod))
     (is (%tree-contains-p expansion 'cl-prolog::%foreign-goal-solver))
@@ -159,7 +156,6 @@
   (with-macroexpansion (expansion
                         '(cl-prolog::define-builtin (twice input output)
                            (rulebase environment depth emit)
-                           (declare (cl:ignore rulebase depth))
                            (cl-prolog::%unify-emit output
                                                    (* 2 (logic-substitute input environment))
                                                    environment
@@ -168,51 +164,37 @@
     (is (%tree-contains-p expansion 'eval-when))
     (is (%tree-contains-p expansion 'twice))))
 
-(progn
-  (deftest define-builtin-macroexpand-registers-aliases-and-rest ()
-    (with-macroexpansion (expansion
-                          (quote (cl-prolog::define-builtin
-                                     ((collect collect-alias) output &rest arguments)
-                                     (rulebase environment depth emit)
-                                   (declare (cl:ignore rulebase output depth)
-                                            (cl:ignorable environment arguments)
-                                            (optimize speed))
-                                   (declare (cl:ignore emit)
-                                            (type list arguments))
-                                   (cl-prolog::%unify-emit output
-                                                           (copy-list arguments)
-                                                           environment
-                                                           emit))))
-      (is (%tree-contains-p expansion (quote cl-prolog::%register-builtin-solver!)))
-      (is (%tree-contains-p expansion (quote eval-when)))
-      (is (%tree-contains-p expansion (quote collect)))
-      (is (%tree-contains-p expansion (quote collect-alias)))
-      (is (%tree-contains-p expansion
-                            (quote (declare (cl:ignore output)
-                                            (cl:ignorable arguments)
-                                            (optimize speed)))))
-      (is (%tree-contains-p expansion
-                            (quote (declare (type list arguments)))))
-      (is (not (%tree-contains-p expansion
-                                 (quote (declare (cl:ignore rulebase output depth))))))
-      (is (not (%tree-contains-p expansion
-                                 (quote (declare (cl:ignore emit))))))))
-
-  (deftest define-builtin-preserves-declaration-for-shadowing-argument ()
-    (with-macroexpansion (expansion
-                          (quote (cl-prolog::define-builtin (shadowed environment)
-                                     (rulebase environment depth emit)
-                                   (declare (cl:ignore rulebase environment depth))
-                                   (funcall emit nil))))
-      (is (%tree-contains-p expansion
-                            (quote (declare (cl:ignore environment))))))))
+(deftest define-builtin-macroexpand-registers-aliases-and-rest ()
+  (with-macroexpansion (expansion
+                        (quote (cl-prolog::define-builtin
+                                   ((collect collect-alias) output &rest arguments)
+                                   (rulebase environment depth emit)
+                                 (declare (cl:ignore output)
+                                          (cl:ignorable arguments)
+                                          (optimize speed))
+                                 (cl-prolog::%unify-emit output
+                                                         (copy-list arguments)
+                                                         environment
+                                                         emit))))
+    (is (%tree-contains-p expansion (quote cl-prolog::%register-builtin-solver!)))
+    (is (%tree-contains-p expansion (quote eval-when)))
+    (is (%tree-contains-p expansion (quote collect)))
+    (is (%tree-contains-p expansion (quote collect-alias)))
+    ;; Body forms, declarations included, are spliced verbatim; the macro
+    ;; supplies its own IGNORABLE declaration for the context variables.
+    (is (%tree-contains-p expansion
+                          (quote (declare (cl:ignore output)
+                                          (cl:ignorable arguments)
+                                          (optimize speed)))))
+    (is (%tree-contains-p expansion
+                          (quote (declare (cl:ignorable rulebase environment
+                                                        depth emit)))))))
 
 (progn
   (defvar *observed-builtin-dispatch-argument* nil)
 
   (cl-prolog::define-builtin (test-observe-builtin argument)
       (rulebase environment depth emit)
-    (declare (cl:ignore rulebase depth))
     (setf *observed-builtin-dispatch-argument* argument)
     (funcall emit environment))
 
@@ -220,7 +202,6 @@
 
   (define-foreign-predicate (test-observe-foreign argument)
       (rulebase environment depth emit)
-    (declare (cl:ignore rulebase depth))
     (setf *observed-foreign-dispatch-argument* argument)
     (funcall emit environment))
 

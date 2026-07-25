@@ -12,7 +12,7 @@ in nothing beyond the ANSI standard. It is developed and tested against
 
 - A Common Lisp implementation — SBCL is the tested target.
 - [ASDF](https://asdf.common-lisp.dev/) (bundled with SBCL) to load the system.
-- Optionally [Nix](https://nixos.org/) for the reproducible Linux test and
+- Optionally [Nix](https://nixos.org/) for the reproducible test and
   documentation workflows.
 
 ## Load from a local checkout
@@ -21,7 +21,7 @@ Clone the repository and load its ASDF definition directly. Run these commands
 from the repository root:
 
 ```sh
-git clone https://github.com/takeokunn/cl-prolog.git
+git clone https://github.com/nerima-lisp/cl-prolog.git
 cd cl-prolog
 sbcl --non-interactive \
   --eval '(require :asdf)' \
@@ -57,18 +57,18 @@ Once ASDF can find the `.asd`, a single form loads it:
 
 ## Run through Nix
 
-The flake exposes a Linux-only runner that executes the
+The flake exposes a runner that executes the
 [cl-weave](https://github.com/nerima-lisp/cl-weave) regression suite:
 
 ```sh
-nix run github:takeokunn/cl-prolog
+nix run github:nerima-lisp/cl-prolog
 ```
 
-!!! warning "Linux-only Nix outputs"
-    The flake currently defines outputs for `x86_64-linux` and `aarch64-linux`
-    only. On Darwin and other platforms, use the ASDF workflow above and rely
-    on CI for the Linux Nix verification path. See [Development](development.md)
-    for details.
+!!! info "Supported systems"
+    The flake defines outputs for `x86_64-linux`, `aarch64-linux`, and
+    `aarch64-darwin`. On other platforms (e.g. Intel Mac, Windows), use the
+    ASDF workflow above instead. See [Development](development.md) for
+    details.
 
 ## Systems provided
 
