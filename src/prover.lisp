@@ -33,11 +33,14 @@ caller's clause alternatives, as ISO requires.")
 
 (defstruct (proof-state
             (:constructor %make-proof-state
-                (rulebase bindings remaining-depth module table-session
-                 cut-tag)))
+                (rulebase bindings environment-index remaining-depth module
+                 table-session cut-tag)))
   "Immutable data carried through the proof-search continuation."
   (rulebase (make-rulebase) :type rulebase :read-only t)
-  (bindings '() :type list :read-only t)
+  (bindings (quote ()) :type list :read-only t)
+  (environment-index (%make-environment-index (quote ()))
+                     :type %environment-index
+                     :read-only t)
   (module +default-prolog-module+ :type symbol :read-only t)
   (table-session nil :type (or null %table-session) :read-only t)
   (cut-tag nil :type list :read-only t)
@@ -46,30 +49,42 @@ caller's clause alternatives, as ISO requires.")
                    :read-only t))
 
 (defun %state-with (state &key (bindings nil bindings-p)
+                                (environment-index nil environment-index-p)
                                 (module nil module-p)
                                 (table-session nil table-session-p)
                                 (cut-tag nil cut-tag-p)
                                 (remaining-depth nil remaining-depth-p))
-  "Return STATE with any supplied slot replaced; slots not supplied are
-preserved from STATE.  Supplying only CUT-TAG, when it already matches
-STATE's current cut tag, returns STATE unchanged, avoiding allocation
-churn on the conjunction traversal's common no-op case."
+  "Return STATE with supplied slots replaced while keeping bindings and their
+index synchronized. Supplying only an unchanged CUT-TAG returns STATE."
   (if (and cut-tag-p (eq (proof-state-cut-tag state) cut-tag)
-           (not bindings-p) (not module-p) (not table-session-p)
-           (not remaining-depth-p))
+           (not bindings-p) (not environment-index-p) (not module-p)
+           (not table-session-p) (not remaining-depth-p))
       state
-      (%make-proof-state (proof-state-rulebase state)
-                         (if bindings-p bindings (proof-state-bindings state))
-                         (if remaining-depth-p
-                             remaining-depth
-                             (proof-state-remaining-depth state))
-                         (if module-p module (proof-state-module state))
-                         (if table-session-p
-                             table-session
-                             (proof-state-table-session state))
-                         (if cut-tag-p cut-tag (proof-state-cut-tag state)))))
+      (let* ((old-bindings (proof-state-bindings state))
+             (old-index (proof-state-environment-index state))
+             (next-bindings (if bindings-p bindings old-bindings))
+             (next-index
+               (cond
+                 (environment-index-p environment-index)
+                 (bindings-p
+                  (%environment-index-after-bindings
+                   next-bindings old-bindings old-index))
+                 (t old-index))))
+        (%make-proof-state
+         (proof-state-rulebase state)
+         next-bindings
+         next-index
+         (if remaining-depth-p
+             remaining-depth
+             (proof-state-remaining-depth state))
+         (if module-p module (proof-state-module state))
+         (if table-session-p
+             table-session
+             (proof-state-table-session state))
+         (if cut-tag-p cut-tag (proof-state-cut-tag state))))))
 
-(defun %state-descending-into-rule (state bindings goal)
+(defun %state-descending-into-rule
+    (state bindings environment-index goal cut-tag)
   "Return the state for proving a matched rule body."
   (let ((remaining (proof-state-remaining-depth state)))
     (when (eql remaining 0)
@@ -77,11 +92,13 @@ churn on the conjunction traversal's common no-op case."
                              (proof-state-bindings state)
                              (%iso-atom "CALL")
                              "explicit rule-resolution depth limit exceeded"
-                             :condition-type 'prolog-depth-limit-exceeded
+                             :condition-type (quote prolog-depth-limit-exceeded)
                              :goal goal))
     (%state-with state
-                :bindings bindings
-                :remaining-depth (and remaining (1- remaining)))))
+                 :bindings bindings
+                 :environment-index environment-index
+                 :remaining-depth (and remaining (1- remaining))
+                 :cut-tag cut-tag)))
 
 (defun %conjunction-p (query)
   "True when QUERY is already a list of goals rather than a single goal."
@@ -116,7 +133,7 @@ churn on the conjunction traversal's common no-op case."
   "Return one revision-stable module snapshot shared by the current query."
   (let* ((rulebase (proof-state-rulebase state))
          (session (proof-state-table-session state))
-         (key (list (rulebase-revision rulebase) module)))
+         (key (list rulebase (rulebase-revision rulebase) module)))
     (multiple-value-bind (entries present-p)
         (gethash key (%table-session-module-entries session))
       (if present-p
@@ -124,40 +141,48 @@ churn on the conjunction traversal's common no-op case."
           (setf (gethash key (%table-session-module-entries session))
                 (%rulebase-module-entries rulebase module))))))
 
-(defun %proof-predicate-entries (goal state
-                                 &optional (module (proof-state-module state)))
-  "Return one revision-stable indexed snapshot for GOAL's predicate."
+(defun %proof-predicate-entries
+    (goal state &optional (module (proof-state-module state)))
+  "Return the immutable current descriptor entries for GOAL."
   (let* ((rulebase (proof-state-rulebase state))
-         (session (proof-state-table-session state))
-         (revision (rulebase-revision rulebase))
          (predicate (first goal))
          (arity (length (rest goal)))
-         (key (list revision module predicate arity)))
-    (multiple-value-bind (entries present-p)
-        (gethash key (%table-session-predicate-entries session))
-      (if present-p
-          entries
-          (setf (gethash key (%table-session-predicate-entries session))
-                (%rulebase-predicate-entries-at-revision
-                 rulebase module predicate arity revision))))))
+         (descriptor
+           (%rulebase-predicate-descriptor
+            rulebase module predicate arity)))
+    (when descriptor
+      (if (plusp arity)
+          (%predicate-descriptor-first-argument-entries
+           descriptor
+           (%logic-substitute-indexed
+            (second goal)
+            (proof-state-environment-index state)))
+          (%predicate-descriptor-entries descriptor)))))
 
-(defun %rulebase-defines-goal-p (state module goal)
-  "True when RULEBASE contains or declares GOAL's predicate."
-  (let ((rulebase (proof-state-rulebase state))
-        (predicate (first goal))
-        (arity (length (rest goal))))
+(defun %rulebase-defines-goal-p (state module predicate arity)
+  "True when RULEBASE contains or declares MODULE:PREDICATE/ARITY."
+  (let ((rulebase (proof-state-rulebase state)))
     (or (%rulebase-predicate-property rulebase predicate arity module)
-        (not (null (%proof-predicate-entries goal state module))))))
+        (%rulebase-predicate-descriptor
+         rulebase module predicate arity))))
 
 (defun %qualified-goal-p (goal)
   (and (%goal-form-p goal)
        (= (length goal) 3)
-       (eq (first goal) (%prolog-symbol ":"))))
+       (eq (first goal)
+           (let* ((cached (load-time-value (%prolog-symbol ":") t))
+                  (home (symbol-package cached)))
+             (if (and home
+                      (eq (find-package (quote #:cl-prolog)) home))
+                 cached
+                 (%prolog-symbol ":"))))))
 
 (defun %resolve-qualified-module (module state)
   "Resolve MODULE through the current bindings and validate it as a module atom."
   (let* ((environment (proof-state-bindings state))
-         (resolved (logic-substitute module environment))
+         (resolved
+           (%logic-substitute-indexed
+            module (proof-state-environment-index state)))
          (context (%iso-atom "CALL")))
     (when (logic-var-p resolved)
       (%raise-instantiation-error environment context
@@ -178,31 +203,64 @@ churn on the conjunction traversal's common no-op case."
          (caller (or explicit-module (proof-state-module state)))
          (predicate (first goal))
          (arity (length (rest goal)))
-         (local-p
-           (lambda (module name count)
-             (%rulebase-defines-goal-p
-              state module (list* name (make-list count))))))
-    (values goal
-            (if explicit-module
-                (module-registry-resolve-qualified
-                 registry caller predicate arity local-p)
-                (module-registry-resolve
-                 registry caller predicate arity local-p)))))
+         (local-descriptor
+           (and (not explicit-module)
+                (%rulebase-predicate-descriptor
+                 rulebase caller predicate arity))))
+    (if local-descriptor
+        (values goal caller)
+        (let ((local-p
+                (lambda (module name count)
+                  (%rulebase-defines-goal-p state module name count))))
+          (values goal
+                  (if explicit-module
+                      (module-registry-resolve-qualified
+                       registry caller predicate arity local-p)
+                      (module-registry-resolve
+                       registry caller predicate arity local-p)))))))
 
-(defun %continue-matching-fact (goal clause state succeed)
-  "Unify GOAL against fact CLAUSE and continue with the extended state."
-  (when (eq (first goal) (first (clause-head clause)))
-    (multiple-value-bind (extended ok)
-        (unify goal (clause-head (%freshen-clause clause))
-               (proof-state-bindings state))
-      (when ok
-        (flet ((continue-with-propagated-bindings (propagated)
-                 (funcall succeed (%state-with state :bindings propagated))))
-          (if *constraint-post-unify-hook*
-              (funcall *constraint-post-unify-hook*
-                       extended
-                       #'continue-with-propagated-bindings)
-              (continue-with-propagated-bindings extended)))))))
+(defun %continue-matching-fact (goal entry state succeed)
+  "Unify GOAL against stored fact ENTRY and continue with the extended state."
+  (let* ((clause (%stored-clause-clause entry))
+         (template (%stored-clause-template entry)))
+    (when (eq (first goal) (first (clause-head clause)))
+      (let ((program (%clause-template-rule-program template))
+            (parent-bindings (proof-state-bindings state))
+            (parent-index (proof-state-environment-index state)))
+        (multiple-value-bind (extended ok extended-index)
+            (if (and program
+                     (zerop (length (%rule-program-body program))))
+                (let* ((variable-count
+                         (%rule-program-variable-count program))
+                       (variables
+                         (if (zerop variable-count)
+                             #()
+                             (make-array variable-count))))
+                  (dotimes (index variable-count)
+                    (setf (svref variables index)
+                          (%fresh-rule-program-variable)))
+                  (%unify-rule-program-head
+                   goal program variables parent-bindings parent-index))
+                (let ((fresh-head
+                        (clause-head
+                         (%materialize-stored-clause-for-proof entry template))))
+                  (%unify-indexed
+                   goal fresh-head parent-bindings parent-index nil)))
+          (when ok
+            (flet ((continue-with-propagated-bindings (propagated)
+                     (let ((propagated-index
+                             (%environment-index-after-bindings
+                              propagated extended extended-index)))
+                       (funcall succeed
+                                (%state-with
+                                 state
+                                 :bindings propagated
+                                 :environment-index propagated-index)))))
+              (if *constraint-post-unify-hook*
+                  (funcall *constraint-post-unify-hook*
+                           extended
+                           (function continue-with-propagated-bindings))
+                  (continue-with-propagated-bindings extended)))))))))
 
 (defun %matching-rule-p (goal clause)
   "True when CLAUSE can be considered for GOAL."
@@ -225,9 +283,11 @@ into the caller's remaining goals."
                                          succeed))))))
 
 (defun %resolve-dispatched-goal (goal state environment context)
-  "Validate GOAL is callable (after substitution and any module
-qualification) and return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
-  (let ((resolved-goal (logic-substitute goal environment)))
+  "Validate GOAL is callable after substitution and qualification.
+Return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
+  (let ((resolved-goal
+          (%logic-substitute-indexed
+           goal (proof-state-environment-index state))))
     (when (logic-var-p resolved-goal)
       (%raise-instantiation-error environment context
                                   "callable term must be instantiated"))
@@ -254,48 +314,64 @@ qualification) and return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
   (let* ((*current-table-session* (proof-state-table-session state))
          (environment (proof-state-bindings state))
          (context (%iso-atom "CALL")))
-    (multiple-value-bind (normalized-goal explicit-module)
-        (%resolve-dispatched-goal goal state environment context)
+    (multiple-value-bind (normalized-goal explicit-module solver)
+        (if (and (%goal-form-p goal)
+                 (symbolp (first goal))
+                 (not (logic-var-p (first goal)))
+                 (not (%qualified-goal-p goal)))
+            (let* ((predicate (first goal))
+                   (arity (length (rest goal)))
+                   (builtin-solver (%goal-solver predicate arity))
+                   (foreign-solver (%foreign-goal-solver predicate arity))
+                   (static-solver (or builtin-solver foreign-solver)))
+              (if static-solver
+                  (multiple-value-bind (resolved-goal resolved-module)
+                      (%resolve-dispatched-goal goal state environment context)
+                    (values resolved-goal resolved-module static-solver))
+                  (values goal nil nil)))
+            (multiple-value-bind (resolved-goal resolved-module)
+                (%resolve-dispatched-goal goal state environment context)
+              (let* ((predicate (first resolved-goal))
+                     (arity (length (rest resolved-goal)))
+                     (builtin-solver (%goal-solver predicate arity))
+                     (foreign-solver (%foreign-goal-solver predicate arity)))
+                (values resolved-goal resolved-module
+                        (or builtin-solver foreign-solver)))))
       (when (and (eq (first normalized-goal) (quote !))
                  (null (rest normalized-goal)))
         (funcall succeed state)
         (cl:throw (proof-state-cut-tag state) t))
-      (let* ((predicate (first normalized-goal))
-             (arity (length (rest normalized-goal)))
-             (builtin-solver (%goal-solver predicate arity))
-             (foreign-solver (%foreign-goal-solver predicate arity))
-             (solver (or builtin-solver foreign-solver)))
-        (cond
-          (solver
-            (when explicit-module
-              (%find-prolog-module
-               (rulebase-module-registry (proof-state-rulebase state))
-               explicit-module "invoke qualified goal"))
-            (let* ((solver-state
-                     (if explicit-module
-                         (%state-with state :module explicit-module)
-                         state))
-                   (*current-prolog-module* (proof-state-module solver-state))
-                   (*caller-cut-tag* (proof-state-cut-tag solver-state)))
-              (funcall solver
-                       normalized-goal
-                       (proof-state-rulebase solver-state)
-                       (proof-state-bindings solver-state)
-                       (proof-state-remaining-depth solver-state)
-                       (lambda (bindings)
-                         (funcall succeed
-                                  (%state-with solver-state :bindings bindings))))))
-          (t
-           (multiple-value-bind (resolved-user-goal defining-module)
-               (%resolve-user-goal normalized-goal state explicit-module)
-             (if defining-module
-                 (%prove-clauses/k resolved-user-goal
-                                   (%state-with state :module defining-module)
-                                   succeed)
-                 (%raise-existence-error
-                  "PROCEDURE" (%goal-predicate-indicator normalized-goal)
-                  environment context
-                  "the invoked predicate is not defined")))))))))
+      (cond
+        (solver
+         (when explicit-module
+           (%find-prolog-module
+            (rulebase-module-registry (proof-state-rulebase state))
+            explicit-module "invoke qualified goal"))
+         (let* ((solver-state
+                  (if explicit-module
+                      (%state-with state :module explicit-module)
+                      state))
+                (*current-prolog-module* (proof-state-module solver-state))
+                (*caller-cut-tag* (proof-state-cut-tag solver-state)))
+           (funcall solver
+                    normalized-goal
+                    (proof-state-rulebase solver-state)
+                    (proof-state-bindings solver-state)
+                    (proof-state-remaining-depth solver-state)
+                    (lambda (bindings)
+                      (funcall succeed
+                               (%state-with solver-state :bindings bindings))))))
+        (t
+         (multiple-value-bind (resolved-user-goal defining-module)
+             (%resolve-user-goal normalized-goal state explicit-module)
+           (if defining-module
+               (%prove-clauses/k resolved-user-goal
+                                 (%state-with state :module defining-module)
+                                 succeed)
+               (%raise-existence-error
+                "PROCEDURE" (%goal-predicate-indicator normalized-goal)
+                environment context
+                "the invoked predicate is not defined"))))))))
 
 (defun %prove-goal/k (goal state succeed)
   "Prove GOAL, counting every dispatched call for local depth limits."
@@ -313,13 +389,21 @@ qualification) and return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
 (defun %prove-with-cut-tag/k (query rulebase bindings remaining-depth cut-tag
                               succeed &optional (module *current-prolog-module*))
   "Prove QUERY under an existing cut barrier CUT-TAG."
-  (%prove-goals/k (%normalize-query query)
-                  (%make-proof-state rulebase bindings remaining-depth module
-                                     (or *current-table-session*
-                                         (%make-rulebase-table-session rulebase))
-                                     cut-tag)
-                  (lambda (state)
-                    (funcall succeed (proof-state-bindings state)))))
+  (let ((*unification-scratch*
+          (or *unification-scratch* (%make-unification-scratch))))
+    (%prove-goals/k
+     (%normalize-query query)
+     (%make-proof-state
+      rulebase
+      bindings
+      (%make-environment-index bindings)
+      remaining-depth
+      module
+      (or *current-table-session*
+          (%make-rulebase-table-session rulebase))
+      cut-tag)
+     (lambda (state)
+       (funcall succeed (proof-state-bindings state))))))
 
 (defun %prove-bindings/k (query rulebase bindings remaining-depth succeed
                           &optional (module *current-prolog-module*))
@@ -343,48 +427,146 @@ any nested proof rebinds *CALLER-CUT-TAG*."
 (defun %prove-raw-clauses/k (goal state succeed)
   "Prove GOAL within one predicate invocation and consume its cut.
 
-The fresh CATCH tag is this invocation's cut barrier: a cut in any clause
+The fresh CATCH tag is this invocation cut barrier: a cut in any clause
 body throws here, abandoning the remaining clause alternatives."
-  (let* ((cut-tag (%make-cut-tag))
-         (state (%state-with state :cut-tag cut-tag)))
+  (let ((cut-tag (%make-cut-tag)))
     (cl:catch cut-tag
       (dolist (entry (%proof-predicate-entries goal state))
         (let ((clause (%stored-clause-clause entry)))
           (if (null (clause-body clause))
-              (%continue-matching-fact goal clause state succeed)
+              (%continue-matching-fact goal entry state succeed)
               (when (%matching-rule-p goal clause)
-                (%prove-rule/k goal clause state succeed))))))))
+                (%prove-rule/k goal entry state cut-tag succeed))))))))
 
-(defun %prove-rule/k (goal clause state succeed)
-  "Resolve GOAL against one CLAUSE; a cut in the body prunes the clause list."
-  (let ((fresh-rule (%freshen-clause clause)))
-    (multiple-value-bind (extended ok)
-        (unify goal (clause-head fresh-rule) (proof-state-bindings state))
-      (when ok
-        (flet ((prove-with-propagated-bindings (propagated)
-                 (%prove-goals/k
-                  (clause-body fresh-rule)
-                  (%state-descending-into-rule state propagated goal)
-                  succeed)))
-          (if *constraint-post-unify-hook*
-              (funcall *constraint-post-unify-hook*
-                       extended
-                       #'prove-with-propagated-bindings)
-              (prove-with-propagated-bindings extended)))))))
+(progn
+  (declaim (inline %rule-program-operand-value))
+  (defun %rule-program-operand-value (operand variables)
+    (ecase (%clause-template-reference-kind operand)
+      (:literal (%clause-template-reference-value operand))
+      (:variable (svref variables (%clause-template-reference-value operand)))))
+  (defun %unify-rule-program-head (goal program variables environment parent-index)
+    "Unify GOAL arguments with PROGRAM operands without materializing a rule head."
+    (let ((arguments (cdr goal))
+          (operands (%rule-program-head-operands program))
+          (extended environment)
+          (index parent-index))
+      (dotimes (operand-index (length operands) (values extended t index))
+        (multiple-value-bind (next-extended ok next-index)
+            (%unify-indexed (car arguments)
+                            (%rule-program-operand-value
+                             (svref operands operand-index) variables)
+                            extended index (not (eq index parent-index)))
+          (unless ok
+            (return-from %unify-rule-program-head
+              (values nil nil parent-index)))
+          (setf extended next-extended
+                index next-index
+                arguments (cdr arguments))))))
+  (defun %materialize-rule-program-goal (instruction variables)
+    "Materialize one instruction with shared fresh variables."
+    (let* ((operands (%rule-instruction-operands instruction))
+           (arguments nil))
+      (loop for index downfrom (1- (length operands)) to 0
+            do (push (%rule-program-operand-value
+                      (svref operands index) variables)
+                     arguments))
+      (cons (%rule-instruction-predicate instruction) arguments)))
+  (defun %prove-rule-program-body/k (program variables goal-cache pc state succeed)
+    "Execute PROGRAM body from PC, materializing each reached goal at most once."
+    (let ((body (%rule-program-body program)))
+      (if (= pc (length body))
+          (funcall succeed state)
+          (let* ((cut-tag (proof-state-cut-tag state))
+                 (goal (or (svref goal-cache pc)
+                           (setf (svref goal-cache pc)
+                                 (%materialize-rule-program-goal
+                                  (svref body pc) variables)))))
+            (%prove-goal/k
+             goal state
+             (lambda (next-state)
+               (%prove-rule-program-body/k
+                program variables goal-cache (1+ pc)
+                (%state-with next-state :cut-tag cut-tag)
+                succeed)))))))
+  (defun %prove-rule-program/k (goal program state cut-tag succeed)
+    "Resolve GOAL using the restricted immutable rule instruction path."
+    (let* ((variables (make-array (%rule-program-variable-count program)))
+           (goal-cache (make-array (length (%rule-program-body program))
+                                   :initial-element nil))
+           (parent-bindings (proof-state-bindings state))
+           (parent-index (proof-state-environment-index state)))
+      (dotimes (index (length variables))
+        (setf (svref variables index) (%fresh-rule-program-variable)))
+      (multiple-value-bind (extended ok extended-index)
+          (%unify-rule-program-head
+           goal program variables parent-bindings parent-index)
+        (when ok
+          (flet ((prove-with-propagated-bindings (propagated)
+                   (let ((propagated-index
+                           (%environment-index-after-bindings
+                            propagated extended extended-index)))
+                     (%prove-rule-program-body/k
+                      program variables goal-cache 0
+                      (%state-descending-into-rule
+                       state propagated propagated-index goal cut-tag)
+                      succeed))))
+            (if *constraint-post-unify-hook*
+                (funcall *constraint-post-unify-hook*
+                         extended
+                         (function prove-with-propagated-bindings))
+                (prove-with-propagated-bindings extended)))))))
+  (defun %prove-generic-rule/k (goal entry state cut-tag succeed)
+    "Resolve GOAL through the general graph-template rule path."
+    (let ((fresh-rule (%materialize-stored-clause-for-proof
+                       entry (%stored-clause-template entry)))
+          (parent-bindings (proof-state-bindings state))
+          (parent-index (proof-state-environment-index state)))
+      (multiple-value-bind (extended ok extended-index)
+          (%unify-indexed goal (clause-head fresh-rule)
+                          parent-bindings parent-index nil)
+        (when ok
+          (flet ((prove-with-propagated-bindings (propagated)
+                   (let ((propagated-index
+                           (%environment-index-after-bindings
+                            propagated extended extended-index)))
+                     (%prove-goals/k
+                      (clause-body fresh-rule)
+                      (%state-descending-into-rule
+                       state propagated propagated-index goal cut-tag)
+                      succeed))))
+            (if *constraint-post-unify-hook*
+                (funcall *constraint-post-unify-hook*
+                         extended
+                         (function prove-with-propagated-bindings))
+                (prove-with-propagated-bindings extended)))))))
+  (defun %prove-rule/k (goal entry state cut-tag succeed)
+    "Resolve GOAL against one stored rule; a cut in the body prunes the clause list."
+    (let* ((template (%stored-clause-template entry))
+           (program (%clause-template-rule-program template)))
+      (if program
+          (%prove-rule-program/k goal program state cut-tag succeed)
+          (%prove-generic-rule/k goal entry state cut-tag succeed)))))
 
 (defun %provable-p (query rulebase environment depth
                     &optional (module +default-prolog-module+))
   "Return true when QUERY has at least one proof."
-  (%with-logic-variable-order
-    (block provable
-      (let ((cut-tag (%make-cut-tag)))
-        (cl:catch cut-tag
-          (%prove-goals/k (%normalize-query query)
-                          (%make-proof-state rulebase environment depth
-                                             module
-                                             (%make-rulebase-table-session rulebase)
-                                             cut-tag)
-                          (lambda (state)
-                            (declare (cl:ignore state))
-                            (return-from provable t)))))
-      nil)))
+  (let ((*unification-scratch*
+          (or *unification-scratch* (%make-unification-scratch))))
+    (%with-logic-variable-order
+      (block provable
+        (let ((cut-tag (%make-cut-tag)))
+          (cl:catch cut-tag
+            (%prove-goals/k
+             (%normalize-query query)
+             (%make-proof-state
+              rulebase
+              environment
+              (%make-environment-index environment)
+              depth
+              module
+              (%make-rulebase-table-session rulebase)
+              cut-tag)
+             (lambda (state)
+               (declare (cl:ignore state))
+               (return-from provable t)))))
+        nil))))

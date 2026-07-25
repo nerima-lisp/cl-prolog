@@ -9,35 +9,69 @@
 
 (defvar *next-logic-variable-ordinal* 0)
 
-(defmacro %with-logic-variable-order (&body body)
-  "Run BODY inside a variable-creation-order context.
+(progn
+  (defvar *rule-program-variable-names* nil)
+  (defvar *rule-program-variable-name-ordinals* nil)
+  (defvar *rule-program-private-variables* nil)
+
+  (defmacro %with-logic-variable-order (&body body)
+    "Run BODY inside a variable-creation-order context.
 
 An enclosing context is reused so nested queries (e.g. a builtin proving a
 sub-query) keep the ordinals of variables created by their caller."
-  `(if *logic-variable-ordinals* (progn
-      ,@body)
-    (let ((*logic-variable-ordinals* (make-hash-table :test #'eq))
-          (*next-logic-variable-ordinal* 0))
-      ,@body)))
+    `(if *logic-variable-ordinals* (progn
+        ,@body)
+      (let ((*logic-variable-ordinals* (make-hash-table :test #'eq))
+            (*next-logic-variable-ordinal* 0)
+            (*rule-program-private-variables*
+              (make-array (length *rule-program-variable-names*)
+                          :initial-element nil)))
+        ,@body))))
 
-(defun %register-logic-variable (variable)
-  "Assign VARIABLE its stable creation ordinal and return VARIABLE."
-  (unless *logic-variable-ordinals*
-    (error "Logic variables require an active ordering context."))
-  (multiple-value-bind (ordinal present-p) (gethash variable *logic-variable-ordinals*)
-    (declare (ignore ordinal))
-    (unless present-p
-      (setf (gethash variable *logic-variable-ordinals*) (prog1
-          *next-logic-variable-ordinal*
-          (incf *next-logic-variable-ordinal*)))))
-  variable)
+(progn
+  (defun %current-private-rule-variable-ordinal (variable)
+    "Return VARIABLE's current-context private ordinal and true, or NIL and false."
+    (if (and *rule-program-private-variables*
+             (null (symbol-package variable)))
+        (multiple-value-bind (ordinal present-p)
+            (gethash (symbol-name variable)
+                     *rule-program-variable-name-ordinals*)
+          (if (and present-p
+                   (eq variable
+                       (svref *rule-program-private-variables* ordinal)))
+              (values ordinal t)
+              (values nil nil)))
+        (values nil nil)))
+
+  (defun %register-logic-variable (variable)
+    "Assign VARIABLE its stable creation ordinal and return VARIABLE."
+    (unless *logic-variable-ordinals*
+      (error "Logic variables require an active ordering context."))
+    (multiple-value-bind (private-ordinal private-p)
+        (%current-private-rule-variable-ordinal variable)
+      (declare (ignore private-ordinal))
+      (unless private-p
+        (multiple-value-bind (ordinal present-p)
+            (gethash variable *logic-variable-ordinals*)
+          (declare (ignore ordinal))
+          (unless present-p
+            (setf (gethash variable *logic-variable-ordinals*)
+                  (prog1
+                      *next-logic-variable-ordinal*
+                    (incf *next-logic-variable-ordinal*)))))))
+    variable))
 
 (defun %logic-variable-ordinal (variable)
   "Return VARIABLE's registered ordinal."
-  (multiple-value-bind (ordinal present-p) (gethash variable *logic-variable-ordinals*)
-    (unless present-p
-      (error "Unregistered logic variable ~S." variable))
-    ordinal))
+  (multiple-value-bind (ordinal present-p)
+      (gethash variable *logic-variable-ordinals*)
+    (if present-p
+        ordinal
+        (multiple-value-bind (private-ordinal private-p)
+            (%current-private-rule-variable-ordinal variable)
+          (if private-p
+              private-ordinal
+              (error "Unregistered logic variable ~S." variable))))))
 
 (defun logic-var-p (term)
   "Return true when TERM is a logic variable rather than a dedicated Prolog atom."
@@ -48,11 +82,41 @@ sub-query) keep the ordinals of variables created by their caller."
     (plusp (length (symbol-name term)))
     (char= (char (symbol-name term) 0) #\?)))
 
-(defun fresh-logic-variable (&optional (prefix "?VAR"))
-  "Return a fresh, never-before-seen logic variable."
-  (let ((variable (gensym prefix)))
-    (if *logic-variable-ordinals* (%register-logic-variable variable)
-      variable)))
+(progn
+  (defun fresh-logic-variable (&optional (prefix "?VAR"))
+    "Return a fresh, never-before-seen logic variable."
+    (let ((variable (gensym prefix)))
+      (if *logic-variable-ordinals* (%register-logic-variable variable)
+        variable)))
+
+  (defparameter *rule-program-variable-names*
+    (let ((names (make-array 256)))
+      (dotimes (index (length names) names)
+        (setf (svref names index)
+              (format nil "?RULE-PROGRAM-~D" index)))))
+
+  (defparameter *rule-program-variable-name-ordinals*
+    (let ((ordinals
+            (make-hash-table
+              :test #'equal
+              :size (length *rule-program-variable-names*))))
+      (dotimes (index (length *rule-program-variable-names*) ordinals)
+        (setf (gethash (svref *rule-program-variable-names* index) ordinals)
+              index))))
+
+  (declaim (inline %fresh-rule-program-variable))
+  (defun %fresh-rule-program-variable ()
+    "Return a registered fresh variable with a cached printable name."
+    (let ((ordinal *next-logic-variable-ordinal*))
+      (if (and *logic-variable-ordinals*
+               (< ordinal (length *rule-program-variable-names*)))
+          (let ((variable
+                  (make-symbol
+                    (svref *rule-program-variable-names* ordinal))))
+            (setf (svref *rule-program-private-variables* ordinal) variable)
+            (incf *next-logic-variable-ordinal*)
+            variable)
+          (fresh-logic-variable "?RULE-PROGRAM-")))))
 
 (progn
   (defconstant +environment-index-overlay-threshold+ 8)
@@ -211,90 +275,181 @@ sub-query) keep the ordinals of variables created by their caller."
   (defun %occurs-p (var term env)
     (%occurs-p-indexed var term (%make-environment-index env) nil)))
 
+(progn
+  (defconstant +unification-scratch-inline-pair-capacity+ 32)
+  (defstruct
+      (%unification-scratch
+        (:constructor %make-unification-scratch ()))
+    (pairs nil :type (or null simple-vector))
+    (pair-count 0 :type fixnum)
+    (pair-table nil :type (or null hash-table))
+    (hash-mode-p nil :type boolean)
+    (active-p nil :type boolean))
+  (defvar *unification-scratch* nil)
+  (declaim
+    (inline
+      %unification-scratch-remember-pair
+      %reset-unification-scratch))
+  (defun %unification-scratch-remember-pair (scratch left right)
+  "Return true for a remembered directed EQ pair; otherwise remember it."
+  (declare (type %unification-scratch scratch)
+           (optimize (speed 3) (safety 1)))
+  (if (%unification-scratch-hash-mode-p scratch)
+      (let* ((table
+               (the hash-table
+                 (%unification-scratch-pair-table scratch)))
+             (rights (gethash left table)))
+        (if (member right rights :test (function eq))
+            t
+            (progn
+              (push right (gethash left table))
+              (incf (%unification-scratch-pair-count scratch))
+              nil)))
+      (let ((pairs (%unification-scratch-pairs scratch))
+            (count (%unification-scratch-pair-count scratch)))
+        (declare (type (or null simple-vector) pairs)
+                 (type fixnum count))
+        (when pairs
+          (dotimes (pair-index count)
+            (let ((offset (* 2 pair-index)))
+              (when
+                  (and
+                    (eq left (svref (the simple-vector pairs) offset))
+                    (eq right
+                        (svref (the simple-vector pairs) (1+ offset))))
+                (return-from %unification-scratch-remember-pair t)))))
+        (if (< count +unification-scratch-inline-pair-capacity+)
+            (let* ((pairs
+                     (or pairs
+                         (setf (%unification-scratch-pairs scratch)
+                               (make-array
+                                 (* 2
+                                    +unification-scratch-inline-pair-capacity+)))))
+                   (offset (* 2 count)))
+              (setf (svref pairs offset) left
+                    (svref pairs (1+ offset)) right
+                    (%unification-scratch-pair-count scratch) (1+ count))
+              nil)
+            (let ((table
+                    (or (%unification-scratch-pair-table scratch)
+                        (setf
+                          (%unification-scratch-pair-table scratch)
+                          (make-hash-table
+                            :test
+                            (function eq)
+                            :size
+                            +unification-scratch-inline-pair-capacity+)))))
+              (dotimes (pair-index count)
+                (let ((offset (* 2 pair-index)))
+                  (push
+                    (svref (the simple-vector pairs) (1+ offset))
+                    (gethash
+                      (svref (the simple-vector pairs) offset)
+                      table))))
+              (setf (%unification-scratch-hash-mode-p scratch) t
+                    (%unification-scratch-pair-count scratch) (1+ count))
+              (push right (gethash left table))
+              nil)))))
+  (defun %reset-unification-scratch (scratch)
+  "Release references retained by SCRATCH and make it reusable."
+  (declare (type %unification-scratch scratch)
+           (optimize (speed 3) (safety 1)))
+  (let ((pairs (%unification-scratch-pairs scratch))
+        (count (%unification-scratch-pair-count scratch))
+        (table (%unification-scratch-pair-table scratch)))
+    (when pairs
+      (fill
+        pairs nil
+        :end
+        (* 2
+           (min count +unification-scratch-inline-pair-capacity+))))
+    (when table
+      (clrhash table))
+    (setf (%unification-scratch-pair-count scratch) 0
+          (%unification-scratch-hash-mode-p scratch) nil
+          (%unification-scratch-active-p scratch) nil))
+  nil))
+
 (defun %unify-indexed (left right env base-index
                        &optional index-owned-p (occurs-check t))
   "Unify using BASE-INDEX, returning environment, success flag, and new index. INDEX-OWNED-P permits in-place extension of a caller-owned transient index.
 When OCCURS-CHECK is NIL the occurs check is skipped, so a variable may bind to
 a term containing it (producing a rational/cyclic term)."
-  (let ((index base-index)
-        (copied-p index-owned-p)
-        (seen-pairs nil)
-        (walk-seen nil))
-    (labels ((ensure-writable-index ()
-               (unless copied-p
-                 (setf index (%copy-environment-index index)
-                       copied-p t)))
-             (extend-environment (variable term environment)
-               (ensure-writable-index)
-               (push
-                 (cons
-                   variable
-                   (cons
-                     term
-                     (%environment-index-next-binding-rank index)))
-                 (%environment-index-overlay index))
-               (incf (%environment-index-overlay-length index))
-               (decf (%environment-index-next-binding-rank index))
-               (when (= (%environment-index-overlay-length index)
-                        +environment-index-overlay-threshold+)
-                 (setf index (%compact-environment-index index)))
-               (acons variable term environment))
-             (seen-pair-p (left right)
-               (and seen-pairs
-                    (member
-                      right
-                      (gethash left seen-pairs)
-                      :test
-                      (function eq))))
-             (remember-pair (left right)
-               (unless seen-pairs
-                 (setf seen-pairs
-                       (make-hash-table :test (function eq))))
-               (push right (gethash left seen-pairs)))
-             (unify-terms (left right environment)
-               (setf left (%walk-term-indexed left index walk-seen)
-                     right (%walk-term-indexed right index walk-seen))
-               (cond
-                 ((eq left right) (values environment t))
-                 ((logic-var-p left)
-                  (if (and occurs-check
-                           (%occurs-p-indexed left right index walk-seen))
-                      (values nil nil)
-                      (values
-                        (extend-environment left right environment)
-                        t)))
-                 ((logic-var-p right)
-                  (unify-terms right left environment))
-                 ((and (consp left) (consp right))
-                  (if (seen-pair-p left right)
-                      (values environment t)
-                      (progn
-                        (remember-pair left right)
-                        (multiple-value-bind (extended ok)
-                            (unify-terms
-                              (car left)
-                              (car right)
-                              environment)
-                          (if ok
-                              (unify-terms
-                                (cdr left)
-                                (cdr right)
-                                extended)
-                              (values nil nil))))))
-                 ((and
-                    (symbolp left)
-                    (symbolp right)
-                    (string=
-                      (symbol-name left)
-                      (symbol-name right)))
-                  (values environment t))
-                 ((equal left right) (values environment t))
-                 (t (values nil nil)))))
-      (multiple-value-bind (extended ok)
-          (unify-terms left right env)
-        (if ok
-            (values extended t index)
-            (values nil nil base-index))))))
+  (let* ((candidate *unification-scratch*)
+         (scratch
+           (if (and candidate
+                    (not (%unification-scratch-active-p candidate)))
+               candidate
+               (%make-unification-scratch))))
+    (let ((*unification-scratch* scratch))
+      (setf (%unification-scratch-active-p scratch) t)
+      (unwind-protect
+          (let ((index base-index)
+                (copied-p index-owned-p)
+                (walk-seen nil))
+            (labels ((ensure-writable-index ()
+                       (unless copied-p
+                         (setf index (%copy-environment-index index)
+                               copied-p t)))
+                     (extend-environment (variable term environment)
+                       (ensure-writable-index)
+                       (push
+                         (cons
+                           variable
+                           (cons
+                             term
+                             (%environment-index-next-binding-rank index)))
+                         (%environment-index-overlay index))
+                       (incf (%environment-index-overlay-length index))
+                       (decf (%environment-index-next-binding-rank index))
+                       (when (= (%environment-index-overlay-length index)
+                                +environment-index-overlay-threshold+)
+                         (setf index (%compact-environment-index index)))
+                       (acons variable term environment))
+                     (unify-terms (left right environment)
+                       (setf left (%walk-term-indexed left index walk-seen)
+                             right (%walk-term-indexed right index walk-seen))
+                       (cond
+                         ((eq left right) (values environment t))
+                         ((logic-var-p left)
+                          (if (and occurs-check
+                                   (%occurs-p-indexed left right index walk-seen))
+                              (values nil nil)
+                              (values
+                                (extend-environment left right environment)
+                                t)))
+                         ((logic-var-p right)
+                          (unify-terms right left environment))
+                         ((and (consp left) (consp right))
+                          (if (%unification-scratch-remember-pair
+                                scratch left right)
+                              (values environment t)
+                              (multiple-value-bind (extended ok)
+                                  (unify-terms
+                                    (car left)
+                                    (car right)
+                                    environment)
+                                (if ok
+                                    (unify-terms
+                                      (cdr left)
+                                      (cdr right)
+                                      extended)
+                                    (values nil nil)))))
+                         ((and
+                            (symbolp left)
+                            (symbolp right)
+                            (string=
+                              (symbol-name left)
+                              (symbol-name right)))
+                          (values environment t))
+                         ((equal left right) (values environment t))
+                         (t (values nil nil)))))
+              (multiple-value-bind (extended ok)
+                  (unify-terms left right env)
+                (if ok
+                    (values extended t index)
+                    (values nil nil base-index)))))
+        (%reset-unification-scratch scratch)))))
 
 (defun unify (left right &optional (env (quote ())) (occurs-check t))
   "Unify LEFT and RIGHT against ENV.
@@ -303,10 +458,12 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure.
 OCCURS-CHECK defaults to T; pass NIL to allow cyclic bindings (see the
 `occurs_check' Prolog flag).  Kept positional (not &key) so the hot
 clause-resolution path pays no keyword-dispatch cost."
-  (multiple-value-bind (extended ok index)
-      (%unify-indexed left right env (%make-environment-index env 1) t occurs-check)
-    (declare (ignore index))
-    (values extended ok)))
+  (let ((*unification-scratch* (%make-unification-scratch)))
+    (multiple-value-bind (extended ok index)
+        (%unify-indexed
+          left right env (%make-environment-index env 1) t occurs-check)
+      (declare (ignore index))
+      (values extended ok))))
 
 (defun %logic-substitute-indexed (template index)
   "Apply INDEX to TEMPLATE while preserving dotted and cyclic structure."

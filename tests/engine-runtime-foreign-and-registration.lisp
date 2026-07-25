@@ -206,3 +206,38 @@
                                    (funcall emit nil))))
       (is (%tree-contains-p expansion
                             (quote (declare (cl:ignore environment))))))))
+
+(progn
+  (defvar *observed-builtin-dispatch-argument* nil)
+
+  (cl-prolog::define-builtin (test-observe-builtin argument)
+      (rulebase environment depth emit)
+    (declare (cl:ignore rulebase depth))
+    (setf *observed-builtin-dispatch-argument* argument)
+    (funcall emit environment))
+
+  (defvar *observed-foreign-dispatch-argument* nil)
+
+  (define-foreign-predicate (test-observe-foreign argument)
+      (rulebase environment depth emit)
+    (declare (cl:ignore rulebase depth))
+    (setf *observed-foreign-dispatch-argument* argument)
+    (funcall emit environment))
+
+  (deftest builtin-dispatch-preserves-resolved-arguments ()
+    (let ((*observed-builtin-dispatch-argument* nil))
+      (is (query-prolog
+           (make-rulebase)
+           (quote ((= ?argument resolved)
+                   (test-observe-builtin ?argument)))))
+      (is (eq (quote resolved)
+              *observed-builtin-dispatch-argument*))))
+
+  (deftest foreign-dispatch-preserves-resolved-arguments ()
+    (let ((*observed-foreign-dispatch-argument* nil))
+      (is (query-prolog
+           (make-rulebase)
+           (quote ((= ?argument resolved)
+                   (test-observe-foreign ?argument)))))
+      (is (eq (quote resolved)
+              *observed-foreign-dispatch-argument*)))))

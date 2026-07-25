@@ -16,27 +16,28 @@
                        :type hash-table :read-only t))
 
 (defstruct (%table-session
-            (:copier nil)
-            (:constructor %make-table-session
-                (entries module-entries predicate-entries left-recursion)))
+                         (:copier nil)
+                         (:constructor %make-table-session
+                             (entries module-entries predicate-entries left-recursion)))
   "Tables shared by every proof nested within one public query."
-  (entries (make-hash-table :test #'equal) :type hash-table :read-only t)
-  (module-entries (make-hash-table :test #'equal)
+  (entries (make-hash-table :test (function equal))
+           :type hash-table :read-only t)
+  (module-entries (make-hash-table :test (function equal))
                   :type hash-table :read-only t)
-  (predicate-entries (make-hash-table :test #'equal)
+  (predicate-entries (make-hash-table :test (function equal))
                      :type hash-table :read-only t)
-  (left-recursion (make-hash-table :test #'equal)
+  (left-recursion (make-hash-table :test (function equal))
                   :type hash-table :read-only t))
 
 (defparameter +variant-variable-marker+ (gensym "VARIANT-VARIABLE-")
   "Unforgeable marker used in canonical table keys and answers.")
 
 (defun %make-rulebase-table-session (rulebase)
-  (declare (cl:ignore rulebase))
-  (%make-table-session (make-hash-table :test #'equal)
-                       (make-hash-table :test #'equal)
-                       (make-hash-table :test #'equal)
-                       (make-hash-table :test #'equal)))
+    (%make-table-session
+     (make-hash-table :test (function equal))
+     (make-hash-table :test (function equal))
+     (make-hash-table :test (function equal))
+     (rulebase-left-recursion-analysis rulebase)))
 
 (defun %canonicalize-variant (term)
   "Rename TERM's variables by first occurrence, preserving sharing.
