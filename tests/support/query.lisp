@@ -27,6 +27,47 @@ names the goal that failed rather than the whole group."
              (is (prolog-goal-holds-p ,source))))
         sources)))
 
+(defun prolog-goal-outcome (source)
+  "Run the goal SOURCE and describe its outcome for a conformance assertion.
+
+Returns :TRUE or :FALSE for a proof or its absence, or the raised ISO error term
+rendered as Prolog text -- which is the form the standard states requirements
+in, so a case can name the exact term it expects."
+  (handler-case
+      (if (prolog-succeeds-p (make-rulebase) (read-prolog-term source))
+          :true
+          :false)
+    (prolog-exception (condition)
+      (prolog-term-string (prolog-exception-term condition)))
+    (error (condition)
+      ;; A host condition escaping to here is itself a conformance failure: the
+      ;; engine owes Prolog code a catchable error, not a Lisp one.
+      (format nil "uncaught host condition ~A" (type-of condition)))))
+
+(defmacro deftest-iso (name &body cases)
+  "Define one cl-weave case per ISO conformance CASE.
+
+Each case is (CLAUSE SOURCE EXPECTED), where CLAUSE cites the ISO 13211-1
+subclause and EXPECTED is :TRUE, :FALSE, or a substring of the error term the
+standard requires -- matched case-insensitively, since the rendered term's
+spelling is not what is under test."
+  `(cl-weave:describe-sequential ,(string name)
+     ,@(mapcar
+        (lambda (case)
+          (destructuring-bind (clause source expected) case
+            `(cl-weave:it ,(format nil "~A: ~A" clause source)
+               (cl-weave:expect-has-assertions)
+               (let ((outcome (prolog-goal-outcome ,source)))
+                 ,(if (keywordp expected)
+                      `(is (eq ,expected outcome)
+                           ,(format nil "ISO ~A requires ~(~A~) for: ~A"
+                                    clause expected source))
+                      `(is (and (stringp outcome)
+                                (search ,expected outcome :test #'char-equal))
+                           ,(format nil "ISO ~A requires ~A for: ~A"
+                                    clause expected source)))))))
+        cases)))
+
 (defmacro with-single-query-solution ((solution solutions rulebase query &rest options)
                                       &body body)
   "Execute QUERY once, assert that it yields exactly one solution, and bind it.

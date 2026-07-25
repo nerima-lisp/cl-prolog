@@ -125,11 +125,13 @@ The macro expands each case into two DEFTEST-QUERIES specs."
   (:equal 12.5d0 (parse-number-codes '(49 50 46 53)))
   (:equal 1250.0d0 (parse-number-codes '(49 46 50 53 69 43 51)))
   (:equal 0.0125d0 (parse-number-codes '(49 46 50 53 101 45 50)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 47 50)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 46)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(46 53)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 101)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 50 120)))
+  ;; ISO 13211-1 8.16.8.3: codes that do not spell a number are a syntax_error,
+  ;; the same class the reader raises for unreadable text.
+  (:equal 'prolog-syntax-error (number-codes-error-type '(49 47 50)))
+  (:equal 'prolog-syntax-error (number-codes-error-type '(49 46)))
+  (:equal 'prolog-syntax-error (number-codes-error-type '(46 53)))
+  (:equal 'prolog-syntax-error (number-codes-error-type '(49 101)))
+  (:equal 'prolog-syntax-error (number-codes-error-type '(49 50 120)))
   (:equal 'prolog-resource-error
           (number-codes-error-type
            (map 'list #'char-code
@@ -236,7 +238,9 @@ The macro expands each case into two DEFTEST-QUERIES specs."
           (atom-builtin-error-summary '(cl-prolog::char_code ?character -1)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "NUMBER" "ATOM"))
           (atom-builtin-error-summary '(cl-prolog::number_chars atom ?chars)))
-  (:equal '(prolog-domain-error ("DOMAIN_ERROR" "NUMBER_TEXT" "bad"))
+  ;; ISO 13211-1 8.16.8.3 classifies unreadable numeric text as a syntax_error,
+  ;; whose culprit is the offending text itself.
+  (:equal '(prolog-syntax-error ("SYNTAX_ERROR" "bad"))
           (atom-builtin-error-summary '(cl-prolog::number_codes ?number (98 97 100))))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
           (atom-builtin-error-summary '(cl-prolog::atom_number ?atom ?number)))

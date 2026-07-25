@@ -1,0 +1,172 @@
+;;;; ISO 13211-1 conformance cases, written as the standard states them.
+;;;;
+;;;; Every case is a goal in Prolog *source text* paired with the outcome the
+;;;; standard requires -- a proof, a failure, or a specific error term. Writing
+;;;; them as text rather than as engine data structures is the point: it is the
+;;;; only way to exercise the reader, the operator table, and the builtin error
+;;;; contracts together, and it is how a user meets them.
+;;;;
+;;;; Each case cites its subclause, so a failure says which requirement broke.
+;;;; This file is deliberately broad rather than deep; the per-builtin suites
+;;;; carry the exhaustive behavioural coverage.
+
+(in-package #:cl-prolog.tests)
+
+;;; 6.3-6.4 -- syntax: what the reader must accept and how tokens are formed.
+
+(deftest-iso iso-syntax
+  ;; 6.3.3.1 / 6.3.4.3: an atom that is an operator is a term as an argument,
+  ;; and bracketed.
+  ("6.3.3.1" "functor(T, +, 2), T = 1 + 2" :true)
+  ("6.3.3.1" "T =.. [+, 1, 2], T == 1 + 2" :true)
+  ("6.3.3.1" "atom_length(-, 1)" :true)
+  ("6.3.3.1" "sort(0, @<, [b,a], [a,b])" :true)
+  ("6.3.3.1" "compare(<, 1, 2)" :true)
+  ("6.3.4.3" "X = (+), X == '+'" :true)
+  ("6.3.4.3" "X = (:-), X == ':-'" :true)
+  ;; 6.3.5: [] is an atom, and quoting does not change which atom.
+  ("6.3.5" "atom([])" :true)
+  ("6.3.5" "[] == '[]'" :true)
+  ("6.3.5" "atom_length([], 2)" :true)
+  ;; 6.3.6: a bare {} is the atom of that name.
+  ("6.3.6" "X = {}, atom(X)" :true)
+  ("6.3.6" "{} == '{}'" :true)
+  ;; 6.4.2: quoting is invisible; case is not.
+  ("6.4.2" "hello == 'hello'" :true)
+  ("6.4.2" "'FooBar' \\== foobar" :true)
+  ;; 6.4.2: a maximal run of graphic characters is one token, and an undeclared
+  ;; one is an atom -- so an operator can be declared before it exists.
+  ("6.4.2" "op(700, xfx, ===)" :true)
+  ("6.4.2" "atom_length(===, 3)" :true)
+  ;; 6.4.2.1: escape sequences denote the character they name.
+  ("6.4.2.1" "atom_codes('a\\nb', [0'a, 10, 0'b])" :true)
+  ("6.4.2.1" "atom_length('a\\tb', 3)" :true)
+  ("6.4.2.1" "atom_codes('\\x41\\', [65])" :true)
+  ("6.4.2.1" "atom_codes('\\101\\', [65])" :true)
+  ;; 6.4.4: character-code and radix constants.
+  ("6.4.4" "0'a =:= 97" :true)
+  ("6.4.4" "0'' =:= 39" :true)
+  ("6.4.4" "0'\\n =:= 10" :true)
+  ("6.4.4" "0xff =:= 255" :true)
+  ("6.4.4" "0o17 =:= 15" :true)
+  ("6.4.4" "0b101 =:= 5" :true)
+  ;; 6.3.4.4 table 7: the bitwise operators are declared.
+  ("6.3.4.4" "1 << 3 =:= 8" :true)
+  ("6.3.4.4" "8 >> 3 =:= 1" :true)
+  ("6.3.4.4" "12 /\\ 10 =:= 8" :true)
+  ("6.3.4.4" "12 \\/ 10 =:= 14" :true)
+  ("6.3.4.4" "12 xor 10 =:= 6" :true)
+  ("6.3.4.4" "\\ 0 =:= -1" :true))
+
+;;; 7.2 -- the standard order of terms.
+
+(deftest-iso iso-term-order
+  ("7.2.3" "compare(<, 'B', a)" :true)
+  ("7.2.3" "a @< b" :true)
+  ("7.2.4" "compare(<, 1, a)" :true)
+  ("7.2" "msort([b, 'A', a], ['A', a, b])" :true)
+  ("7.2" "sort([b, a, b], [a, b])" :true)
+  ;; == and compare/3 must agree with the unification =/2 admits.
+  ("7.2" "compare(=, hello, 'hello')" :true))
+
+;;; 7.6.1 -- converting a term to a clause.
+
+(deftest-iso iso-clause-conversion
+  ("7.6.1" "assertz((h :- true)), h" :true)
+  ("7.6.1" "assertz((h(X) :- X > 1)), h(2)" :true)
+  ("7.6.1" "assertz((h(X) :- X > 1)), \\+ h(0)" :true)
+  ("7.6.1" "assertz(f), clause(f, true)" :true)
+  ("7.6.1" "assertz((g :- a, b)), clause(g, (a , b))" :true)
+  ("7.6.1" "assertz((d :- true)), retract((d :- true)), \\+ d" :true)
+  ("7.6.1" "assertz(p), retract((p :- true)), \\+ p" :true))
+
+;;; 8.x -- the builtin error contracts the standard specifies exactly.
+
+(deftest-iso iso-builtin-errors
+  ;; 8.2 unification
+  ("8.2.2" "unify_with_occurs_check(X, f(X))" :false)
+  ;; 8.4 comparison
+  ("8.4.2.3" "compare(1, 1, 2)" "type_error(atom")
+  ("8.4.2.3" "compare(foo, 1, 2)" "domain_error(order")
+  ;; 8.5 term construction and decomposition
+  ("8.5.1.3" "functor(T, N, 2)" "instantiation_error")
+  ("8.5.1.3" "functor(T, foo, a)" "type_error(integer")
+  ("8.5.1.3" "functor(T, foo, -1)" "domain_error")
+  ("8.5.1.3" "functor(T, 1.5, 1)" "type_error(atom")
+  ("8.5.2.3" "arg(N, f(a), A)" "instantiation_error")
+  ("8.5.2.3" "arg(a, f(a), A)" "type_error(integer")
+  ("8.5.3.3" "X =.. Y" "instantiation_error")
+  ("8.5.3.3" "X =.. [foo|bar]" "type_error(list")
+  ("8.5.3.3" "X =.. []" "domain_error")
+  ;; 8.6 arithmetic evaluation
+  ("8.6.1.3" "X is Y" "instantiation_error")
+  ("8.6.1.3" "X is foo" "type_error(evaluable")
+  ("8.6.1.3" "X is 1 // 0" "evaluation_error(zero_divisor")
+  ("8.6.1.3" "X is 1 mod 0" "evaluation_error(zero_divisor")
+  ("8.7.1.3" "1 =:= Y" "instantiation_error")
+  ;; 8.8 clause retrieval and inspection
+  ("8.8.1.3" "clause(H, B)" "instantiation_error")
+  ("8.8.1.3" "clause(1, B)" "type_error(callable")
+  ("8.8.1.3" "clause(foo, 1)" "type_error(callable")
+  ("8.8.2.3" "current_predicate(1)" "type_error")
+  ;; 8.9 clause creation and destruction
+  ("8.9.1.3" "asserta(X)" "instantiation_error")
+  ("8.9.1.3" "asserta(1)" "type_error(callable")
+  ("8.9.1.3" "asserta((X :- true))" "instantiation_error")
+  ("8.9.1.3" "asserta((foo :- 1))" "type_error(callable")
+  ("8.9.3.3" "retract(X)" "instantiation_error")
+  ("8.9.4.3" "abolish(foo)" "type_error(predicate_indicator")
+  ;; 8.10 findall and friends
+  ("8.10.1.3" "findall(X, G, L)" "instantiation_error")
+  ("8.10.1.3" "findall(X, 1, L)" "type_error(callable")
+  ("8.10.1" "findall(X, fail, [])" :true)
+  ("8.10.2" "bagof(X, fail, L)" :false)
+  ("8.10.2" "bagof(X, Y^member(X-Y,[1-a,2-b]), [1,2])" :true)
+  ("8.10.3" "setof(X, member(X,[b,a,b]), [a,b])" :true)
+  ;; 8.11 stream selection
+  ("8.11.1.3" "current_input(foo)" "domain_error(stream")
+  ("8.11.1.3" "current_output(foo)" "domain_error(stream")
+  ;; 8.14 term input/output
+  ("8.14.1.3" "read_term_from_atom('a', T, [bogus])" "domain_error")
+  ;; 8.15 logic and control
+  ("8.15.1.3" "call(G)" "instantiation_error")
+  ("8.15.1.3" "call(1)" "type_error(callable")
+  ("8.15.1" "\\+ fail" :true)
+  ("8.15.2" "once(member(X,[a,b])), X == a" :true)
+  ("8.15" "catch(throw(ball), B, B == ball)" :true)
+  ("8.15" "throw(X)" "instantiation_error")
+  ;; 8.16 atomic term processing
+  ("8.16.1.3" "atom_length(A, L)" "instantiation_error")
+  ("8.16.1.3" "atom_length(1, L)" "type_error(atom")
+  ("8.16.1.3" "atom_length(abc, -1)" "domain_error")
+  ("8.16.2.3" "atom_concat(A, B, C)" "instantiation_error")
+  ("8.16.3" "sub_atom(abracadabra, 0, 5, _, abrac)" :true)
+  ("8.16.4.3" "atom_chars(A, L)" "instantiation_error")
+  ("8.16.5" "atom_codes(A, [0'a]), A == a" :true)
+  ("8.16.6.3" "char_code(C, N)" "instantiation_error")
+  ;; 8.16.7.3 / 8.16.8.3: text that spells no number is a syntax error.
+  ("8.16.7.3" "number_chars(N, ['a'])" "syntax_error")
+  ("8.16.8.3" "number_codes(N, \"bad\")" "syntax_error")
+  ("8.16.8" "number_codes(N, \"33\"), N == 33" :true)
+  ;; 8.17 implementation-defined hooks
+  ("8.17.1.3" "op(1300, xfx, bad)" "domain_error(operator_priority")
+  ("8.17.1.3" "op(700, bad, x)" "domain_error(operator_specifier")
+  ("8.17.1.3" "op(700, xfx, ',')" "permission_error")
+  ("8.17.2.3" "current_prolog_flag(1, V)" "type_error")
+  ("8.17.3.3" "set_prolog_flag(bounded, true)" "permission_error"))
+
+;;; Divergences this engine documents rather than fixes.  They are asserted so
+;;; that a change of behaviour shows up as a failure here and gets a decision,
+;;; rather than drifting silently.
+
+(deftest-iso iso-documented-divergences
+  ;; 6.3.6: a non-empty {T} is the engine's internal `brace' term, not the
+  ;; compound '{}'(T), because DCG bodies are built on that representation.
+  ("6.3.6*" "X = {a}, X = {}(a)" "uncaught host condition")
+  ;; 8.2.1: the occurs_check flag defaults to true here, so =/2 refuses the
+  ;; cyclic binding ISO would let it make.  See docs/src/semantics.md.
+  ("8.2.1*" "X = f(X)" :false)
+  ;; 6.3.3: a functor is not required to be followed immediately by `(', so a
+  ;; bare +(1,2) reads as the prefix operator applied to (1,2) and the writer
+  ;; quotes such a functor to keep write_canonical/1 output re-readable.
+  ("6.3.3*" "X = +(1,2), X == 1 + 2" :false))

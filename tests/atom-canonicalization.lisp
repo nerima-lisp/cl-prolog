@@ -120,11 +120,10 @@ back as the same atom as an argument, a list element, and a list tail too."
 (deftest writeq-quotes-only-what-cannot-read-back-bare ()
   "ISO 13211-1 6.4.2: a graphic token and the solo chars `!' and `;' are name
 tokens, so quoting them would be noise.  The exceptions each have a reason —
-`,' and `|' would read back as separators, `{}' is not yet read as an atom, and
-a lone `.' is the end token."
-  (dolist (bare '("+" "-" "=.." "@<" "\\+" ":-" "-->" "#$&" ".." "!" ";"))
+`,' and `|' would read back as separators, and a lone `.' is the end token."
+  (dolist (bare '("+" "-" "=.." "@<" "\\+" ":-" "-->" "#$&" ".." "!" ";" "{}"))
     (is-equal bare (prolog-term-string (prolog-atom bare))))
-  (dolist (text '("," "|" "{}" "."))
+  (dolist (text '("," "|" "."))
     (is-equal (format nil "'~A'" text)
               (prolog-term-string (prolog-atom text)))))
 

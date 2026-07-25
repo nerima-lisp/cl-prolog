@@ -8,7 +8,7 @@
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
   :long-name "cl-prolog"
-  :version "0.8.0"
+  :version "1.0.0"
   :pathname "src"
   :serial t
   :components ((:file "package")
@@ -90,6 +90,7 @@
                              (:file "query")
                              (:file "fixtures")))
                (:file "unification")
+               (:file "iso-conformance")
                (:file "atom-canonicalization")
                (:file "operator-table")
                (:file "parser")
