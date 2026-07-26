@@ -1,9 +1,9 @@
 ;;;; Stream lifecycle: open/close, stream_property, set_stream_position,
 ;;;; char/byte builtins over binary and text streams, current-input/
 ;;;; current-output selection, and rulebase-copy isolation.  Uses the
-;;;; with-io-rulebase fixture defined in builtin-io-terms.lisp; term
+;;;; with-io-rulebase fixture defined in builtin-io-terms-test.lisp; term
 ;;;; reading/writing semantics live there, and malformed-input/error-
-;;;; rejection coverage lives in builtin-io-open-errors.lisp.
+;;;; rejection coverage lives in builtin-io-open-errors-test.lisp.
 
 (in-package #:cl-prolog.tests)
 

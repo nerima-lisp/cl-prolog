@@ -3,8 +3,8 @@
 ;;;; reads.  Defines the shared with-io-rulebase fixture used across this
 ;;;; file and its siblings; stream lifecycle (open/close, stream_property,
 ;;;; set_stream_position, current-input/output selection) lives in
-;;;; builtin-io-streams-lifecycle.lisp, and malformed-input/error-rejection
-;;;; coverage lives in builtin-io-open-errors.lisp.
+;;;; builtin-io-streams-lifecycle-test.lisp, and malformed-input/error-rejection
+;;;; coverage lives in builtin-io-open-errors-test.lisp.
 
 (in-package #:cl-prolog.tests)
 

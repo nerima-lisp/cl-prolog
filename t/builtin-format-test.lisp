@@ -1,5 +1,5 @@
 ;;;; format/1,2,3, tab/1, and print/1 output tests.  Uses the with-io-rulebase
-;;;; fixture (defined in builtin-io-terms.lisp) to capture current-output.
+;;;; fixture (defined in builtin-io-terms-test.lisp) to capture current-output.
 
 (in-package #:cl-prolog.tests)
 

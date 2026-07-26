@@ -161,7 +161,7 @@ but differ deliberately in a few edge modes:
 
 ## ISO conformance
 
-`t/iso-conformance.lisp` states the ISO 13211-1 requirements this engine is
+`t/iso-conformance-test.lisp` states the ISO 13211-1 requirements this engine is
 checked against as goals in Prolog source text, each citing its subclause, so a
 regression names the requirement it broke. The knowingly divergent cases are
 asserted there too, so a change of behavior surfaces as a failure rather than
@@ -184,7 +184,7 @@ drifting:
   `representation_error`, which is what lets an atom hold text in any script.
   The 1999 conformance corpus assumes a 256-character set and expects the error
   on two of its cases; keeping Unicode is a deliberate choice, asserted in
-  `t/iso-conformance.lisp`.
+  `t/iso-conformance-test.lisp`.
 
 ## occurs_check and cyclic terms
 

@@ -1,8 +1,8 @@
 ;;;; Cut, tabling, and left-recursion detection tests.  Predicate-index and
-;;;; depth-limit tests live in engine-runtime-index-and-depth.lisp; foreign
+;;;; depth-limit tests live in engine-runtime-index-and-depth-test.lisp; foreign
 ;;;; predicates and define-builtin registration in
-;;;; engine-runtime-foreign-and-registration.lisp; the ISO error contract in
-;;;; engine-runtime-error-contract.lisp.
+;;;; engine-runtime-foreign-and-registration-test.lisp; the ISO error contract in
+;;;; engine-runtime-error-contract-test.lisp.
 
 (in-package #:cl-prolog.tests)
 

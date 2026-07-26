@@ -3,8 +3,8 @@
 ;;;; options, rollback on duplicate alias, boolean-option/non-symbol/non-
 ;;;; boolean rejections, stream-designator-does-not-unify, and unseekable-
 ;;;; stream reposition reporting.  Uses the with-io-rulebase fixture defined
-;;;; in builtin-io-terms.lisp; stream lifecycle lives in
-;;;; builtin-io-streams-lifecycle.lisp.
+;;;; in builtin-io-terms-test.lisp; stream lifecycle lives in
+;;;; builtin-io-streams-lifecycle-test.lisp.
 
 (in-package #:cl-prolog.tests)
 

@@ -1,7 +1,7 @@
 ;;;; Control-flow builtin tests: call/N, call_nth, call_with_depth_limit,
 ;;;; setup_call_cleanup, and catch/throw interaction with continuations.
-;;;; Collection/database tests live in builtin-collections.lisp; arithmetic
-;;;; and flag tests live in builtin-arithmetic-and-flags.lisp.
+;;;; Collection/database tests live in builtin-collections-test.lisp; arithmetic
+;;;; and flag tests live in builtin-arithmetic-and-flags-test.lisp.
 
 (in-package #:cl-prolog.tests)
 

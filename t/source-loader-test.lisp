@@ -1,7 +1,7 @@
 ;;;; Source-loading fixtures, input media, and directive/rollback atomicity
 ;;;; tests.  consult/load_files/ensure_loaded semantics live in
-;;;; source-loader-transactions.lisp; interning/resource-error safety in
-;;;; source-loader-limits.lisp.
+;;;; source-loader-transactions-test.lisp; interning/resource-error safety in
+;;;; source-loader-limits-test.lisp.
 
 (in-package #:cl-prolog.tests)
 

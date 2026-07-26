@@ -18,7 +18,7 @@ Each file holds one builtin's cases, one term per line:
 ```
 
 `Expected` is `success`, `failure`, an ISO error term, or a list of solution
-substitutions written with the suite's own `<--` operator. `t/iso-inria.lisp`
+substitutions written with the suite's own `<--` operator. `t/iso-inria-test.lisp`
 reads these files with this engine's own reader and runs each goal, so a case
 exercises the reader, the operator table and the builtin together.
 
@@ -28,5 +28,5 @@ than tests. `file_manip` is vendored but its cases are documentation only — th
 suite itself marks them unimplemented.
 
 The suite predates the standard's corrigenda, so a few of its expectations are
-themselves disputed; `t/iso-inria.lisp` records each such case explicitly
+themselves disputed; `t/iso-inria-test.lisp` records each such case explicitly
 rather than quietly skipping it.

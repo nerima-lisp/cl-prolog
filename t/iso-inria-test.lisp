@@ -1,6 +1,6 @@
 ;;;; The INRIA ISO conformance suite, run against this engine.
 ;;;;
-;;;; t/iso-conformance.lisp states requirements I read out of the standard;
+;;;; t/iso-conformance-test.lisp states requirements I read out of the standard;
 ;;;; this file runs a corpus I did not write (see t/iso/README.md).  That
 ;;;; independence is the whole value: it can disagree with this engine in ways a
 ;;;; suite written alongside it cannot, and it is the only coverage here whose
