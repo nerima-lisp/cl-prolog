@@ -1,7 +1,9 @@
 (defpackage #:cl-prolog.user-atoms
   (:use)
   (:documentation
-   "Interned Prolog atoms kept separate from CL-PROLOG symbols, including inherited Common Lisp names and quoted names reserved for logic-variable syntax."))
+   "Interned Prolog atoms kept separate from CL-PROLOG symbols, including
+inherited Common Lisp names and quoted names reserved for logic-variable
+syntax."))
 
 (defpackage #:cl-prolog.verbatim-atoms
   (:use)

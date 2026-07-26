@@ -109,8 +109,9 @@ variable first, UP/DOWN fix the domain-enumeration direction.")
 
 (defun %fd-label (variables store environment options emit
                   &optional (context (%iso-atom "LABELING")))
-  (let ((pending (remove-if-not #'logic-var-p
-                                (mapcar (lambda (term) (logic-substitute term environment)) variables))))
+  (let ((pending (remove-if-not
+                  #'logic-var-p
+                  (mapcar (lambda (term) (logic-substitute term environment)) variables))))
     (if (null pending)
         (%fd-emit store environment emit)
         (let* ((variable (%fd-select-variable pending store options))
