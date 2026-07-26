@@ -90,7 +90,11 @@
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
   :depends-on (#:cl-prolog #:cl-weave)
   :pathname "src"
-  :components ((:file "weave")))
+  ;; :serial t so package-weave.lisp is loaded before the file that reads
+  ;; symbols into the package it declares.
+  :serial t
+  :components ((:file "package-weave")
+               (:file "weave")))
 
 ;;; The test system is `cl-prolog/test` — singular, slash-separated — with
 ;;; :pathname "t". It is NOT `cl-prolog-test` and NOT `cl-prolog/tests`.

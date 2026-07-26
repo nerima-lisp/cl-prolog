@@ -1,10 +1,6 @@
 ;;;; cl-weave helpers for testing cl-prolog queries.
-
-(defpackage #:cl-prolog/weave
-  (:use #:cl)
-  (:export
-   #:assert-query
-   #:deftest-queries))
+;;;;
+;;;; The package itself is declared in src/package-weave.lisp.
 
 (in-package #:cl-prolog/weave)
 
