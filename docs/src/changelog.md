@@ -14,6 +14,22 @@ complete, per-entry history.
     embed the root `CHANGELOG.md` directly. To avoid drift, this page links to
     the source of truth and lists only headline changes.
 
+## 1.1.0 - 2026-07-27
+
+Performance work across the resolution engine's hottest paths — goal dispatch,
+unification, clause indexing, tabled-answer replay, and query-solution
+projection — replacing consed keys and `equal`-hashed lookups with nested
+`eq`/`eql` tables and moving loop-invariant work off per-solution paths. See
+[Development](development.md#testing-at-a-glance) for the new `sb-cover`
+coverage report.
+
+- **`atom_number/2`** and the `number_string` family now parse the full ISO
+  number-token grammar, including `0x`/`0o`/`0b` radix and `0'c`
+  character-code notations, by delegating to the tokenizer's own reader.
+- A local coverage-report entry point: `nix build .#coverage` or
+  `sbcl --script run-coverage.lisp` outside Nix — see
+  [Testing](testing.md#coverage).
+
 ## 1.0.1 - 2026-07-26
 
 Three defects in the engine's internal Lisp clause shape `(:- HEAD . BODY-GOALS)`,

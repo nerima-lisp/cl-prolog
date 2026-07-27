@@ -18,6 +18,8 @@ fail. Keep `## [Unreleased]` at the top at all times.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-27
+
 ### Added
 
 - **A coverage report.** `nix build .#coverage` (or `sbcl --script
