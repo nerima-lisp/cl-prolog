@@ -56,20 +56,23 @@ jobs:
       # silently, which is how cl-boundary-kit reached :version 1.0.0 while its
       # newest tag was still v0.6.0.
       #
-      # The sed is anchored to the line start so a comment or docstring merely
-      # mentioning :version cannot shadow the real field, and an empty result is
-      # reported rather than silently compared against the tag.
+      # The Perl regexp is anchored to the line start so a comment or docstring
+      # merely mentioning :version cannot shadow the real field, and an empty
+      # result is reported rather than silently compared against the tag.
       #
-      # `[[:space:]][[:space:]]*` rather than `[[:space:]]\+`: the latter is a
-      # GNU extension. It works on ubuntu-latest but yields an empty match under
-      # the BSD sed on macOS, so anyone reproducing this gate locally would see
-      # "Could not read :version" on a perfectly good .asd.
+      # Perl's whitespace and capture syntax is portable across the supported
+      # runners, unlike relying on GNU- or BSD-specific sed behavior locally.
       - name: Verify tag matches .asd version
         env:
           PACKAGE: cl-prolog
         run: |
           set -euo pipefail
-          asd_version="$(sed -n 's/^[[:space:]]*:version[[:space:]][[:space:]]*"\([^"]*\)".*/\1/p' "$PACKAGE.asd" | head -n1)"
+          asd_version="$(perl -ne '
+            if (/^\s*:version\s+"([^"]*)"/) {
+              print "$1\n";
+              exit;
+            }
+          ' "$PACKAGE.asd")"
           tag_version="${GITHUB_REF_NAME#v}"
           if [[ -z "$asd_version" ]]; then
             echo "::error::Could not read :version from $PACKAGE.asd" >&2
@@ -90,10 +93,17 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          awk -v v="$version" '
-            $0 ~ "^## \\[" v "\\]" { found = 1; next }
-            found && /^## / { exit }
-            found { print }
+          VERSION="$version" perl -ne '
+            BEGIN { $heading = "## [$ENV{VERSION}]"; }
+            if (!$found) {
+              if (index($_, $heading) == 0
+                  && substr($_, length($heading), 1) =~ /(?:\s|\z)/) {
+                $found = 1;
+              }
+              next;
+            }
+            exit if /^## /;
+            print;
           ' CHANGELOG.md > release-notes.md
           if [[ ! -s release-notes.md ]]; then
             echo "::error::CHANGELOG.md has no section for [$version]" >&2

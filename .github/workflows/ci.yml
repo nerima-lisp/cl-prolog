@@ -35,7 +35,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # Keep the Cachix credential out of every pull-request run.  This is a
+      # repository-local action, so the PR controls the action code that would
+      # otherwise receive the input even though the action itself disables
+      # cache pushes for PR events.
       - uses: ./.github/actions/nix-setup
+        if: github.event_name == 'pull_request'
+        with:
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+
+      - uses: ./.github/actions/nix-setup
+        if: github.event_name != 'pull_request'
         with:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}

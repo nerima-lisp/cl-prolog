@@ -12,7 +12,7 @@
   # paredit-cli provides structural S-expression tooling for this repo's
   # Lisp sources: a dev-shell binary for agent-driven refactors and a
   # structural-parse lint gate reused in `checks`.
-  inputs.paredit-cli.url = "github:nerima-lisp/paredit-cli/v0.8.0";
+  inputs.paredit-cli.url = "github:nerima-lisp/paredit-cli/v1.0.0";
   inputs.paredit-cli.inputs.nixpkgs.follows = "nixpkgs";
 
   # treefmt drives `nix fmt` and the checks.formatting gate. Scope is Nix only:
@@ -57,16 +57,18 @@
           asd = builtins.readFile ./cl-prolog.asd;
           # Match only lines that are literally `:version "X"`, so a comment
           # or docstring merely mentioning :version can never shadow the real
-          # definition. An empty result asserts loudly instead of failing with
-          # an opaque `builtins.head` error on the malformed source.
+          # definition. Assert every ASDF system declares the same nonempty
+          # version, so the package cannot silently drift from a subsystem.
           matches = builtins.filter (m: m != null) (
             map (builtins.match ''[[:space:]]*:version[[:space:]]+"([^"]+)".*'') (
               nixpkgs.lib.splitString "\n" asd
             )
           );
+          versions = map builtins.head matches;
         in
         assert matches != [ ];
-        builtins.head (builtins.head matches);
+        assert builtins.all (version: version == builtins.head versions) versions;
+        builtins.head versions;
       # Shared CL_SOURCE_REGISTRY export so the dev shell and the `test` app
       # agree on how cl-weave and the working tree land on ASDF's search path.
       clSourceRegistryExport =
@@ -104,6 +106,43 @@
               )
             );
         };
+      # Keep the coverage runner in the derivation rather than the source
+      # tree: cleanSourceWith cannot include an untracked script from a
+      # Git-backed flake input. The runner loads its ASD from the copied
+      # working directory, so it remains independent of its Nix-store path.
+      mkCoverage =
+        pkgs: system: src:
+        let
+          coverageRunner = pkgs.writeText "cl-prolog-coverage-runner.lisp" ''
+            (require :asdf)
+            (require :sb-cover)
+
+            (asdf:load-asd (merge-pathnames "cl-prolog.asd" (truename ".")))
+            (asdf:load-system "cl-weave")
+
+            (declaim (optimize sb-cover:store-coverage-data))
+            (asdf:load-system "cl-prolog" :force t)
+            (asdf:load-system "cl-prolog/weave")
+            (declaim (optimize (sb-cover:store-coverage-data 0)))
+
+            (asdf:test-system "cl-prolog/test")
+            (sb-cover:report
+             (uiop:ensure-directory-pathname
+              (uiop:parse-native-namestring (second sb-ext:*posix-argv*))))
+          '';
+        in
+        pkgs.runCommand "cl-prolog-coverage" { nativeBuildInputs = [ pkgs.sbcl ]; } ''
+          cp -R ${src} source
+          chmod -R u+w source
+          cd source
+          export HOME="$TMPDIR/home"
+          export XDG_CACHE_HOME="$TMPDIR/cache"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME"
+          export CL_SOURCE_REGISTRY="${
+            cl-weave.packages.${system}.default
+          }/share/common-lisp/source//:$PWD//:"
+          timeout -k 30 600 sbcl --script ${coverageRunner} "$out"
+        '';
       mkDocs =
         pkgs:
         pkgs.stdenvNoCC.mkDerivation {
@@ -153,6 +192,7 @@
           inherit cl-prolog;
           default = cl-prolog;
           docs = mkDocs pkgs;
+          coverage = mkCoverage pkgs system src;
         }
       );
 
@@ -222,6 +262,19 @@
             touch $out
           '';
 
+          # packages.coverage runs the full suite under sb-cover, so a script
+          # regression that stops it reporting entirely fails here rather
+          # than silently shipping a stale or empty report. This does not
+          # gate on a coverage percentage: the report exists to make the
+          # number visible and trending, not to block merges on a threshold
+          # nobody has agreed to yet.
+          coverage =
+            pkgs.runCommand "cl-prolog-coverage-check" { coverage = self.packages.${system}.coverage; }
+              ''
+                test -f "$coverage/cover-index.html"
+                touch $out
+              '';
+
           # Fails `nix flake check` when any tracked Nix file is unformatted,
           # which is what makes `nix fmt` an enforced gate rather than a
           # suggestion. Checks the whole tree, not just flake.nix as before.
@@ -255,12 +308,13 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
+          src = sourceFor pkgs;
           clWeavePackage = cl-weave.packages.${system}.default;
           test = pkgs.writeShellApplication {
             name = "cl-prolog-test";
             runtimeInputs = [ clWeavePackage ];
             text = ''
-              ${clSourceRegistryExport clWeavePackage}
+              export CL_SOURCE_REGISTRY="${clWeavePackage}/share/common-lisp/source//:${src}//:''${CL_SOURCE_REGISTRY:-}"
               exec cl-weave run cl-prolog/test "$@"
             '';
           };

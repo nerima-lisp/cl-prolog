@@ -20,6 +20,14 @@ fail. Keep `## [Unreleased]` at the top at all times.
 
 ### Added
 
+- **A coverage report.** `nix build .#coverage` (or `sbcl --script
+  run-coverage.lisp` outside Nix) runs the regression suite under SB-COVER
+  and writes an HTML report instrumenting `cl-prolog` and `cl-prolog/weave`
+  only, not the `cl-weave` harness driving them. Nix embeds its runner in
+  `flake.nix` with `pkgs.writeText`; `run-coverage.lisp` remains the local
+  SBCL entry point. `checks.coverage` builds the Nix report in CI; it asserts
+  the report exists, not a coverage percentage. See
+  [Testing](docs/src/testing.md#coverage).
 - `benchmarks/performance.lisp` gains three benchmark groups matching the
   optimizations below: indexed substitution, ground-vs-nonground tabled
   answer replay, and the left-recursion cache across cold/warm/revision-
@@ -68,6 +76,15 @@ fail. Keep `## [Unreleased]` at the top at all times.
   instead of recomputing it from the delimiter stack's length on every
   open/close paren, and its near-duplicate quoted-atom/string scanners are
   unified into one macro.
+- `paredit-cli` bumped `v0.8.0` -> `v1.0.0`.
+- CI: the `nix-setup` composite action no longer receives `CACHIX_AUTH_TOKEN`
+  on pull-request runs, so a fork's workflow changes cannot exfiltrate the
+  write-capable Cachix credential; PR runs still read from the cache.
+- CI: the release workflow's `.asd`-version and `CHANGELOG.md`-section
+  extraction moved from `sed`/`awk` to Perl, which behaves identically on the
+  GNU and BSD tool variants the supported runners carry (the prior `sed`
+  pattern relied on a GNU-only escape and silently produced no match under
+  macOS's BSD `sed`).
 
 ### Fixed
 
