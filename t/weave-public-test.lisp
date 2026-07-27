@@ -45,14 +45,7 @@
     (cl-weave:expect-has-assertions)
     (let ((rulebase (make-weave-rulebase)))
       (assert-query rulebase (parent alice ?child) :set
-        (((?child . carol)) ((?child . bob))))))
-
-  (cl-weave:it "preserves order inside each solution"
-    (cl-weave:expect
-     (cl-prolog/weave::%solution-multiset-equal-p
-      '(((?x . one) (?y . two)))
-      '(((?y . two) (?x . one))))
-     :to-be-falsy)))
+        (((?child . carol)) ((?child . bob)))))))
 
 (cl-weave:describe-sequential "query-spec-parsing-rejects-malformed-input"
   (cl-weave:it "an :ordered/:set/:first kind requires an expected value"

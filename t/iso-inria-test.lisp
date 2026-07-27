@@ -20,7 +20,7 @@ Resolved through ASDF rather than *LOAD-PATHNAME*, which points at the fasl
 cache once the suite is compiled."
   (asdf:system-relative-pathname :cl-prolog/test "t/iso/inriasuite/"))
 
-(defparameter +inria-conformance-floor+ 430
+(defparameter +inria-conformance-floor+ 431
   "The corpus score this engine is known to reach.
 
 A floor rather than an exact count, so that fixing a builtin never fails the
@@ -52,12 +52,14 @@ test; raise it when the score improves and a regression will fail here.")
     (second term)))
 
 (defparameter +inria-driver-support-clauses+
-  "exists(Name/Arity) :- functor(Head, Name, Arity), predicate_property(Head, _)."
+  "exists(Name/Arity) :- functor(Head, Name, Arity), predicate_property(Head, _).
+run_tests(_)."
   "Helpers the corpus expects its own driver to supply.
 
-Some cases call `exists/1' to ask whether a predicate is available at all.  It
-belongs to the suite's harness rather than to the standard, so it is defined
-here rather than counted as a conformance failure.")
+Some cases call `exists/1' to ask whether a predicate is available at all,
+and `current_predicate/1' expects the driver-provided `run_tests/1' predicate.
+They belong to the suite's harness rather than to the standard, so they are
+defined here rather than counted as conformance failures.")
 
 (defun inria-rulebase ()
   "A rulebase carrying the corpus's driver-supplied helpers."

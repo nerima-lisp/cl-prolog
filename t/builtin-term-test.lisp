@@ -156,6 +156,16 @@
     (is (not (cl-prolog::%term-acyclic-p
               '?cycle '((?cycle node ?cycle)))))))
 
+(deftest public-cyclic-term-builtins-detect-cdr-cycles ()
+  (let ((cycle (list (quote node))))
+    (setf (cdr cycle) cycle)
+    (let ((rulebase (make-rulebase)))
+      (is-equal 1
+                (length (query-prolog rulebase
+                                      (list (quote cl-prolog:cyclic_term) cycle))))
+      (is (null (query-prolog rulebase
+                             (list (quote cl-prolog:acyclic_term) cycle)))))))
+
 (defun term-builtin-error-summary (goal)
   (query-error-summary (make-rulebase) goal :with-data t))
 

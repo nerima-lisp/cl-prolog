@@ -103,16 +103,17 @@
          (last-goal (list last-predicate))
          (first-snapshot (cl-prolog::%proof-module-entries state)))
     (is (eq first-snapshot (cl-prolog::%proof-module-entries state)))
-    (is (eq (cl-prolog::%table-session-left-recursion session)
-            (cl-prolog::%table-session-left-recursion second-session)))
+    (is-equal 0
+              (hash-table-count
+               (cl-prolog::rulebase-left-recursion-analysis rulebase)))
     (is (not (cl-prolog::%left-recursive-p root-goal state)))
-    (let ((analysis-count
-            (hash-table-count
-             (cl-prolog::%table-session-left-recursion session))))
-      (is (not (cl-prolog::%left-recursive-p last-goal second-state)))
-      (is-equal analysis-count
-                (hash-table-count
-                 (cl-prolog::%table-session-left-recursion session))))
+    (is-equal 1
+              (hash-table-count
+               (cl-prolog::rulebase-left-recursion-analysis rulebase)))
+    (is (not (cl-prolog::%left-recursive-p last-goal second-state)))
+    (is-equal 1
+              (hash-table-count
+               (cl-prolog::rulebase-left-recursion-analysis rulebase)))
     (let* ((copy (copy-rulebase rulebase))
            (copy-session
              (cl-prolog::%make-rulebase-table-session copy))
@@ -125,36 +126,32 @@
   cl-prolog::+default-prolog-module+
   copy-session
   (cl-prolog::%make-cut-tag))))
-      (is (not (eq (cl-prolog::%table-session-left-recursion session)
-                   (cl-prolog::%table-session-left-recursion copy-session))))
+      (is (not (eq (cl-prolog::rulebase-left-recursion-analysis rulebase)
+                   (cl-prolog::rulebase-left-recursion-analysis copy))))
       (is-equal 0
                 (hash-table-count
-                 (cl-prolog::%table-session-left-recursion copy-session)))
+                 (cl-prolog::rulebase-left-recursion-analysis copy)))
       (is (not (cl-prolog::%left-recursive-p root-goal copy-state)))
       (is-equal 1
                 (hash-table-count
-                 (cl-prolog::%table-session-left-recursion session))))
+                 (cl-prolog::rulebase-left-recursion-analysis copy)))
+      (is-equal 1
+                (hash-table-count
+                 (cl-prolog::rulebase-left-recursion-analysis rulebase))))
     (rulebase-insert-clause!
      rulebase
      (make-clause last-goal (list root-goal)))
     (is-equal 0
               (hash-table-count
-               (cl-prolog::%table-session-left-recursion session)))
-    (is-equal 0
-              (hash-table-count
-               (cl-prolog::%table-session-left-recursion second-session)))
+               (cl-prolog::rulebase-left-recursion-analysis rulebase)))
     (let ((next-snapshot (cl-prolog::%proof-module-entries state)))
       (is (not (eq first-snapshot next-snapshot)))
       (is-equal (1+ (length first-snapshot)) (length next-snapshot)))
     (is (cl-prolog::%left-recursive-p root-goal state))
-    (let ((analysis-count
-            (hash-table-count
-             (cl-prolog::%table-session-left-recursion session))))
-      (is (cl-prolog::%left-recursive-p last-goal second-state))
-      (is-equal analysis-count
-                (hash-table-count
-                 (cl-prolog::%table-session-left-recursion session)))
-      (is-equal 1 analysis-count))))
+    (is (cl-prolog::%left-recursive-p last-goal second-state))
+    (is-equal 1
+              (hash-table-count
+               (cl-prolog::rulebase-left-recursion-analysis rulebase)))))
 
 (deftest-table rulebase-default-constructors ()
   (:equal '() (clause-body (make-clause '(lonely))))

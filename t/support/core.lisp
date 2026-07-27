@@ -124,6 +124,13 @@ condition's normalized ISO error-term payload as a second list element."
   (declare (ignore message))
   `(cl-weave:expect (lambda () ,form) :to-throw))
 
+(defmacro signals-prolog-condition (condition-class form &optional message)
+  "Assert that FORM signals CONDITION-CLASS."
+  `(is (handler-case
+           (progn ,form nil)
+         (,condition-class () t))
+       ,@(when message (list message))))
+
 (defmacro with-closed-io-context ((context) &body body)
   "Run BODY, then close every stream CONTEXT owns, even if BODY errors."
   `(unwind-protect (progn ,@body)

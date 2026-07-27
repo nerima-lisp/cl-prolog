@@ -154,6 +154,20 @@ happily as the ISO error and would not have caught the defect."
                (nreverse seen)))
     (assert-query rulebase (current_predicate (/ gamma 1)) :succeeds)))
 
+(deftest predicate-indicator-snapshots-are-detached ()
+  (let ((builtin-snapshot (cl-prolog::%builtin-predicate-indicators))
+        (foreign-snapshot (cl-prolog::%foreign-predicate-indicators)))
+    (is builtin-snapshot)
+    (is foreign-snapshot)
+    (let ((builtin-first (first builtin-snapshot))
+          (foreign-first (first foreign-snapshot)))
+      (setf (first builtin-snapshot) 'mutated-builtin
+            (first foreign-snapshot) 'mutated-foreign)
+      (is-equal builtin-first
+                (first (cl-prolog::%builtin-predicate-indicators)))
+      (is-equal foreign-first
+                (first (cl-prolog::%foreign-predicate-indicators))))))
+
 (deftest current-predicate-validates-ground-indicators ()
   (let ((rulebase (make-rulebase)))
     (assert-query rulebase (current_predicate missing) :signals)

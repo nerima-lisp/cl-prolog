@@ -363,6 +363,7 @@
   ("7.11.2.4" "current_prolog_flag(unknown, error)" :true)
   ("7.7.7" "undefined_procedure_xyz" "existence_error(procedure")
   ("7.11.2.4" "set_prolog_flag(unknown, fail), undefined_procedure_xyz" :false)
+  ("7.11.2.4" "set_prolog_flag(unknown, fail), !(_)" :false)
   ("7.11.2.4" "set_prolog_flag(unknown, warning), undefined_procedure_xyz" :false)
   ;; ...and the default is restored per rulebase, not left global.
   ("7.11.2.4" "undefined_procedure_xyz" "existence_error(procedure"))

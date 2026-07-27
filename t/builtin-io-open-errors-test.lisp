@@ -25,33 +25,36 @@
 
 (deftest io-open-rejects-a-non-atom-source ()
   (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase
-                  (cl-prolog::open 123 cl-prolog.user-atoms::read ?stream)
-                  :signals)))
+    (signals-prolog-condition prolog-type-error
+      (prolog-succeeds-p
+       rulebase
+       (quote (cl-prolog::open 123 cl-prolog.user-atoms::read ?stream))))))
 
 (deftest io-open-reports-existence-error-for-a-missing-unquoted-source ()
   (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase
-                  (cl-prolog::open
-                   cl-prolog::nonexistent_io_open_test_source_xyz
-                   cl-prolog.user-atoms::read ?stream)
-                  :signals)))
+    (signals-prolog-condition prolog-existence-error
+      (prolog-succeeds-p
+       rulebase
+       (quote (cl-prolog::open cl-prolog::nonexistent_io_open_test_source_xyz
+                               cl-prolog.user-atoms::read ?stream))))))
 
 (deftest io-open-rejects-an-unsupported-type-option ()
   (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase
-                  (cl-prolog::open
-                   cl-prolog::whatever cl-prolog.user-atoms::read ?stream
-                   ((cl-prolog::type cl-prolog::bogus)))
-                  :signals)))
+    (signals-prolog-condition prolog-domain-error
+      (prolog-succeeds-p
+       rulebase
+       (quote (cl-prolog::open cl-prolog::whatever cl-prolog.user-atoms::read
+                               ?stream
+                               ((cl-prolog::type cl-prolog::bogus))))))))
 
 (deftest io-open-rejects-a-non-atom-alias ()
   (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase
-                  (cl-prolog::open
-                   cl-prolog::whatever cl-prolog.user-atoms::read ?stream
-                   ((cl-prolog::alias 123)))
-                  :signals)))
+    (signals-prolog-condition prolog-type-error
+      (prolog-succeeds-p
+       rulebase
+       (quote (cl-prolog::open cl-prolog::whatever cl-prolog.user-atoms::read
+                               ?stream
+                               ((cl-prolog::alias 123))))))))
 
 (deftest io-open-reports-existence-error-for-a-missing-parent-directory ()
   (with-io-rulebase (rulebase input output) ""
@@ -59,7 +62,8 @@
             (%read-prolog-query
              rulebase
              "open('/tmp/definitely_nonexistent_dir_xyz_123/file.pl', write, _).")))
-      (signals-error (prolog-succeeds-p rulebase query)))))
+      (signals-prolog-condition prolog-existence-error
+        (prolog-succeeds-p rulebase query)))))
 
 (deftest io-open-rolls-back-a-newly-opened-stream-on-duplicate-alias ()
   (uiop:with-temporary-file (:pathname path-a :type "txt")

@@ -46,6 +46,10 @@ current-output equals EXPECTED."
                           (concatenate 'string "[hi" gap "]")))
   (assert-format-output "~`-t~10|" () (make-string 10 :initial-element #\-)))
 
+(deftest format-relative-column-control-after-absolute-commit ()
+  (assert-format-output "aa~tbb~10|cc~tdd~8+ee" ()
+                        "aa      bbcc    ddee"))
+
 (deftest format-reports-too-few-arguments ()
   (with-io-rulebase (rulebase input output) ""
     (assert-query rulebase (cl-prolog::format "~w ~w" (only)) :signals)))
