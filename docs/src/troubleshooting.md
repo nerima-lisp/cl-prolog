@@ -103,8 +103,9 @@ Direct smoke:
 nix run .
 ```
 
-The packaged Nix runner is Linux-only. On Darwin, skip this smoke step and
-use ASDF directly for local library work.
+The packaged Nix runner supports `x86_64-linux` and Apple Silicon
+(`aarch64-darwin`). On other environments, use ASDF directly for local library
+work.
 
 ## What To Include In A Bug Report
 
@@ -112,5 +113,5 @@ use ASDF directly for local library work.
 - expected result
 - actual result
 - SBCL version
-- output of `nix run .` when reproducing on Linux
+- output of `nix run .` when reproducing on a supported Nix environment
 - output of `nix flake check --print-build-logs`

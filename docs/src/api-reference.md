@@ -1,7 +1,9 @@
 # API Reference
 
-`cl-prolog` exposes one public package: `cl-prolog`. This page lists every
-symbol exported by that package. Anything not listed here is internal.
+The core `cl-prolog` system exposes the public `cl-prolog` package. This page
+lists every symbol exported by that package; the separately loaded public
+test-helper package `cl-prolog/weave` is documented in [Testing](testing.md).
+Anything not listed here is internal.
 
 See [Querying](querying.md), [Builtin goals](builtin-goals.md),
 [Rule DSL](rule-dsl.md), and [DCG](dcg.md) for narrative explanations and
@@ -190,13 +192,16 @@ arities. See [Builtin goals](builtin-goals.md) for behavior-oriented guidance.
 - Term inspection and copying: `term_variables`, `functor`, `arg`, `copy_term`,
   `numbervars`
 
-## Prolog-Source Goals
+## Prolog-Source and Query Goals
 
-The engine also implements a range of ISO goals that are **not** exported as
-Common Lisp package symbols. They are callable from parsed Prolog source (via
-`consult`/`load_files` or `read-prolog-*`) and in Lisp-shaped queries by their
-goal name, but they are not part of the exported symbol surface above. This
-catalogue lists them by predicate indicator; see
+The engine also implements a range of ISO goals callable from parsed Prolog
+source (via `consult`/`load_files` or `read-prolog-*`). Several of the goals
+listed below are exported as `cl-prolog` symbols, so Lisp code can use those
+symbols as Prolog goal names in Lisp-shaped queries. Those exports are **not**
+ordinary Common Lisp host-function APIs: invoking the relation still happens
+through the Prolog query interface. Goals not called out as exported here are
+source/query-goal vocabulary only. This catalogue lists them by predicate
+indicator; see
 [Builtin Goals](builtin-goals.md) for behavior-oriented notes.
 
 - **Operators:** `op/3` defines operators in the rulebase operator table;
@@ -222,39 +227,47 @@ catalogue lists them by predicate indicator; see
   binding either term) — companions to the exported `==`, `@<`, `compare`, and
   `unifiable`.
 - **Relational arithmetic:** `between/3` (enumerate or test an integer range),
-  `succ/2` (the non-negative successor relation, usable in either direction),
-  and `plus/3` (`A + B =:= C`, any single unknown). See
+  and the exported query goals `succ/2` (the non-negative successor relation,
+  usable in either direction) and `plus/3` (`A + B =:= C`, any single
+  unknown). See
   [Arithmetic and Comparison](arithmetic.md#relational-arithmetic).
-- **List library:** `sum_list/2` (`sumlist/2`), `max_list/2`, `min_list/2`,
+- **List library:** the exported query goals `sum_list/2` (`sumlist/2`),
   `numlist/3`, `list_to_set/2`, `subtract/3`, `intersection/3`, `union/3`,
-  `permutation/2`.
-- **Apply (meta) library:** `maplist/2` and up, `foldl/4`, `foldl/5`,
-  `foldl/6`, `include/3`, `exclude/3`, `partition/4`.
-- **Sorting and aggregation:** `sort/4`, `predsort/3`, `aggregate_all/3`.
-- **Character classification:** `char_type/2`, `code_type/2`, `upcase_atom/2`,
-  `downcase_atom/2`.
-- **Term ↔ text:** `term_to_atom/2`, `read_term_from_atom/3`.
+  and `permutation/2`; plus `max_list/2` and `min_list/2`.
+- **Apply (meta) library:** the exported query goals `maplist/2` and up,
+  `foldl/4`, `foldl/5`, `foldl/6`, `include/3`, `exclude/3`, and
+  `partition/4`.
+- **Sorting and aggregation:** `sort/4`, plus the exported query goals
+  `predsort/3` and `aggregate_all/3`.
+- **Character classification:** the exported query goals `char_type/2`,
+  `code_type/2`, `upcase_atom/2`, and `downcase_atom/2`.
+- **Term ↔ text:** the exported query goals `term_to_atom/2` and
+  `read_term_from_atom/3`.
 - **Strings:** `string/1`, `string_length/2`, `string_concat/3`,
   `atom_string/2`, `string_to_atom/2`, `number_string/2`, `string_chars/2`,
   `string_codes/2`, `term_string/2`, `text_concat/3`, `sub_string/5`,
-  `split_string/4`.
-- **Association maps:** `empty_assoc/1`, `put_assoc/4`, `get_assoc/3`,
-  `del_assoc/4`, `list_to_assoc/2`, `assoc_to_list/2`, `assoc_to_keys/2`,
-  `assoc_to_values/2`.
-- **Pairs:** `pairs_keys_values/3`, `pairs_keys/2`, `pairs_values/2`.
-- **Formatted output:** `format/1`, `format/2`, `format/3`, `tab/1`, `tab/2`,
-  `print/1`, `print/2`.
+  `split_string/4`; every listed predicate other than `string/1` is an
+  exported query goal.
+- **Association maps:** the exported query goals `empty_assoc/1`,
+  `put_assoc/4`, `get_assoc/3`, `del_assoc/4`, `list_to_assoc/2`,
+  `assoc_to_list/2`, `assoc_to_keys/2`, and `assoc_to_values/2`.
+- **Pairs:** the exported query goals `pairs_keys_values/3`, `pairs_keys/2`,
+  and `pairs_values/2`.
+- **Formatted output:** the exported query goals `format/1`, `format/2`,
+  `format/3`, `tab/1`, `tab/2`, `print/1`, and `print/2`.
 - **Modules and reflection:** `current_module/1`; and the extra arities
   `findall/4` (with a difference-list tail) and `term_variables/3` (with a
   tail).
 - **Process control:** `halt/0`, `halt/1` (raise the `prolog-halt` condition).
 
-!!! note "Why these are not exported"
-    cl-prolog keeps a narrow exported package surface. These goals belong to the
-    parsed-source and query-goal vocabulary, not the Lisp API, so they are
-    implemented but not interned as `cl-prolog` package symbols. The
-    [Rule DSL](rule-dsl.md) and [Extending the Engine](extending.md) pages cover
-    the Lisp-facing surface.
+!!! note "Exports and the Lisp API"
+    cl-prolog keeps a narrow exported package surface. The exported query-goal
+    names above are interned as `cl-prolog` symbols, but they denote Prolog
+    relations when used in a Lisp-shaped query; they are not Common Lisp
+    functions to call directly. The remaining goals in this section are
+    available through parsed source and the query-goal vocabulary without being
+    exported package symbols. The [Rule DSL](rule-dsl.md) and
+    [Extending the Engine](extending.md) pages cover the Lisp-facing API.
 
 ## DCG
 
@@ -284,6 +297,8 @@ signalled and how to handle it, see
   `prolog-type-error`, `prolog-domain-error`, `prolog-permission-error`,
   `prolog-existence-error`, `prolog-evaluation-error`,
   `prolog-resource-error`
+- ISO categories: `prolog-representation-error` and `prolog-syntax-error`
+  (see [Conditions and Errors](conditions.md))
 - Process-level halt: `prolog-halt` and reader `prolog-halt-code`
 - Arithmetic diagnostics: `arithmetic-evaluation-error` and readers
   `arithmetic-error-expression`, `arithmetic-error-reason`
@@ -300,5 +315,7 @@ termination.
 
 ## Script Entry Points
 
-- `nix run .` — run the cl-weave-backed ASDF regression suite on Linux
+- `nix run .` — run the cl-weave-backed ASDF regression suite on
+  `x86_64-linux` or Apple Silicon (`aarch64-darwin`); use ASDF directly on
+  other environments
 - `asdf:load-system :cl-prolog/examples` — load runnable examples
