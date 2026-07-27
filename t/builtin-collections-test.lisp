@@ -116,6 +116,12 @@
   ((predsort ?g (1) ?s)         :signals)
   ((predsort cmp improper ?s)   :signals))
 
+(deftest predsort-preserves-caller-list ()
+  (let ((input '(3 1 2 1)))
+    (query-prolog-first (make-predsort-rulebase)
+                        (list 'predsort 'cmp input '?sorted))
+    (is-equal '(3 1 2 1) input)))
+
 ;; Wrapper predicates keep the aggregate template variable inside the clause
 ;; body so only the result variable appears in each query.
 (defun make-aggregate-rulebase ()

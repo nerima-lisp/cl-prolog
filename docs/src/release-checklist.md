@@ -57,7 +57,8 @@ must delete and recreate the tag:
   reads (`flake.nix`'s `projectVersion`), so bump `cl-prolog.asd` first and let
   the tag follow it.
 - **CHANGELOG contract.** Release notes are sliced out of the root
-  `CHANGELOG.md` section whose heading is `## X.Y.Z` (optionally followed by
-  ` - DATE`). Rename the top `## Unreleased` section to `## X.Y.Z - DATE` with
+  `CHANGELOG.md` section whose heading uses the exact
+  `## [X.Y.Z] - YYYY-MM-DD` format.
+  Rename the top `## [Unreleased]` section to `## [X.Y.Z] - YYYY-MM-DD` with
   an ASCII hyphen before tagging; an empty or missing section fails the
   release. The `docs/src/changelog.md` mirror is not read by CI.

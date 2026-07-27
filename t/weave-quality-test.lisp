@@ -102,12 +102,16 @@ two representative assertion styles."
     (is (zerop (getf (cl-weave:mutation-summary loose-results) :killed)))
     (is (= 1 (getf (cl-weave:mutation-summary precise-results) :killed)))))
 
-(deftest weave-solution-multiset-equal-rejects-length-mismatch ()
-  "cl-prolog/weave::%solution-multiset-equal-p short-circuits to false when the
-actual and expected solution lists differ in length -- the :set assertion path
-taken when a rulebase yields a different count of solutions than expected."
-  (is (not (cl-prolog/weave::%solution-multiset-equal-p '((a) (b)) '((a)))))
-  (is (cl-prolog/weave::%solution-multiset-equal-p '((a) (b)) '((b) (a)))))
+(deftest weave-solution-multiset-diff-reports-multiset-differences ()
+  "Verify the internal :set matcher primitive reports both sides of a mismatch and accepts unordered equal multisets."
+  (multiple-value-bind (missing unexpected)
+      (cl-prolog/weave::%solution-multiset-diff '((a) (b)) '((a) (c)))
+    (is (equal missing '((c))))
+    (is (equal unexpected '((b)))))
+  (multiple-value-bind (missing unexpected)
+      (cl-prolog/weave::%solution-multiset-diff '((a) (b)) '((b) (a)))
+    (is (null missing))
+    (is (null unexpected))))
 
 (deftest weave-parse-query-spec-requires-query-after-label ()
   "cl-prolog/weave::%parse-query-spec signals when a labelled spec supplies only

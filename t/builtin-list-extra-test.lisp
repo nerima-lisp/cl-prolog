@@ -37,6 +37,16 @@
   ((cl-prolog::permutation ?x (1 2))       :set (((?x . (1 2))) ((?x . (2 1)))))
   ((cl-prolog::permutation ?x ?y)          :signals))
 
+(deftest numlist-obeys-builtin-output-length-limit ()
+  (let ((cl-prolog:*max-prolog-builtin-output-length* 1))
+    (signals-condition prolog-resource-error
+      (query-prolog (make-rulebase)
+                    (quote (cl-prolog::numlist 1 2 ?list)))))
+  (let ((cl-prolog:*max-prolog-builtin-output-length* nil))
+    (is-equal (quote (((?list . (1 2)))))
+              (query-prolog (make-rulebase)
+                            (quote (cl-prolog::numlist 1 2 ?list))))))
+
 (defun make-apply-rulebase ()
   (prolog
     ((double ?x ?y) (is ?y (* 2 ?x)))

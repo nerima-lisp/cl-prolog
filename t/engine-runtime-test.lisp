@@ -234,9 +234,15 @@
       (is-equal 2
                 (hash-table-count
                  (cl-prolog::%table-session-module-entries session)))
-      (is-equal 2
-                (hash-table-count
-                 (cl-prolog::%table-session-left-recursion session)))
+      (progn
+        (is-equal 1
+                  (hash-table-count
+                   (cl-prolog::rulebase-left-recursion-analysis
+                    recursive-rulebase)))
+        (is-equal 1
+                  (hash-table-count
+                   (cl-prolog::rulebase-left-recursion-analysis
+                    fact-rulebase))))
       (is-equal 2
                 (hash-table-count
                  (cl-prolog::%table-session-entries session))))))
@@ -350,29 +356,38 @@ produces the normal proof-search result."
               (query-prolog rulebase (quote (fast-paired ?answer))))))
 
 (defun %make-rule-program-equivalence-rulebases ()
-  (let* ((variable (fresh-logic-variable))
+  (let* ((fast-variable (fresh-logic-variable))
+         (fast-clause
+           (make-clause
+            (list (quote descriptor-candidate) fast-variable)
+            (list (list (quote descriptor-choice) fast-variable)
+                  (list (quote descriptor-choice) fast-variable))))
+         (variable (fresh-logic-variable))
          (shared-goal (list (quote descriptor-choice) variable))
          (generic-clause
            (make-clause (list (quote descriptor-candidate) variable)
                         (list shared-goal shared-goal)))
+         (fast-rulebase
+           (prolog
+             ((descriptor-choice a))
+             ((descriptor-choice b))))
          (generic-rulebase
            (prolog
              ((descriptor-choice a))
              ((descriptor-choice b)))))
+    (rulebase-insert-clause! fast-rulebase fast-clause)
     (rulebase-insert-clause! generic-rulebase generic-clause)
-    (values
-     (prolog
-       ((descriptor-choice a))
-       ((descriptor-choice b))
-       ((descriptor-candidate ?x)
-        (descriptor-choice ?x)
-        (descriptor-choice ?x)))
-     generic-rulebase
-     (cl-prolog::%compile-clause-template generic-clause))))
+    (values fast-rulebase
+            generic-rulebase
+            (cl-prolog::%compile-clause-template generic-clause))))
+
+(defmacro with-rule-program-equivalence-rulebases ((fast-rulebase generic-rulebase generic-template) &body body)
+  `(multiple-value-bind (,fast-rulebase ,generic-rulebase ,generic-template)
+       (%make-rule-program-equivalence-rulebases)
+     ,@body))
 
 (deftest shared-and-cyclic-rule-graphs-use-observationally-equivalent-fallback ()
-  (multiple-value-bind (fast-rulebase generic-rulebase generic-template)
-      (%make-rule-program-equivalence-rulebases)
+  (with-rule-program-equivalence-rulebases (fast-rulebase generic-rulebase generic-template)
     (is (null (cl-prolog::%clause-template-rule-program generic-template)))
     (is-equal
      (query-prolog fast-rulebase (quote (descriptor-candidate ?answer)))
@@ -388,9 +403,32 @@ produces the normal proof-search result."
         (make-clause (list (quote cyclic-candidate) variable)
                      cyclic-body)))))))
 
+(deftest rule-program-body-materializes-each-instruction-once-despite-backtracking ()
+  (with-rule-program-equivalence-rulebases (fast-rulebase generic-rulebase generic-template)
+    (declare (ignore generic-rulebase generic-template))
+    (let ((original
+            (symbol-function
+             (quote cl-prolog::%materialize-rule-program-goal)))
+          (materialization-count 0))
+      (unwind-protect
+           (progn
+             (setf (symbol-function
+                    (quote cl-prolog::%materialize-rule-program-goal))
+                   (lambda (&rest arguments)
+                     (incf materialization-count)
+                     (apply original arguments)))
+             (is-equal
+              (quote (((?answer . a)) ((?answer . b))))
+              (query-prolog
+               fast-rulebase
+               (quote (descriptor-candidate ?answer))))
+             (is-equal 2 materialization-count))
+        (setf (symbol-function
+               (quote cl-prolog::%materialize-rule-program-goal))
+              original)))))
+
 (deftest constraint-hook-continuation-reentry-matches-generic-fallback ()
-  (multiple-value-bind (fast-rulebase generic-rulebase generic-template)
-      (%make-rule-program-equivalence-rulebases)
+  (with-rule-program-equivalence-rulebases (fast-rulebase generic-rulebase generic-template)
     (declare (ignore generic-template))
     (let ((cl-prolog::*constraint-post-unify-hook*
             (lambda (environment continuation)
@@ -427,8 +465,7 @@ produces the normal proof-search result."
                  (query-prolog
                   rulebase
                   (quote (descriptor-candidate ?answer))))))))
-    (multiple-value-bind (fast-rulebase generic-rulebase generic-template)
-        (%make-rule-program-equivalence-rulebases)
+    (with-rule-program-equivalence-rulebases (fast-rulebase generic-rulebase generic-template)
       (declare (ignore generic-template))
       (multiple-value-bind (fast-current fast-next)
           (observe-update fast-rulebase)
@@ -440,8 +477,7 @@ produces the normal proof-search result."
           (is-equal fast-next generic-next))))))
 
 (deftest rule-program-and-fallback-share-depth-boundaries ()
-  (multiple-value-bind (fast-rulebase generic-rulebase generic-template)
-      (%make-rule-program-equivalence-rulebases)
+  (with-rule-program-equivalence-rulebases (fast-rulebase generic-rulebase generic-template)
     (declare (ignore generic-template))
     (let ((fast-solutions
             (query-prolog fast-rulebase
@@ -512,6 +548,40 @@ produces the normal proof-search result."
            (cl-prolog::%clause-template-rule-program
             variable-predicate-template)))
       (is (null (cl-prolog::%clause-template-rule-program cyclic-template))))))
+(deftest flat-fact-rule-program-supports-257-distinct-variables ()
+    (let* ((variables (loop repeat 257 collect (fresh-logic-variable)))
+           (ground-atoms
+             (loop for ordinal below 257
+                   collect (intern (format nil "WIDE-GROUND-~D" ordinal))))
+           (head (cons (quote wide) variables))
+           (template
+             (cl-prolog::%compile-clause-template (make-clause head)))
+           (rulebase (make-rulebase :clauses (list (make-clause head)))))
+      (is (cl-prolog::%clause-template-rule-program template))
+      (is (prolog-succeeds-p rulebase (cons (quote wide) ground-atoms)))))
+
+  (progn
+  (deftest rule-program-private-variable-registration-preserves-ordinal ()
+    (cl-prolog::%with-logic-variable-order
+      (let ((rule-variable (cl-prolog::%fresh-rule-program-variable)))
+        (is-equal 0 (cl-prolog::%logic-variable-ordinal rule-variable))
+        (cl-prolog::%register-logic-variable rule-variable)
+        (is-equal 1
+                  (cl-prolog::%logic-variable-ordinal
+                   (fresh-logic-variable))))))
+  (deftest rule-program-private-variable-falls-back-after-cached-boundary ()
+    (cl-prolog::%with-logic-variable-order
+      (loop repeat (length cl-prolog::*rule-program-variable-names*)
+            do (fresh-logic-variable))
+      (let ((rule-variable (cl-prolog::%fresh-rule-program-variable)))
+        (is-equal (length cl-prolog::*rule-program-variable-names*)
+                  (cl-prolog::%logic-variable-ordinal rule-variable)))))
+  (deftest logic-variable-ordinal-context-invariants ()
+    (signals-error
+     (cl-prolog::%register-logic-variable (gensym "?UNREGISTERED")))
+    (cl-prolog::%with-logic-variable-order
+      (signals-error
+       (cl-prolog::%logic-variable-ordinal (gensym "?UNREGISTERED"))))))
 (deftest flat-fact-rule-program-preserves-runtime-semantics ()
   (let ((rulebase
           (prolog

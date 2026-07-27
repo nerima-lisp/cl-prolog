@@ -27,7 +27,7 @@ nix flake check
 ```
 
 !!! info "Unsupported platforms"
-    On platforms outside the three supported systems (e.g. Intel Mac,
+    On platforms outside the two supported systems (e.g. Intel Mac,
     Windows), ensure `cl-weave` is discoverable through ASDF and run the
     suite directly:
 
@@ -55,6 +55,30 @@ nix flake check
   not merely evaluated.
 - **`checks.app-test`** — runs `apps.test`, the cl-weave CLI wrapper (a
   distinct code path from `checks.default`: it sets a 4096 MB dynamic space).
+- **`checks.coverage`** — builds `packages.coverage` and asserts it produced a
+  report; it does not gate on a coverage percentage.
+
+## Coverage
+
+`packages.coverage` runs the regression suite under `sb-cover`, instrumenting
+only `cl-prolog` and `cl-prolog/weave` (not the `cl-weave` harness driving
+them), and writes an HTML report. Its runner is embedded in `flake.nix` with
+`pkgs.writeText`, so it does not read the source-tree `run-coverage.lisp`:
+
+```sh
+nix build .#coverage
+open result/cover-index.html
+```
+
+Outside Nix, `run-coverage.lisp` remains the direct SBCL entry point. With
+`cl-weave` discoverable through `CL_SOURCE_REGISTRY`:
+
+```sh
+sbcl --script run-coverage.lisp coverage/
+```
+
+This is a visibility tool, not an enforced gate: `checks.coverage` fails only
+if the report fails to build, not if coverage drops.
 
 ## Query test helpers
 

@@ -256,12 +256,23 @@ Callers must have already rejected an unbound TERM."
 
 ;;; Builtin goal dispatch
 
-(defvar *fixed-builtin-solvers* (make-hash-table :test #'equal))
+(defvar *fixed-builtin-solvers* (make-hash-table :test #'eq))
+
+
+
+
+
+(defun %fixed-builtin-arity-table! (predicate)
+    "Return the fixed-builtin arity table for PREDICATE, creating it if needed."
+    (or (gethash predicate *fixed-builtin-solvers*)
+        (setf (gethash predicate *fixed-builtin-solvers*)
+              (make-hash-table :test (function eql)))))
 (defvar *variadic-builtin-solvers* (make-hash-table :test #'eq))
 
 (defun %goal-solver (predicate arity)
   "Return the builtin solver registered for PREDICATE/ARITY, if any."
-  (or (gethash (cons predicate arity) *fixed-builtin-solvers*)
+  (or (let ((arities (gethash predicate *fixed-builtin-solvers*)))
+        (and arities (gethash arity arities)))
       (let ((entry (gethash predicate *variadic-builtin-solvers*)))
         (when (and entry (>= arity (car entry)))
           (cdr entry)))))
@@ -282,11 +293,15 @@ Callers must have already rejected an unbound TERM."
   (dolist (alias (remove-duplicates
                   (list predicate
                         (%prolog-atom-symbol (%atom-text predicate)))
-                  :test #'eq))
+                  :test (function eq)))
     (if maximum
-        (setf (gethash (cons alias maximum) *fixed-builtin-solvers*) solver)
-        (setf (gethash alias *variadic-builtin-solvers*)
-              (cons minimum solver))))
+        (progn
+          (remhash alias *variadic-builtin-solvers*)
+          (setf (gethash maximum (%fixed-builtin-arity-table! alias)) solver))
+        (progn
+          (remhash alias *fixed-builtin-solvers*)
+          (setf (gethash alias *variadic-builtin-solvers*)
+                (cons minimum solver)))))
   (%register-builtin-predicate! predicate minimum))
 
 (defun %builtin-predicate-indicators ()
@@ -335,7 +350,7 @@ BODY must call EMIT with one extended environment per solution."
 
 (defun %foreign-predicate-indicators ()
   "Return a detached snapshot of registered foreign predicate indicators."
-  (reverse (copy-list *foreign-predicate-indicators*)))
+  (nreverse (copy-list *foreign-predicate-indicators*)))
 
 (defgeneric %foreign-goal-solver (predicate arity)
   (:documentation

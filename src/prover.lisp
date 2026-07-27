@@ -7,6 +7,8 @@
 
 (in-package #:cl-prolog)
 
+(defparameter +call-context-atom+ (%iso-atom "CALL"))
+
 (declaim (ftype function %proper-list-p %prove-goal/k %prove-clauses/k %prove-rule/k))
 
 (defmacro %with-propagated-bindings
@@ -79,7 +81,7 @@ is set it decides which propagated bindings BODY runs on, and how often."
       (if (plusp arity)
           (%predicate-descriptor-first-argument-entries
            descriptor
-           (%logic-substitute-indexed
+           (%walk-term-indexed
             (second goal)
             (proof-state-environment-index state)))
           (%predicate-descriptor-entries descriptor)))))
@@ -108,7 +110,7 @@ is set it decides which propagated bindings BODY runs on, and how often."
          (resolved
            (%logic-substitute-indexed
             module (proof-state-environment-index state)))
-         (context (%iso-atom "CALL")))
+         (context +call-context-atom+))
     (when (logic-var-p resolved)
       (%raise-instantiation-error environment context
                                   "module qualifier must be instantiated"))
@@ -146,44 +148,37 @@ is set it decides which propagated bindings BODY runs on, and how often."
 
 (defun %continue-matching-fact (goal entry state succeed)
   "Unify GOAL against stored fact ENTRY and continue with the extended state."
-  (let* ((clause (%stored-clause-clause entry))
-         (template (%stored-clause-template entry)))
-    (when (eq (first goal) (first (clause-head clause)))
-      (let ((program (%clause-template-rule-program template))
-            (parent-bindings (proof-state-bindings state))
-            (parent-index (proof-state-environment-index state)))
-        (multiple-value-bind (extended ok extended-index)
-            (if (and program
-                     (zerop (length (%rule-program-body program))))
-                (let* ((variable-count
-                         (%rule-program-variable-count program))
-                       (variables
-                         (if (zerop variable-count)
-                             #()
-                             (make-array variable-count))))
-                  (dotimes (index variable-count)
-                    (setf (svref variables index)
-                          (%fresh-rule-program-variable)))
-                  (%unify-rule-program-head
-                   goal program variables parent-bindings parent-index))
-                (let ((fresh-head
-                        (clause-head
-                         (%materialize-stored-clause-for-proof entry template))))
-                  (%unify-indexed
-                   goal fresh-head parent-bindings parent-index nil)))
-          (when ok
-            (%with-propagated-bindings
-                (propagated propagated-index extended extended-index)
-              (funcall succeed
-                       (%state-with
-                        state
-                        :bindings propagated
-                        :environment-index propagated-index)))))))))
-
-(defun %matching-rule-p (goal clause)
-  "True when CLAUSE can be considered for GOAL."
-  (and (consp (clause-head clause))
-       (eq (first goal) (first (clause-head clause)))))
+  (let ((template (%stored-clause-template entry)))
+    (let ((program (%clause-template-rule-program template))
+          (parent-bindings (proof-state-bindings state))
+          (parent-index (proof-state-environment-index state)))
+      (multiple-value-bind (extended ok extended-index)
+          (if (and program
+                   (zerop (length (%rule-program-body program))))
+              (let* ((variable-count
+                       (%rule-program-variable-count program))
+                     (variables
+                       (if (zerop variable-count)
+                           #()
+                           (make-array variable-count))))
+                (dotimes (index variable-count)
+                  (setf (svref variables index)
+                        (%fresh-rule-program-variable)))
+                (%unify-rule-program-head
+                 goal program variables parent-bindings parent-index))
+              (let ((fresh-head
+                      (clause-head
+                       (%materialize-stored-clause-for-proof entry template))))
+                (%unify-indexed
+                 goal fresh-head parent-bindings parent-index nil)))
+        (when ok
+          (%with-propagated-bindings
+              (propagated propagated-index extended extended-index)
+            (funcall succeed
+                     (%state-with
+                      state
+                      :bindings propagated
+                      :environment-index propagated-index))))))))
 
 (defun %prove-goals/k (goals state succeed)
   "Prove conjunction GOALS, calling SUCCEED with each solution state.
@@ -227,81 +222,101 @@ Return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
               (and qualified-p
                    (%resolve-qualified-module (second resolved-goal) state))))))
 
-(defun %prove-goal-dispatch/k (goal state succeed)
-  "Prove GOAL from STATE after any active depth-limit accounting."
-  (let* ((*current-table-session* (proof-state-table-session state))
-         (environment (proof-state-bindings state))
-         (context (%iso-atom "CALL")))
-    (multiple-value-bind (normalized-goal explicit-module solver)
-        (if (and (%goal-form-p goal)
-                 (symbolp (first goal))
-                 (not (logic-var-p (first goal)))
-                 (not (%qualified-goal-p goal)))
-            (let* ((predicate (first goal))
-                   (arity (length (rest goal)))
-                   (builtin-solver (%goal-solver predicate arity))
-                   (foreign-solver (%foreign-goal-solver predicate arity))
-                   (static-solver (or builtin-solver foreign-solver)))
-              (if static-solver
-                  (multiple-value-bind (resolved-goal resolved-module)
-                      (%resolve-dispatched-goal goal state environment context)
-                    (values resolved-goal resolved-module static-solver))
-                  (values goal nil nil)))
+(defun %resolve-dispatch-target (goal state environment context)
+  (if (and (%goal-form-p goal)
+           (symbolp (first goal))
+           (not (logic-var-p (first goal)))
+           (not (%qualified-goal-p goal)))
+      (let* ((predicate (first goal))
+             (arity (length (rest goal)))
+             (builtin-solver (%goal-solver predicate arity))
+             (foreign-solver (%foreign-goal-solver predicate arity))
+             (static-solver (or builtin-solver foreign-solver)))
+        (if static-solver
             (multiple-value-bind (resolved-goal resolved-module)
                 (%resolve-dispatched-goal goal state environment context)
-              (let* ((predicate (first resolved-goal))
-                     (arity (length (rest resolved-goal)))
-                     (builtin-solver (%goal-solver predicate arity))
-                     (foreign-solver (%foreign-goal-solver predicate arity)))
-                (values resolved-goal resolved-module
-                        (or builtin-solver foreign-solver)))))
-      (when (and (eq (first normalized-goal) (quote !))
-                 (null (rest normalized-goal)))
-        (funcall succeed state)
-        (cl:throw (proof-state-cut-tag state) t))
-      (cond
-        (solver
-         (when explicit-module
-           (%find-prolog-module
-            (rulebase-module-registry (proof-state-rulebase state))
-            explicit-module "invoke qualified goal"))
-         (let* ((solver-state
-                  (if explicit-module
-                      (%state-with state :module explicit-module)
-                      state))
-                (*current-prolog-module* (proof-state-module solver-state))
-                (*caller-cut-tag* (proof-state-cut-tag solver-state)))
-           (funcall solver
-                    normalized-goal
-                    (proof-state-rulebase solver-state)
-                    (proof-state-bindings solver-state)
-                    (proof-state-remaining-depth solver-state)
-                    (lambda (bindings)
-                      (funcall succeed
-                               (%state-with solver-state :bindings bindings))))))
-        (t
-         (multiple-value-bind (resolved-user-goal defining-module)
-             (%resolve-user-goal normalized-goal state explicit-module)
-           (if defining-module
-               (%prove-clauses/k resolved-user-goal
-                                 (%state-with state :module defining-module)
-                                 succeed)
-               ;; ISO 13211-1 7.7.7 and 7.11.2.4: what an undefined procedure
-               ;; does is the `unknown' flag's to decide.  `error' (the default)
-               ;; raises; `fail' and `warning' let the call simply fail, which
-               ;; is what makes a partially written program runnable.
-               (if (logic-var-p (first normalized-goal))
-                   (%raise-instantiation-error
-                    environment context
-                    "a goal reached at run time must be instantiated")
-               (let ((mode (%prolog-flag-value (proof-state-rulebase state)
-                                               (%find-prolog-flag "UNKNOWN"))))
-                 (when (string= mode "ERROR")
-                   (%raise-existence-error
-                    "PROCEDURE" (%goal-predicate-indicator normalized-goal)
-                    environment context
-                    "the invoked predicate is not defined"))
-                 nil)))))))))
+              (values resolved-goal resolved-module static-solver))
+            (values goal nil nil)))
+      (multiple-value-bind (resolved-goal resolved-module)
+          (%resolve-dispatched-goal goal state environment context)
+        (let* ((predicate (first resolved-goal))
+               (arity (length (rest resolved-goal)))
+               (builtin-solver (%goal-solver predicate arity))
+               (foreign-solver (%foreign-goal-solver predicate arity)))
+          (values resolved-goal resolved-module
+                  (or builtin-solver foreign-solver))))))
+
+(progn
+  (defun %prove-cut-goal/k (state succeed)
+    "Succeed once, then prune this predicate invocation's alternatives."
+    (funcall succeed state)
+    (cl:throw (proof-state-cut-tag state) t))
+
+  (defun %prove-static-goal/k
+      (solver normalized-goal explicit-module state succeed)
+    "Invoke a registered solver and continue with each returned binding set."
+    (when explicit-module
+      (%find-prolog-module
+       (rulebase-module-registry (proof-state-rulebase state))
+       explicit-module "invoke qualified goal"))
+    (let* ((solver-state
+            (if explicit-module
+                (%state-with state :module explicit-module)
+                state))
+           (*current-prolog-module* (proof-state-module solver-state))
+           (*caller-cut-tag* (proof-state-cut-tag solver-state)))
+      (funcall solver
+               normalized-goal
+               (proof-state-rulebase solver-state)
+               (proof-state-bindings solver-state)
+               (proof-state-remaining-depth solver-state)
+               (lambda (bindings)
+                 (funcall succeed
+                          (%state-with solver-state :bindings bindings))))))
+
+  (defun %prove-user-goal/k
+      (normalized-goal explicit-module state environment context succeed)
+    "Prove a user predicate or apply ISO undefined-procedure semantics."
+    (multiple-value-bind (resolved-user-goal defining-module)
+        (%resolve-user-goal normalized-goal state explicit-module)
+      (if defining-module
+          (%prove-clauses/k resolved-user-goal
+                            (%state-with state :module defining-module)
+                            succeed)
+          ;; ISO 13211-1 7.7.7 and 7.11.2.4: what an undefined procedure
+          ;; does is the unknown' flag's to decide.  error' (the default)
+          ;; raises; fail' and warning' let the call simply fail, which
+          ;; is what makes a partially written program runnable.
+          (if (logic-var-p (first normalized-goal))
+              (%raise-instantiation-error
+               environment context
+               "a goal reached at run time must be instantiated")
+              (let ((mode (%prolog-flag-value (proof-state-rulebase state)
+                                              (%find-prolog-flag "UNKNOWN"))))
+                (when (string= mode "ERROR")
+                  (%raise-existence-error
+                   "PROCEDURE" (%goal-predicate-indicator normalized-goal)
+                   environment context
+                   "the invoked predicate is not defined"))
+                nil)))))
+
+  (defun %prove-goal-dispatch/k (goal state succeed)
+    "Prove GOAL from STATE after any active depth-limit accounting."
+    (let* ((*current-table-session* (proof-state-table-session state))
+           (environment (proof-state-bindings state))
+           (context +call-context-atom+))
+      (multiple-value-bind (normalized-goal explicit-module solver)
+          (%resolve-dispatch-target goal state environment context)
+        (cond
+          ((and (eq (first normalized-goal) (quote !))
+                (null (rest normalized-goal)))
+           (%prove-cut-goal/k state succeed))
+          (solver
+           (%prove-static-goal/k
+            solver normalized-goal explicit-module state succeed))
+          (t
+           (%prove-user-goal/k
+            normalized-goal explicit-module state environment context succeed)))))))
 
 (defun %prove-goal/k (goal state succeed)
   "Prove GOAL, counting every dispatched call for local depth limits."
@@ -365,8 +380,7 @@ body throws here, abandoning the remaining clause alternatives."
         (let ((clause (%stored-clause-clause entry)))
           (if (null (clause-body clause))
               (%continue-matching-fact goal entry state succeed)
-              (when (%matching-rule-p goal clause)
-                (%prove-rule/k goal entry state cut-tag succeed))))))))
+              (%prove-rule/k goal entry state cut-tag succeed)))))))
 
 (progn
   (declaim (inline %rule-program-operand-value))

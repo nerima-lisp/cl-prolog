@@ -117,14 +117,15 @@ sbcl --non-interactive \
   --eval '(asdf:load-system :cl-prolog)'
 ```
 
-To run the cl-weave regression suite through the Linux-only Nix app:
+To run the cl-weave regression suite through the Nix app on `x86_64-linux` or
+Apple Silicon (`aarch64-darwin`):
 
 ```sh
 nix run github:nerima-lisp/cl-prolog
 ```
 
-See [Installation](installation.md) for the full matrix of load paths and the
-Linux-only Nix caveat.
+See [Installation](installation.md) for the full matrix of load paths; use its
+ASDF instructions on other environments.
 
 ## Project policy
 

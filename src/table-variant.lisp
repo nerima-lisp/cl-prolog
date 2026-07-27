@@ -15,62 +15,75 @@
   (cyclic-answer-index (make-hash-table :test #'equal)
                        :type hash-table :read-only t))
 
+(defstruct (%table-answer (:copier nil)
+                          (:constructor %make-table-answer
+                              (term contains-variables-p)))
+  "An immutable canonical answer and whether replay must freshen variables."
+  (term nil :read-only t)
+  (contains-variables-p nil :type boolean :read-only t))
+
 (defstruct (%table-session
                          (:copier nil)
                          (:constructor %make-table-session
-                             (entries module-entries predicate-entries left-recursion)))
+                             (entries module-entries predicate-entries)))
   "Tables shared by every proof nested within one public query."
   (entries (make-hash-table :test (function equal))
            :type hash-table :read-only t)
   (module-entries (make-hash-table :test (function equal))
                   :type hash-table :read-only t)
   (predicate-entries (make-hash-table :test (function equal))
-                     :type hash-table :read-only t)
-  (left-recursion (make-hash-table :test (function equal))
-                  :type hash-table :read-only t))
+                     :type hash-table :read-only t))
 
 (defparameter +variant-variable-marker+ (gensym "VARIANT-VARIABLE-")
   "Unforgeable marker used in canonical table keys and answers.")
 
 (defun %make-rulebase-table-session (rulebase)
-    (%make-table-session
-     (make-hash-table :test (function equal))
-     (make-hash-table :test (function equal))
-     (make-hash-table :test (function equal))
-     (rulebase-left-recursion-analysis rulebase)))
+  (declare (ignore rulebase))
+  (%make-table-session
+   (make-hash-table :test (function equal))
+   (make-hash-table :test (function equal))
+   (make-hash-table :test (function equal))))
 
-(defun %canonicalize-variant (term)
-  "Rename TERM's variables by first occurrence, preserving sharing.
-The second value reports whether TERM contains a cons cycle."
-  (let ((variables (make-hash-table :test #'eq))
-        (copies (make-hash-table :test #'eq))
-        (active (make-hash-table :test #'eq))
+(defun %canonicalize-variant (term &optional environment-index)
+  "Rename TERM variables by first occurrence after resolving ENVIRONMENT-INDEX.
+The second value reports whether the resolved graph contains a cons cycle; the
+third reports whether its canonical form contains logical variable markers."
+  (let ((variables (make-hash-table :test (function eq)))
+        (copies (make-hash-table :test (function eq)))
+        (active (make-hash-table :test (function eq)))
         (next-index 0)
-        (cyclic-p nil))
-    (labels ((canonicalize (node)
-               (cond
-                 ((logic-var-p node)
-                  (or (gethash node variables)
-                      (setf (gethash node variables)
-                            (list +variant-variable-marker+
-                                  (prog1 next-index (incf next-index))))))
-                 ((consp node)
-                  (multiple-value-bind (copy present-p)
-                      (gethash node copies)
-                    (if present-p
-                        (progn
-                          (when (gethash node active)
-                            (setf cyclic-p t))
-                          copy)
-                        (let ((copy (cons nil nil)))
-                          (setf (gethash node copies) copy
-                                (gethash node active) t
-                                (car copy) (canonicalize (car node))
-                                (cdr copy) (canonicalize (cdr node)))
-                          (remhash node active)
-                          copy))))
-                 (t node))))
-      (values (canonicalize term) cyclic-p))))
+        (cyclic-p nil)
+        (contains-variables-p nil))
+    (labels ((resolve (node)
+               (if environment-index
+                   (%walk-term-indexed node environment-index)
+                   node))
+             (canonicalize (term)
+               (let ((node (resolve term)))
+                 (cond
+                   ((logic-var-p node)
+                    (setf contains-variables-p t)
+                    (or (gethash node variables)
+                        (setf (gethash node variables)
+                              (list +variant-variable-marker+
+                                    (prog1 next-index (incf next-index))))))
+                   ((consp node)
+                    (multiple-value-bind (copy present-p)
+                        (gethash node copies)
+                      (if present-p
+                          (progn
+                            (when (gethash node active)
+                              (setf cyclic-p t))
+                            copy)
+                          (let ((copy (cons nil nil)))
+                            (setf (gethash node copies) copy
+                                  (gethash node active) t
+                                  (car copy) (canonicalize (car node))
+                                  (cdr copy) (canonicalize (cdr node)))
+                            (remhash node active)
+                            copy))))
+                   (t node)))))
+      (values (canonicalize term) cyclic-p contains-variables-p))))
 
 (defun %variant-graph-key (term)
   "Return an EQUAL-safe encoding of TERM's cons graph."

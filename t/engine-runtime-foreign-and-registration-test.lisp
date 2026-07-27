@@ -117,9 +117,22 @@
     (is (signals-error
          (prolog-succeeds-p rb (quote (ancestor tom ?who)) :max-depth 1.5)))))
 
-(deftest ground-recursive-query-has-one-projected-solution ()
+(deftest query-projection-caches-public-variables-across-solutions ()
   (is-equal '(nil)
-            (query-prolog (make-family-rulebase) '(ancestor tom eve))))
+            (query-prolog (make-family-rulebase) '(ancestor tom eve)))
+  (let ((rulebase (make-family-rulebase))
+        (query
+          '(and (choice ?value)
+                (= ?value ?value)
+                (forall (choice ?local)
+                        (or (= ?local left) (= ?local right))))))
+    (let ((seen '()))
+      (map-prolog-solutions (lambda (solution) (push solution seen))
+                            rulebase query)
+      (is-equal '(((?value . left)) ((?value . right)))
+                (nreverse seen)))
+    (is-equal '(((?value . left)))
+              (query-prolog rulebase query :limit 1))))
 
 (deftest-table default-query-projection-paths ()
   (:equal '(((?x . tom)))
@@ -142,12 +155,30 @@
   (is-equal '(((?y . 6)))
             (query-prolog (make-rulebase) '(test-twice 3 ?y))))
 
+
+
 (deftest builtin-does-not-shadow-user-predicate-with-different-arity ()
   (let ((rulebase (prolog ((test-twice user-defined)))))
     (is-equal '(())
               (query-prolog rulebase '(test-twice user-defined)))))
 
-(deftest define-builtin-supports-aliases-and-rest-arguments ()
+(deftest builtin-solver-registration-replaces-conflicting-forms ()
+    (let ((cl-prolog::*fixed-builtin-solvers* (make-hash-table :test (function eq)))
+          (cl-prolog::*variadic-builtin-solvers* (make-hash-table :test (function eq)))
+          (cl-prolog::*builtin-predicate-indicators* (list)))
+      (let ((predicate (gensym "PREDICATE"))
+            (fixed (lambda (&rest ignored) (declare (ignore ignored))))
+            (variadic (lambda (&rest ignored) (declare (ignore ignored))))
+            (replacement (lambda (&rest ignored) (declare (ignore ignored)))))
+        (cl-prolog::%register-builtin-solver! predicate 1 1 fixed)
+        (is (eq fixed (cl-prolog::%goal-solver predicate 1)))
+        (cl-prolog::%register-builtin-solver! predicate 1 nil variadic)
+        (is (eq variadic (cl-prolog::%goal-solver predicate 1)))
+        (cl-prolog::%register-builtin-solver! predicate 2 2 replacement)
+        (is (null (cl-prolog::%goal-solver predicate 1)))
+        (is (eq replacement (cl-prolog::%goal-solver predicate 2))))))
+
+  (deftest define-builtin-supports-aliases-and-rest-arguments ()
   (is-equal '(((?arguments . (a b c))))
             (query-prolog (make-rulebase)
                           '(test-collect-alias ?arguments a b c))))

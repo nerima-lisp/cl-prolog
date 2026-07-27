@@ -47,13 +47,18 @@
       (let* ((table
                (the hash-table
                  (%unification-scratch-pair-table scratch)))
-             (rights (gethash left table)))
-        (if (member right rights :test (function eq))
-            t
-            (progn
-              (push right (gethash left table))
-              (incf (%unification-scratch-pair-count scratch))
-              nil)))
+             (rights
+               (or (gethash left table)
+                   (setf (gethash left table)
+                         (make-hash-table :test (function eq))))))
+        (multiple-value-bind (value presentp) (gethash right rights)
+          (declare (ignore value))
+          (if presentp
+              t
+              (progn
+                (setf (gethash right rights) t)
+                (incf (%unification-scratch-pair-count scratch))
+                nil))))
       (let ((pairs (%unification-scratch-pairs scratch))
             (count (%unification-scratch-pair-count scratch)))
         (declare (type (or null simple-vector) pairs)
@@ -89,15 +94,22 @@
                             :size
                             +unification-scratch-inline-pair-capacity+)))))
               (dotimes (pair-index count)
-                (let ((offset (* 2 pair-index)))
-                  (push
-                    (svref (the simple-vector pairs) (1+ offset))
-                    (gethash
-                      (svref (the simple-vector pairs) offset)
-                      table))))
+                (let* ((offset (* 2 pair-index))
+                       (stored-left (svref (the simple-vector pairs) offset))
+                       (stored-right
+                         (svref (the simple-vector pairs) (1+ offset)))
+                       (rights
+                         (or (gethash stored-left table)
+                             (setf (gethash stored-left table)
+                                   (make-hash-table :test (function eq))))))
+                  (setf (gethash stored-right rights) t)))
+              (let ((rights
+                      (or (gethash left table)
+                          (setf (gethash left table)
+                                (make-hash-table :test (function eq))))))
+                (setf (gethash right rights) t))
               (setf (%unification-scratch-hash-mode-p scratch) t
                     (%unification-scratch-pair-count scratch) (1+ count))
-              (push right (gethash left table))
               nil)))))
   (defun %reset-unification-scratch (scratch)
   "Release references retained by SCRATCH and make it reusable."
@@ -142,19 +154,17 @@ a term containing it (producing a rational/cyclic term)."
                                copied-p t)))
                      (extend-environment (variable term environment)
                        (ensure-writable-index)
-                       (push
-                         (cons
-                           variable
-                           (cons
-                             term
-                             (%environment-index-next-binding-rank index)))
-                         (%environment-index-overlay index))
-                       (incf (%environment-index-overlay-length index))
-                       (decf (%environment-index-next-binding-rank index))
-                       (when (= (%environment-index-overlay-length index)
-                                +environment-index-overlay-threshold+)
-                         (setf index (%compact-environment-index index)))
-                       (acons variable term environment))
+                       (let ((binding (cons variable term)))
+                         (push
+                           (cons binding
+                                 (%environment-index-next-binding-rank index))
+                           (%environment-index-overlay index))
+                         (incf (%environment-index-overlay-length index))
+                         (decf (%environment-index-next-binding-rank index))
+                         (when (= (%environment-index-overlay-length index)
+                                  +environment-index-overlay-threshold+)
+                           (setf index (%compact-environment-index index)))
+                         (cons binding environment)))
                      (unify-terms (left right environment)
                        (setf left (%walk-term-indexed left index)
                              right (%walk-term-indexed right index))
@@ -217,17 +227,20 @@ clause-resolution path pays no keyword-dispatch cost."
   (let ((root (%walk-term-indexed template index)))
     (if (not (consp root))
         root
-        (let ((copies (make-hash-table :test (function eq))))
+        (let ((copies (%make-freshening-map)))
           (labels ((copy-resolved-term (resolved)
                      (if (consp resolved)
-                         (or (gethash resolved copies)
-                             (let ((copy (cons nil nil)))
-                               (setf (gethash resolved copies) copy
-                                     (car copy)
-                                     (substitute-term (car resolved))
-                                     (cdr copy)
-                                     (substitute-term (cdr resolved)))
-                               copy))
+                         (multiple-value-bind (copy present-p)
+                             (%freshening-map-lookup resolved copies)
+                           (if present-p
+                               copy
+                               (let ((copy (cons nil nil)))
+                                 (%freshening-map-insert resolved copy copies)
+                                 (setf (car copy)
+                                       (substitute-term (car resolved))
+                                       (cdr copy)
+                                       (substitute-term (cdr resolved)))
+                                 copy)))
                          resolved))
                    (substitute-term (term)
                      (copy-resolved-term
@@ -331,16 +344,21 @@ COPIES preserves cons identity and cycles across calls that share it."
 
 (defun %term-has-variables-p (term)
   "True when TERM contains at least one logic variable."
-  (let ((seen (make-hash-table :test #'eq)))
-    (labels ((has-variables-p (node)
-               (cond
-            ((logic-var-p node) t)
-            ((not (consp node)) nil)
-            ((gethash node seen) nil)
-            (t
-              (setf (gethash node seen) t)
-              (or (has-variables-p (car node)) (has-variables-p (cdr node)))))))
-      (has-variables-p term))))
+  (cond
+    ((logic-var-p term) t)
+    ((not (consp term)) nil)
+    (t
+     (let ((seen (make-hash-table :test #'eq)))
+       (labels ((has-variables-p (node)
+                  (cond
+                    ((logic-var-p node) t)
+                    ((not (consp node)) nil)
+                    ((gethash node seen) nil)
+                    (t
+                     (setf (gethash node seen) t)
+                     (or (has-variables-p (car node))
+                         (has-variables-p (cdr node)))))))
+         (has-variables-p term))))))
 
 (defun %freshen-clause (clause)
   "Return CLAUSE with all logic variables consistently renamed to fresh ones."

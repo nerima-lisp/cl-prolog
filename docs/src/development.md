@@ -6,16 +6,16 @@ and benchmarks have their own pages: [Testing](testing.md) and
 
 ## Environment
 
-The flake defines outputs for `x86_64-linux`, `aarch64-linux`, and
-`aarch64-darwin`. On any of those systems, enter the reproducible development
-environment with:
+The flake defines outputs for `x86_64-linux` and `aarch64-darwin` (Apple
+Silicon). On either system, enter the reproducible development environment
+with:
 
 ```sh
 nix develop        # sbcl, cl-weave, paredit-cli, treefmt, mkdocs-material
 ```
 
 !!! info "Other platforms have no flake outputs"
-    On platforms outside the three supported systems (e.g. Intel Mac,
+    On platforms outside the two supported systems (e.g. Intel Mac,
     Windows), the flake does not expose a development shell, package, check,
     or app. Load the local checkout with ASDF instead (see
     [Installation](installation.md)) and rely on CI for Nix verification.
@@ -38,7 +38,7 @@ load the `cl-prolog` package. See [Examples](examples.md) for a walkthrough.
 
 ```sh
 nix run .                     # cl-weave regression suite, via the cl-weave CLI
-sbcl --script run-tests.lisp  # the same suite, plain SBCL, no Nix
+sbcl --script run-tests.lisp  # requires cl-weave on CL_SOURCE_REGISTRY
 nix flake check               # full verification suite
 nix fmt                       # format Nix sources (treefmt)
 ```
@@ -46,7 +46,8 @@ nix fmt                       # format Nix sources (treefmt)
 `nix flake check` also runs the structural parse gate, the examples check, and
 the documentation build. The full testing workflow — including the ASDF
 fallback for unsupported platforms and the `cl-prolog/weave` query helpers —
-is on the [Testing](testing.md) page.
+is on the [Testing](testing.md) page. For the plain SBCL command, ensure
+`cl-weave` is discoverable through `CL_SOURCE_REGISTRY` as described there.
 
 ## Track new files before trusting `nix flake check`
 

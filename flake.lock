@@ -49,16 +49,16 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1784977300,
-        "narHash": "sha256-edlX2EkanXV4tOS0Ncww/mzlJF2MBtBiXOk6ThzOiHg=",
+        "lastModified": 1785001695,
+        "narHash": "sha256-g91GQXfIOORPOaJ2PSnbFsIC71B104JUKoXQSpJNTM0=",
         "owner": "nerima-lisp",
         "repo": "paredit-cli",
-        "rev": "c3a9079c79a1679c76335f3b00ea91881d30b10b",
+        "rev": "38aa7a840c9467f17b4d6759a9051d6b28a74a2c",
         "type": "github"
       },
       "original": {
         "owner": "nerima-lisp",
-        "ref": "v0.8.0",
+        "ref": "v1.0.0",
         "repo": "paredit-cli",
         "type": "github"
       }

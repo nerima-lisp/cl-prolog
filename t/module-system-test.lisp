@@ -71,15 +71,28 @@
       (cl-prolog::%find-prolog-module registry "not-an-atom" "test"))))
 
 (deftest module-registry-rejects-invalid-imports ()
-  (let ((registry (cl-prolog::make-module-registry)))
-    (cl-prolog::module-registry-declare! registry 'left '((/ same 1)))
-    (cl-prolog::module-registry-declare! registry 'right '((/ same 1)))
-    (cl-prolog::module-registry-declare! registry 'client '())
-    (cl-prolog::module-registry-import! registry 'client 'left)
-    (signals-error
-      (cl-prolog::module-registry-import! registry 'client 'right))
-    (signals-error
-      (cl-prolog::module-registry-import! registry 'client 'left '((/ hidden 1))))))
+    (let ((registry (cl-prolog::make-module-registry)))
+      (cl-prolog::module-registry-declare! registry 'left '((/ same 1)))
+      (cl-prolog::module-registry-declare! registry 'right '((/ same 1)))
+      (cl-prolog::module-registry-declare! registry 'client '())
+      (cl-prolog::module-registry-import! registry 'client 'left)
+      (signals-error
+        (cl-prolog::module-registry-import! registry 'client 'right))
+      (signals-error
+        (cl-prolog::module-registry-import! registry 'client 'left '((/ hidden 1))))))
+
+  (deftest module-registry-allows-reimport-from-same-origin ()
+    (let ((registry (cl-prolog::make-module-registry)))
+      (cl-prolog::module-registry-declare! registry 'library '((/ public 1)))
+      (cl-prolog::module-registry-declare! registry 'client '())
+      (cl-prolog::module-registry-import! registry 'client 'library)
+      (cl-prolog::module-registry-import! registry 'client 'library)
+      (is-equal 'library
+                (cl-prolog::module-registry-resolve
+                 registry 'client 'public 1
+                 (lambda (module predicate arity)
+                   (declare (ignore module predicate arity))
+                   nil)))))
 
 (deftest module-registry-rejects-import-redefinition-and-undefined-export ()
   (let ((registry (cl-prolog::make-module-registry)))

@@ -19,12 +19,6 @@
       (when matched
         (funcall emit extended)))))
 
-(define-rulebase *macro-rulebase*
-  ((parent tom bob))
-  ((parent bob alice))
-  ((ancestor ?x ?y) (parent ?x ?y))
-  ((ancestor ?x ?y) (parent ?x ?z) (ancestor ?z ?y)))
-
 (defun make-family-rulebase ()
   (prolog
     ((parent tom bob))

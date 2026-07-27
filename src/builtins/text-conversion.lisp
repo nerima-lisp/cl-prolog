@@ -189,16 +189,6 @@
      (%raise-type-error "NUMBER" number environment operation
                         "first argument must be a Prolog integer or float"))))
 
-(defun %raise-syntax-number-error (text environment operation)
-  (let* ((length (length text))
-         (culprit-text
-           (if (<= length 64)
-               text
-               (format nil "~A...<~D characters>" (subseq text 0 32) length))))
-    ;; ISO 13211-1 8.16.7.3 and 8.16.8.3: text that does not spell a number is a
-    ;; syntax_error, the same class the reader raises for it.
-    (%raise-syntax-error-for culprit-text environment operation)))
-
 (defun %read-number-token (text environment operation)
   "Read TEXT as one Prolog number token, per ISO 13211-1 8.16.7/8.16.8.
 
@@ -260,89 +250,7 @@ agreeing with what the same text means in source."
   (%check-text-resource-limit
    text *max-prolog-numeric-lexeme-length* "NUMBER_TEXT_LENGTH"
    environment operation "numeric text exceeds the configured length limit")
-  (return-from %text-number (%read-number-token text environment operation))
-  (let* ((length (length text))
-         (position 0)
-         (sign 1)
-         (integer-part 0)
-         (integer-digits 0)
-         (fraction-part 0)
-         (fraction-digits 0)
-         (exponent 0)
-         (exponent-sign 1)
-         (exponent-digits 0)
-         (exponent-too-large-p nil)
-         (decimal-p nil)
-         (exponent-p nil))
-    (labels ((current-character ()
-               (and (< position length) (char text position)))
-             (consume-digits (consumer)
-               (let ((count 0))
-                 (loop for character = (current-character)
-                       while (and character (digit-char-p character 10))
-                       do (funcall consumer (digit-char-p character 10))
-                          (incf position)
-                          (incf count))
-                 count))
-             (invalid ()
-               (%raise-syntax-number-error text environment operation)))
-      (let ((character (current-character)))
-        (when (and character (member character '(#\+ #\-) :test #'char=))
-          (when (char= character #\-)
-            (setf sign -1))
-          (incf position)))
-      (setf integer-digits
-            (consume-digits (lambda (digit)
-                              (setf integer-part (+ (* integer-part 10) digit)))))
-      (when (and (current-character) (char= (current-character) #\.))
-        (setf decimal-p t)
-        (incf position)
-        (setf fraction-digits
-              (consume-digits (lambda (digit)
-                                (setf fraction-part (+ (* fraction-part 10) digit))))))
-      (when (and (current-character)
-                 (member (current-character) '(#\e #\E) :test #'char=))
-        (setf exponent-p t)
-        (incf position)
-        (let ((character (current-character)))
-          (when (and character (member character '(#\+ #\-) :test #'char=))
-            (when (char= character #\-)
-              (setf exponent-sign -1))
-            (incf position)))
-        (setf exponent-digits
-              (consume-digits
-               (lambda (digit)
-                 (unless exponent-too-large-p
-                   (if (> exponent
-                          (floor (- *max-prolog-numeric-lexeme-length* digit) 10))
-                       (setf exponent-too-large-p t)
-                       (setf exponent (+ (* exponent 10) digit))))))))
-      (when (or (zerop integer-digits)
-                (and decimal-p (zerop fraction-digits))
-                (and exponent-p (zerop exponent-digits))
-                (/= position length))
-        (invalid))
-      (when exponent-too-large-p
-        (%raise-resource-error
-         "EXPONENT_MAGNITUDE" environment operation
-         "numeric exponent exceeds the configured magnitude limit"))
-      (if (or decimal-p exponent-p)
-          (let* ((signed-exponent (* exponent-sign exponent))
-                 (positive-exponent (max 0 signed-exponent))
-                 (negative-exponent (max 0 (- signed-exponent))))
-            (when (or (> (+ integer-digits fraction-digits positive-exponent)
-                         *max-prolog-numeric-lexeme-length*)
-                      (> (+ fraction-digits negative-exponent)
-                         *max-prolog-numeric-lexeme-length*))
-              (%raise-resource-error
-               "NUMBER_SIZE" environment operation
-               "numeric value exceeds the configured exact-size limit"))
-            (let* ((fraction-scale (expt 10 fraction-digits))
-                   (significand (+ integer-part (/ fraction-part fraction-scale)))
-                   (scaled (* sign significand
-                              (expt 10 signed-exponent))))
-              (coerce scaled 'double-float)))
-          (* sign integer-part)))))
+  (%read-number-token text environment operation))
 
 (defun %text-of (value environment operation
                  &key (accept :any)
