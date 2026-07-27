@@ -2,134 +2,35 @@
 ;;;; then scanning it into %token structs against an operator table's
 ;;;; lexemes (lexer-operator-lexemes.lisp), under lexer.lisp's resource
 ;;;; limits.
-
 (in-package #:cl-prolog)
 
-(defun %read-prolog-term-source (stream)
-  "Read through one top-level term terminator without consuming the next term."
-  (let ((delimiters '())
-        (state :code)
-        (previous nil)
-        (position 0))
-    (labels ((record-character (character out)
-               (incf position)
-               (%check-parser-limit "SOURCE_CHARACTERS"
-                                    *max-prolog-source-characters*
-                                    position
-                                    position)
-               (write-char character out))
-             (expected-closer (character)
-               (cdr (assoc character
-                           '((#\( . #\)) (#\[ . #\]) (#\{ . #\}))
-                           :test #'char=)))
-             (open-delimiter (character)
-               (%check-parser-limit "DELIMITER_DEPTH"
-                                    *max-prolog-delimiter-depth*
-                                    (1+ (length delimiters))
-                                    position)
-               (push (expected-closer character) delimiters))
-             (close-delimiter (character)
-               (unless delimiters
-                 (%parse-error
-                  "Unexpected closing Prolog delimiter ~C at source position ~D."
-                  character position))
-               (unless (char= character (first delimiters))
-                 (%parse-error
-                  "Mismatched Prolog delimiter ~C at source position ~D; expected ~C."
-                  character position (first delimiters)))
-               (pop delimiters)))
-      (with-output-to-string (out)
-        (loop for character = (read-char stream nil nil)
-              do (unless character
-                   (unless (member state '(:code :line-comment))
-                     (%parse-error
-                      "Unexpected end of Prolog input while reading ~A."
-                      state))
-                   (when delimiters
-                     (%parse-error
-                      "Unexpected end of Prolog input; expected closing delimiter ~C."
-                      (first delimiters)))
-                   (return))
-                 (record-character character out)
-                 (ecase state
-                   (:code
-                    (cond
-                      ;; `0'c' is a character-code constant (ISO 6.4.4), not the
-                      ;; start of a quoted atom, so its `'' must not put the
-                      ;; splitter into :QUOTED and swallow the rest of the term.
-                      ((and (char= character #\') (eql previous #\0))
-                       (let ((next (read-char stream nil nil)))
-                         (when next
-                           (record-character next out)
-                           (cond
-                             ((char= next #\\)
-                              (let ((escaped (read-char stream nil nil)))
-                                (when escaped (record-character escaped out))))
-                             ;; `0''' spells the quote character itself.
-                             ((and (char= next #\')
-                                   (eql (peek-char nil stream nil nil) #\'))
-                              (record-character (read-char stream) out)))
-                           (setf character next))))
-                      ((char= character #\') (setf state :quoted))
-                      ((char= character #\") (setf state :dquoted))
-                      ((char= character #\%) (setf state :line-comment))
-                      ((and (char= character #\/)
-                            (eql (peek-char nil stream nil nil) #\*))
-                       (record-character (read-char stream) out)
-                       (setf state :block-comment))
-                      ((member character '(#\( #\[ #\{))
-                       (open-delimiter character))
-                      ((member character '(#\) #\] #\}))
-                       (close-delimiter character))
-                      ((and (null delimiters)
-                            (char= character #\.)
-                            (not (and previous
-                                      (digit-char-p previous)
-                                      (let ((next
-                                              (peek-char nil stream nil nil)))
-                                        (and next (digit-char-p next))))))
-                       (return))))
-                   (:quoted
-                    (cond
-                      ((char= character #\\)
-                       (setf state :quoted-escape))
-                      ((char= character #\')
-                       (if (eql (peek-char nil stream nil nil) #\')
-                           (progn
-                             (record-character (read-char stream) out)
-                             (setf previous #\'))
-                           (setf state :code)))))
-                   (:quoted-escape (setf state :quoted))
-                   (:dquoted
-                    (cond
-                      ((char= character #\\)
-                       (setf state :dquoted-escape))
-                      ((char= character #\")
-                       (if (eql (peek-char nil stream nil nil) #\")
-                           (progn
-                             (record-character (read-char stream) out)
-                             (setf previous #\"))
-                           (setf state :code)))))
-                   (:dquoted-escape (setf state :dquoted))
-                   (:line-comment
-                    (when (char= character #\Newline)
-                      (setf state :code)))
-                   (:block-comment
-                    (when (and (char= character #\*)
-                               (eql (peek-char nil stream nil nil) #\/))
-                      (record-character (read-char stream) out)
-                      (setf state :code))))
-                 (setf previous character))))))
-
-(defun %prolog-source-string (source)
-  (etypecase source
-    (string
-     (%check-parser-limit "SOURCE_CHARACTERS"
-                          *max-prolog-source-characters*
-                          (length source)
-                          (length source))
-     source)
-    (stream (%read-prolog-term-source source))))
+(defmacro %scan-prolog-quoted-lexeme (delimiter unterminated-message)
+  `(progn
+    (take)
+    (setf raw-mode t)
+    (unwind-protect (let ((content-length 0))
+        (labels ((write-content (character out)
+                   (incf content-length)
+                   (%check-parser-limit
+                "QUOTED_LEXEME_LENGTH"
+                *max-prolog-quoted-lexeme-length*
+                content-length
+                position)
+                   (write-char character out)))
+          (with-output-to-string (out)
+            (loop (unless (peek)
+                (%parse-error ,unterminated-message)) (let ((character (take)))
+                (cond
+                  ((and (char= character ,delimiter) (peek) (char= (peek) ,delimiter))
+                    (take)
+                    (write-content ,delimiter out))
+                  ((char= character ,delimiter) (return))
+                  ((and (char= character #\\) (peek))
+                    (let ((decoded (scan-escape)))
+                      (when decoded
+                        (write-content decoded out))))
+                  (t (write-content character out))))))))
+      (setf raw-mode nil))))
 
 (defun %tokenize-prolog (source &optional (operator-table *standard-operator-table*))
   (let* ((text (%prolog-source-string source))
@@ -142,8 +43,9 @@
          (raw-mode nil)
          (token-count 0)
          (delimiters '())
+         (delimiter-depth 0)
          (tokens '()))
-    (labels ((peek (&optional (offset 0))
+        (labels ((peek (&optional (offset 0))
                (let ((index (+ position offset)))
                  (when (< index length)
                    (let ((character (char text index)))
@@ -156,25 +58,34 @@
                (cond ((string= operator "(") ")")
                      ((string= operator "[") "]")
                      ((string= operator "{") "}")))
-             (note-delimiter (operator start)
-               (let ((closer (expected-closer operator)))
-                 (cond
-                   (closer
-                    (%check-parser-limit "DELIMITER_DEPTH"
-                                         *max-prolog-delimiter-depth*
-                                         (1+ (length delimiters))
-                                         start)
-                    (push closer delimiters))
-                   ((member operator '(")" "]" "}") :test #'string=)
-                    (unless delimiters
-                      (%parse-error
-                       "Unexpected closing Prolog delimiter ~A at source position ~D."
-                       operator start))
-                    (unless (string= operator (first delimiters))
-                      (%parse-error
-                       "Mismatched Prolog delimiter ~A at source position ~D; expected ~A."
-                       operator start (first delimiters)))
-                    (pop delimiters)))))
+             (note-delimiter
+  (operator start)
+  (let ((closer (expected-closer operator)))
+    (cond
+      (closer
+        (%check-parser-limit
+          "DELIMITER_DEPTH"
+          *max-prolog-delimiter-depth*
+          (1+ delimiter-depth)
+          start)
+        (progn
+          (push closer delimiters)
+          (incf delimiter-depth)))
+      ((member operator '(")" "]" "}") :test #'string=)
+        (unless delimiters
+          (%parse-error
+            "Unexpected closing Prolog delimiter ~A at source position ~D."
+            operator
+            start))
+        (unless (string= operator (first delimiters))
+          (%parse-error
+            "Mismatched Prolog delimiter ~A at source position ~D; expected ~A."
+            operator
+            start
+            (first delimiters)))
+        (progn
+          (pop delimiters)
+          (decf delimiter-depth))))))
              (emit (kind &optional value (start position))
                (unless (eq kind :eof)
                  (%check-parser-limit "TOKEN_COUNT"
@@ -244,72 +155,10 @@ Returns NIL for a `\\'-newline continuation, which contributes no character."
                           (progn (decf position) (scan-radix-escape 8 t))
                           ;; \\ \' \" \` and anything else stand for themselves.
                           character)))))
-             (scan-quoted ()
-               (take)
-               (setf raw-mode t)
-               (unwind-protect
-                    (let ((content-length 0))
-                      (labels ((write-content (character out)
-                                 (incf content-length)
-                                 (%check-parser-limit
-                                  "QUOTED_LEXEME_LENGTH"
-                                  *max-prolog-quoted-lexeme-length*
-                                  content-length
-                                  position)
-                                 (write-char character out)))
-                        (with-output-to-string (out)
-                          (loop
-                            (unless (peek)
-                              (%parse-error "Unterminated quoted Prolog atom."))
-                            (let ((character (take)))
-                              (cond
-                                ((and (char= character #\')
-                                      (peek)
-                                      (char= (peek) #\'))
-                                 (take)
-                                 (write-content #\' out))
-                                ((char= character #\')
-                                 (return))
-                                ((and (char= character #\\) (peek))
-                                 (let ((decoded (scan-escape)))
-                                   (when decoded (write-content decoded out))))
-                                (t
-                                 (write-content character out))))))))
-                 (setf raw-mode nil)))
-             (scan-string ()
-               ;; A "..." literal, mirroring SCAN-QUOTED but delimited by #\".
-               ;; A doubled "" is a literal quote; \\-escapes are decoded.
-               (take)
-               (setf raw-mode t)
-               (unwind-protect
-                    (let ((content-length 0))
-                      (labels ((write-content (character out)
-                                 (incf content-length)
-                                 (%check-parser-limit
-                                  "QUOTED_LEXEME_LENGTH"
-                                  *max-prolog-quoted-lexeme-length*
-                                  content-length
-                                  position)
-                                 (write-char character out)))
-                        (with-output-to-string (out)
-                          (loop
-                            (unless (peek)
-                              (%parse-error "Unterminated Prolog string."))
-                            (let ((character (take)))
-                              (cond
-                                ((and (char= character #\")
-                                      (peek)
-                                      (char= (peek) #\"))
-                                 (take)
-                                 (write-content #\" out))
-                                ((char= character #\")
-                                 (return))
-                                ((and (char= character #\\) (peek))
-                                 (let ((decoded (scan-escape)))
-                                   (when decoded (write-content decoded out))))
-                                (t
-                                 (write-content character out))))))))
-                 (setf raw-mode nil)))
+             (scan-quoted
+  ()
+  (%scan-prolog-quoted-lexeme #\' "Unterminated quoted Prolog atom."))
+             (scan-string () (%scan-prolog-quoted-lexeme #\" "Unterminated Prolog string."))
              (block-comment-ahead-p ()
                (and (eql (peek) #\/) (eql (peek 1) #\*)))
              (scan-graphic-run ()
@@ -484,17 +333,21 @@ requires layout text, a comment, or end of input after the end token."
 Reading past the end yields the terminating :EOF token, which every token
 vector carries, so a caller never has to bounds-check its lookahead."
   (let ((tokens (%parser-tokens parser)))
-    (aref tokens (min (+ (%parser-position parser) offset)
-                      (1- (length tokens))))))
+    (aref tokens (min (+ (%parser-position parser) offset) (1- (length tokens))))))
 
 (defun %accept-token (parser kind &optional value)
   (let ((token (%current-token parser)))
-    (when (and (eq kind (%token-kind token))
-               (or (null value) (equal value (%token-value token))))
+    (when (and
+        (eq kind (%token-kind token))
+        (or (null value) (equal value (%token-value token))))
       (incf (%parser-position parser))
       token)))
 
 (defun %expect-token (parser kind &optional value)
-  (or (%accept-token parser kind value)
-      (%parse-error "Expected Prolog token ~S~@[ ~S~], got ~S."
-                    kind value (%current-token parser))))
+  (or
+    (%accept-token parser kind value)
+    (%parse-error
+      "Expected Prolog token ~S~@[ ~S~], got ~S."
+      kind
+      value
+      (%current-token parser))))

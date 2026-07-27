@@ -18,6 +18,65 @@ fail. Keep `## [Unreleased]` at the top at all times.
 
 ## [Unreleased]
 
+### Added
+
+- `benchmarks/performance.lisp` gains three benchmark groups matching the
+  optimizations below: indexed substitution, ground-vs-nonground tabled
+  answer replay, and the left-recursion cache across cold/warm/revision-
+  changed rulebases.
+
+### Changed
+
+- Fixed-builtin goal dispatch (`%goal-solver`) uses a nested `eq` (predicate)
+  -> `eql` (arity) hash-table pair instead of one table keyed by a consed
+  `(predicate . arity)` under `equal`, avoiding a cons and an `equal` hash on
+  every builtin lookup — the hottest path in goal dispatch.
+- Left-recursion detection caches its per-revision, per-module SCC index and
+  its recursive predicate/arity membership check through nested `eq`/`eql`
+  hash tables instead of an `equal`-keyed table over a freshly consed
+  `(rulebase revision module)` list, and now reads the rulebase's own
+  persistent analysis table directly instead of duplicating it into the
+  per-query table session.
+- Clause freshening (`%freshen-clause`, `%freshen-term`) and indexed-
+  substitution's copy map use a small inline-array store that only escalates
+  to a hash table past 12 entries, avoiding a hash-table allocation for the
+  common case of a clause with few variables.
+- Unification's cyclic-pair scratch space stores a nested `eq` hash table of
+  "already seen" right-hand terms per left-hand term instead of a plain list
+  checked with `member`, turning an O(n) scan per remembered pair into an
+  O(1) lookup.
+- Tabled answers now record whether they contain unbound variables; replaying
+  a ground answer to a consumer skips variant instantiation entirely, since
+  there is nothing to rename.
+- Predicate first-argument indexing builds its per-key candidate lists with
+  one linear merge over the original clause order instead of rescanning
+  every clause once per distinct first-argument key, removing an
+  O(clauses × distinct keys) reconstruction from `%make-predicate-descriptor`.
+- Query-variable collection uses an `eq` hash-table membership check instead
+  of `pushnew`, avoiding an O(n) rescan per occurrence, and the query-solving
+  loop now collects a query's variables once before the search begins
+  instead of once per solution.
+- `format/2`'s column directives (`~t`, `~|`, `~+`) track the pending
+  segment's length and fill count incrementally instead of resumming the
+  pending output on every column-fill request, and literal text runs batch
+  through `subseq` instead of appending one character at a time.
+- `predsort/3`'s merge sort splits its private list destructively via
+  `nthcdr` instead of allocating two `subseq` copies per recursion level; the
+  caller copies the substituted input list once up front so the destructive
+  split cannot alias shared structure.
+- The lexer's tokenizer tracks open-delimiter depth with an explicit counter
+  instead of recomputing it from the delimiter stack's length on every
+  open/close paren, and its near-duplicate quoted-atom/string scanners are
+  unified into one macro.
+
+### Fixed
+
+- `atom_number/2` and the `number_string`-family conversions parse the full
+  ISO number-token grammar — including the `0x`/`0o`/`0b` radix and `0'c`
+  character-code notations — by delegating to the same reader the tokenizer
+  uses, instead of a separate hand-rolled decimal-only parser that rejected
+  those notations.
+
 ## [1.0.1] - 2026-07-26
 
 ### Fixed

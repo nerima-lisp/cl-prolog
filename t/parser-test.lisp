@@ -273,10 +273,68 @@ against its :OBSERVED/:LIMIT/:POSITION, which vary per resource kind."
     (cl-prolog::prolog-parse-error ()
       t)))
 
-(deftest prolog-parse-error-report-writes-its-description ()
-  (let ((condition (make-condition 'cl-prolog::prolog-parse-error
-                                    :description "unexpected end of input")))
-    (is-equal "unexpected end of input" (princ-to-string condition))))
+(progn
+  (defun %prolog-parse-error-condition (thunk)
+    (handler-case
+        (progn
+          (funcall thunk)
+          nil)
+      (cl-prolog::prolog-parse-error (condition)
+        condition)))
+
+  (defun %assert-prolog-parse-error (thunk expected-description)
+    (let ((condition (%prolog-parse-error-condition thunk)))
+      (is (typep condition 'cl-prolog::prolog-parse-error))
+      (when condition
+        (is-equal expected-description
+                  (cl-prolog::prolog-parse-error-description condition)))
+      condition))
+
+  (deftest lexer-rejects-malformed-source-for-string-and-stream-input ()
+    (dolist (case
+             (list
+              (list "unterminated block comment"
+                    "/* unterminated"
+                    "Unterminated Prolog block comment."
+                    "Unexpected end of Prolog input while reading BLOCK-COMMENT.")
+              (list "unterminated quoted atom"
+                    "'unterminated"
+                    "Unterminated quoted Prolog atom."
+                    "Unexpected end of Prolog input while reading QUOTED.")
+              (list "unterminated string"
+                    "\"unterminated"
+                    "Unterminated Prolog string."
+                    "Unexpected end of Prolog input while reading DQUOTED.")
+              (list "malformed character escape"
+                    "'\\xz'"
+                    "Malformed Prolog character escape at position 3."
+                    "Malformed Prolog character escape at position 3.")
+              (list "out-of-range character escape"
+                    "'\\x110000z'"
+                    "Prolog character escape \"110000\" is out of range."
+                    "Prolog character escape \"110000\" is out of range.")
+              (list "truncated character-code constant"
+                    "0'"
+                    "Unterminated Prolog character-code constant."
+                    "Unterminated Prolog character-code constant.")
+              (list "malformed exponent"
+                    "1e+"
+                    "Malformed Prolog exponent."
+                    "Malformed Prolog exponent.")))
+      (destructuring-bind (name source string-description stream-description) case
+        (declare (ignore name))
+        (%assert-prolog-parse-error
+         (lambda () (read-prolog-term source))
+         string-description)
+        (with-input-from-string (stream source)
+          (%assert-prolog-parse-error
+           (lambda () (read-prolog-term stream))
+           stream-description)))))
+
+  (deftest prolog-parse-error-report-writes-its-description ()
+    (let ((condition (make-condition 'cl-prolog::prolog-parse-error
+                                     :description "unexpected end of input")))
+      (is-equal "unexpected end of input" (princ-to-string condition)))))
 
 (deftest prolog-parser-resource-error-report-includes-every-slot ()
   (let* ((*max-prolog-source-characters* 1)
@@ -352,6 +410,9 @@ against its :OBSERVED/:LIMIT/:POSITION, which vary per resource kind."
   (let ((*max-prolog-delimiter-depth* 1))
     (is-equal (quote cl-prolog::a)
               (read-prolog-term "(a)")))
+  (let ((*max-prolog-delimiter-depth* 2))
+    (is-equal (quote (cl-prolog::f cl-prolog::a cl-prolog::b))
+              (read-prolog-term "f((a),(b))")))
   (let* ((*max-prolog-delimiter-depth* 1)
          (condition
            (%assert-parser-resource-error

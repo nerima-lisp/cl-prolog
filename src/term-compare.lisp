@@ -149,11 +149,13 @@ so they must compare equal here exactly as they unify."
                 (%compare-terms (cdr left) (cdr right) seen)
                 car-comparison))))))
 
-(defun %compare-terms (left right &optional
-                                    (seen (make-hash-table :test #'eq)))
-  (if (%term-identical-p left right)
-      0
-      (let ((left-class (%term-order-class left))
+(defun %compare-terms (left right &optional seen)
+  (cond
+    ((eq left right) 0)
+    ((%term-identical-p left right) 0)
+    (t
+      (let ((seen (or seen (make-hash-table :test #'eq)))
+            (left-class (%term-order-class left))
             (right-class (%term-order-class right)))
         (cond
           ((< left-class right-class) -1)
@@ -166,7 +168,7 @@ so they must compare equal here exactly as they unify."
            (if (and (%proper-list-p left) (%proper-list-p right))
                (%compare-compound-terms left right seen)
                (%compare-cons-terms left right seen)))
-          (t (error "Not a Prolog term: ~S" left))))))
+          (t (error "Not a Prolog term: ~S" left)))))))
 
 (defun %emit-term-comparison (predicate left right environment emit)
   (when (funcall predicate

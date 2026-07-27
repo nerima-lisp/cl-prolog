@@ -79,6 +79,46 @@
            (cl-prolog:logic-substitute start resolved-environment))
          1 15 5))))
 
+(defun benchmark-indexed-substitution ()
+  (let* ((left (cl-prolog:fresh-logic-variable "?LEFT"))
+         (right (cl-prolog:fresh-logic-variable "?RIGHT"))
+         (bound-compound (list :node :bound))
+         (goal (list :goal left (list :nested right left)))
+         (environment (list (cons left bound-compound)
+                            (cons right :resolved)))
+         (index (cl-prolog::%make-environment-index environment))
+         (expected (list :goal (list :node :bound)
+                         (list :nested :resolved (list :node :bound))))
+         (result (cl-prolog::%logic-substitute-indexed goal index))
+         (cases
+           (coerce
+            (loop repeat 64
+                  collect
+                  (let ((sample-left (cl-prolog:fresh-logic-variable))
+                        (sample-right (cl-prolog:fresh-logic-variable)))
+                    (cons
+                     (list :goal sample-left (list :nested sample-right sample-left))
+                     (cl-prolog::%make-environment-index
+                      (list (cons sample-left (list :node :bound))
+                            (cons sample-right :resolved))))))
+            (quote vector)))
+         (cursor 0))
+    (assert (equal expected result))
+    (assert (not (eq goal result)))
+    (assert (eq (second result) (third (third result))))
+    (assert (not (eq bound-compound (second result))))
+    (run-benchmark
+     "indexed-substitution/small-bound-compound-goal"
+     (lambda ()
+       (let ((timed-result nil))
+         (dotimes (iteration 100000 timed-result)
+           (declare (ignore iteration))
+           (let ((case (aref cases cursor)))
+             (setf cursor (logand (1+ cursor) 63))
+             (setf timed-result
+                   (cl-prolog::%logic-substitute-indexed (car case) (cdr case)))))))
+     100000 15 5)))
+
   (defun make-predicate-index-rulebase (count)
     (cl-prolog:make-rulebase
      :clauses
@@ -239,7 +279,9 @@
          (branching-path-all-solutions rulebase node-count))
        1 11 3))))
 
+  (progn
   (benchmark-alias-chain)
+  (benchmark-indexed-substitution))
   (progn
   (benchmark-predicate-index)
   (benchmark-first-argument-index)
@@ -248,3 +290,110 @@
   (benchmark-recursive-path)
   (benchmark-branching-path-ground)
   (benchmark-branching-path-all-solutions))
+
+(progn
+  (defun make-tabled-answer-replay-rulebase (predicate answer)
+    (let ((rulebase
+            (cl-prolog:make-rulebase
+             :clauses (list (cl-prolog:make-clause (list predicate answer))))))
+      (cl-prolog::%add-rulebase-table-declaration! rulebase predicate 1 :benchmark)
+      rulebase))
+
+  (defun make-tabled-answer-replay-query (predicate values)
+    (let ((variables
+            (loop repeat (length values)
+                  collect (cl-prolog:fresh-logic-variable))))
+      (append
+       (loop for variable in variables
+             collect (list predicate variable))
+       (loop for variable in variables
+             for value in values
+             collect (list (quote =) variable value)))))
+
+  (defun benchmark-table-answer-replay ()
+    (dolist (case (list (list "ground" (list (quote alpha) (quote alpha) (quote alpha)))
+                        (list "nonground" (list (quote alpha) (quote beta) (quote gamma)))))
+      (let* ((name (first case))
+             (values (second case))
+             (predicate (if (string= name "ground")
+                            (quote tabled-replay-ground)
+                            (quote tabled-replay-nonground)))
+             (answer (if (string= name "ground")
+                         (quote alpha)
+                         (cl-prolog:fresh-logic-variable)))
+             (rulebase (make-tabled-answer-replay-rulebase predicate answer))
+             (query (make-tabled-answer-replay-query predicate values)))
+        (unless (cl-prolog:prolog-succeeds-p rulebase query)
+          (error "Table-answer replay setup failed for ~A." name))
+        (run-benchmark
+         (format nil "table-answer-replay-3-consumers/~A" name)
+         (lambda ()
+           (dotimes (iteration 100 t)
+             (declare (ignore iteration))
+             (unless (cl-prolog:prolog-succeeds-p rulebase query)
+               (error "Table-answer replay failed for ~A." name))))
+         100 11 3))))
+
+  (defun make-left-recursive-path-rulebase (length)
+    (let ((x (cl-prolog:fresh-logic-variable))
+          (y (cl-prolog:fresh-logic-variable))
+          (z (cl-prolog:fresh-logic-variable)))
+      (cl-prolog:make-rulebase
+       :clauses
+       (nconc
+        (list
+         (cl-prolog:make-clause
+          (list (quote left-path) x y)
+          (list (list (quote left-path) x z)
+                (list (quote left-edge) z y)))
+         (cl-prolog:make-clause
+          (list (quote left-path) x y)
+          (list (list (quote left-edge) x y))))
+        (loop for source below length
+              collect (cl-prolog:make-clause
+                       (list (quote left-edge) source (1+ source))))))))
+
+  (defun left-recursive-path-succeeds-p (rulebase length)
+    (cl-prolog:prolog-succeeds-p rulebase (list (quote left-path) 0 length)))
+
+  (defun benchmark-left-recursion-cache ()
+    (let ((length 64))
+      (run-benchmark
+       "left-recursion-cache-64/cold-rulebase"
+       (lambda ()
+         (dotimes (iteration 20 t)
+           (declare (ignore iteration))
+           (let ((rulebase (make-left-recursive-path-rulebase length)))
+             (unless (left-recursive-path-succeeds-p rulebase length)
+               (error "Cold left-recursion query failed.")))))
+       20 7 2)
+      (let ((rulebase (make-left-recursive-path-rulebase length)))
+        (unless (left-recursive-path-succeeds-p rulebase length)
+          (error "Warm left-recursion setup failed."))
+        (run-benchmark
+         "left-recursion-cache-64/warm-shared-scope"
+         (lambda ()
+           (dotimes (iteration 100 t)
+             (declare (ignore iteration))
+             (unless (left-recursive-path-succeeds-p rulebase length)
+               (error "Warm left-recursion query failed."))))
+         100 11 3))
+      (let ((rulebase (make-left-recursive-path-rulebase length))
+            (revision 0))
+        (unless (left-recursive-path-succeeds-p rulebase length)
+          (error "Revision-change left-recursion setup failed."))
+        (run-benchmark
+         "left-recursion-cache-64/revision-change"
+         (lambda ()
+           (dotimes (iteration 20 t)
+             (declare (ignore iteration))
+             (cl-prolog:rulebase-insert-clause!
+              rulebase
+              (cl-prolog:make-clause (list (quote cache-noise) revision)))
+             (incf revision)
+             (unless (left-recursive-path-succeeds-p rulebase length)
+               (error "Revision-change left-recursion query failed."))))
+         20 7 2))))
+
+  (benchmark-table-answer-replay)
+  (benchmark-left-recursion-cache))

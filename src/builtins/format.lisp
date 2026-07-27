@@ -149,6 +149,8 @@ control (~t fill, ~| absolute column, ~+ relative column)."
         (output (make-string-output-stream))
         (line-column 0)      ; committed column on the current line
         (segment-column 0)   ; column where the pending segment began
+        (pending-text-length 0)
+        (pending-fill-count 0)
         (pieces '()))        ; reversed: strings and (:fill . char)
     (labels ((next-argument ()
                (when (null remaining)
@@ -156,18 +158,18 @@ control (~t fill, ~| absolute column, ~+ relative column)."
                                       environment operation
                                       "not enough arguments for format directives"))
                (pop remaining))
-             (segment-text-length ()
-               (loop for piece in pieces
-                     when (stringp piece) sum (length piece)))
              (commit-plain ()
                ;; Flush the pending segment with zero-width fills.
                (dolist (piece (reverse pieces))
                  (when (stringp piece) (write-string piece output)))
-               (incf line-column (segment-text-length))
-               (setf pieces '() segment-column line-column))
+               (incf line-column pending-text-length)
+               (setf pieces '()
+                     pending-text-length 0
+                     pending-fill-count 0
+                     segment-column line-column))
              (commit-to-column (target)
-               (let* ((text-length (segment-text-length))
-                      (fills (count-if #'consp pieces))
+               (let* ((text-length pending-text-length)
+                      (fills pending-fill-count)
                       (deficit (max 0 (- target (+ segment-column text-length)))))
                  (%check-builtin-output-length
                   deficit "COLUMN_WIDTH" environment operation
@@ -189,9 +191,16 @@ control (~t fill, ~| absolute column, ~+ relative column)."
                                (dotimes (i width)
                                  (write-char (cdr piece) output)))))))
                  (setf line-column (max target (+ segment-column text-length)))
-                 (setf pieces '() segment-column line-column)))
+                 (setf pieces '()
+                       pending-text-length 0
+                       pending-fill-count 0
+                       segment-column line-column)))
              (add-text (string)
+               (incf pending-text-length (length string))
                (push string pieces))
+             (add-fill (character)
+               (incf pending-fill-count)
+               (push (cons :fill character) pieces))
              (newline (count)
                (%check-builtin-output-length
                 (max 1 count) "NEWLINE_COUNT" environment operation
@@ -202,7 +211,9 @@ control (~t fill, ~| absolute column, ~+ relative column)."
       (loop while (< index length) do
         (let ((character (char text index)))
           (if (char/= character #\~)
-              (progn (add-text (string character)) (incf index))
+              (let ((literal-end (or (position #\~ text :start index) length)))
+                (add-text (subseq text index literal-end))
+                (setf index literal-end))
               (multiple-value-bind (numeric-argument fill-character directive next-index)
                   (%read-format-directive text (1+ index) #'next-argument
                                           environment operation)
@@ -257,9 +268,9 @@ control (~t fill, ~| absolute column, ~+ relative column)."
                                             (%code-character code environment operation)))))
                   ((#\n) (newline (or numeric-argument 1)))
                   ((#\~) (add-text "~"))
-                  ((#\t) (push (cons :fill fill-character) pieces))
+                  ((#\t) (add-fill fill-character))
                   ((#\|) (commit-to-column (or numeric-argument
-                                               (+ segment-column (segment-text-length)))))
+                                               (+ segment-column pending-text-length))))
                   ((#\+) (commit-to-column (+ segment-column
                                               (or numeric-argument 0))))
                   (t (%format-string-error

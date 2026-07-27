@@ -76,12 +76,6 @@
   (values (%solution-multiset-remove expected actual)
           (%solution-multiset-remove actual expected)))
 
-(defun %solution-multiset-equal-p (actual expected)
-  "Return true when ACTUAL and EXPECTED contain equal solutions in any order."
-  (multiple-value-bind (missing unexpected)
-      (%solution-multiset-diff actual expected)
-    (and (null missing) (null unexpected))))
-
 (cl-weave:defmatcher :to-solve (actual expected)
   "Passes when ACTUAL holds exactly the EXPECTED solutions in any order."
   (unless (and expected (null (rest expected)))

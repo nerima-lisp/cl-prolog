@@ -304,44 +304,53 @@ fails (as in SWI) rather than raising."
                 (t (%raise-domain-error "ORDER" order environment operation
                                         "predsort/3 order must be <, = or >"))))))))
 
+(defun %predsort-merge-runs (left right comparison)
+  "Merge sorted runs LEFT and RIGHT, dropping duplicate right-hand elements."
+  (let ((accumulator '()))
+    (loop
+      (cond
+        ((null left) (return (nreconc accumulator right)))
+        ((null right) (return (nreconc accumulator left)))
+        (t (let ((order (funcall comparison (car left) (car right))))
+             (cond
+               ((minusp order) (push (pop left) accumulator))
+               ((zerop order)
+                (push (pop left) accumulator)
+                (pop right))
+               ((plusp order) (push (pop right) accumulator)))))))))
+
+(defun %predsort-sort-run (items comparison)
+  "Destructively split and merge-sort a private proper list spine."
+  (if (or (null items) (null (cdr items)))
+      items
+      (let* ((half (floor (length items) 2))
+             (left-tail (nthcdr (1- half) items))
+             (right (cdr left-tail)))
+        (setf (cdr left-tail) nil)
+        (%predsort-merge-runs (%predsort-sort-run items comparison)
+                               (%predsort-sort-run right comparison)
+                               comparison))))
+
 (define-builtin (predsort goal input sorted) (rulebase environment depth emit)
   (let* ((operation (%iso-atom "PREDSORT"))
          (closure (logic-substitute goal environment))
          (values (%require-proper-list (logic-substitute input environment)
-                                              environment operation
-                                              "the input list"))
+                                       environment operation
+                                       "the input list"))
          (fail-tag (list 'predsort-fail)))
     (when (logic-var-p closure)
       (%raise-instantiation-error environment operation
                                   "predsort/3 comparison predicate must be instantiated"))
-    ;; Merge sort so each pair is compared once; `=' drops the later element.
-    ;; MERGE-RUNS is iterative (accumulate + NREVERSE) to keep the control
-    ;; stack O(log n) on large lists.
-    (labels ((merge-runs (left right)
-               (let ((accumulator '()))
-                 (loop
-                   (cond
-                     ((null left) (return (nreconc accumulator right)))
-                     ((null right) (return (nreconc accumulator left)))
-                     (t (let ((order (%predsort-order closure (car left) (car right)
-                                                      rulebase environment depth
-                                                      operation fail-tag)))
-                          (cond
-                            ((minusp order) (push (pop left) accumulator))
-                            ((plusp order) (push (pop right) accumulator))
-                            (t ;; equal: keep the left element, drop the right
-                             (push (pop left) accumulator)
-                             (pop right)))))))))
-             (sort-run (items)
-               (if (or (null items) (null (cdr items)))
-                   items
-                   (let* ((half (floor (length items) 2))
-                          (left (subseq items 0 half))
-                          (right (subseq items half)))
-                     (merge-runs (sort-run left) (sort-run right))))))
-      (let ((result (cl:catch fail-tag (sort-run values))))
-        (unless (eq result :fail)
-          (%unify-emit sorted result environment emit))))))
+    ;; Copy the substituted list before destructively splitting its private spine.
+    (let ((result
+            (cl:catch fail-tag
+              (%predsort-sort-run
+               (copy-list values)
+               (lambda (a b)
+                 (%predsort-order closure a b rulebase environment depth
+                                  operation fail-tag))))))
+      (unless (eq result :fail)
+        (%unify-emit sorted result environment emit)))))
 
 ;;; aggregate_all/3 -- count/sum/max/min/bag/set reductions over a goal.
 

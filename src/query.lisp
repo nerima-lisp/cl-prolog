@@ -9,11 +9,14 @@
 (defun %collect-query-variables (query)
   "Collect public variables, excluding variables scoped by FORALL/2."
   (let ((variables '())
+        (seen-variables (make-hash-table :test #'eq))
         (seen-conses (make-hash-table :test #'eq)))
     (labels ((walk (term)
                (cond
                  ((logic-var-p term)
-                  (pushnew term variables :test #'eq))
+                  (unless (gethash term seen-variables)
+                    (setf (gethash term seen-variables) t)
+                    (push term variables)))
                  ((and (consp term) (eq (first term) 'forall))
                   nil)
                  ((consp term)
@@ -25,17 +28,13 @@
     (nreverse variables)))
 
 (progn
-  (defun %project-bindings-indexed (query environment-index)
-    "Return QUERY variable bindings projected through ENVIRONMENT-INDEX."
+  (defun %project-query-variables-indexed (variables environment-index)
+    "Return VARIABLES bindings projected through ENVIRONMENT-INDEX."
     (mapcar
      (lambda (variable)
        (cons variable
              (%logic-substitute-indexed variable environment-index)))
-     (%collect-query-variables query)))
-
-  (defun %project-bindings (query environment)
-    "Return an alist mapping each variable of QUERY to its solved value."
-    (%project-bindings-indexed query (%make-environment-index environment))))
+     variables)))
 
 (defun %query-option (options key default)
   "Return KEY from OPTIONS, or DEFAULT when KEY is absent."
@@ -75,7 +74,9 @@
   (let ((*unification-scratch* (%make-unification-scratch)))
     (%with-logic-variable-order
       (%collect-variables query)
-      (let ((remaining limit)
+      (let ((query-variables
+              (and project (%collect-query-variables query)))
+            (remaining limit)
             (cut-tag (%make-cut-tag)))
         (block search
           (cl:catch cut-tag
@@ -95,8 +96,8 @@
                        (proof-state-environment-index state)))
                  (funcall function
                           (if project
-                              (%project-bindings-indexed
-                               query environment-index)
+                              (%project-query-variables-indexed
+                               query-variables environment-index)
                               bindings)))
                (when (and remaining (zerop (decf remaining)))
                  (return-from search))))))

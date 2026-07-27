@@ -226,7 +226,79 @@
             (gethash key
                      (cl-prolog::rulebase-predicate-tails rulebase))))))
 
-(deftest predicate-index-proof-cache-follows-rulebase-revisions ()
+(deftest predicate-index-proof-loop-preserves-arity-and-solution-order ()
+  (let ((rulebase
+          (prolog
+           ((dispatch alpha))
+           ((dispatch ?value) (helper ?value))
+           ((dispatch beta))
+           ((dispatch alpha extra))
+           ((helper gamma)))))
+    (is-equal (quote (nil))
+              (query-prolog rulebase (quote (dispatch alpha))))
+    (is-equal (quote (((?value . alpha))
+                      ((?value . gamma))
+                      ((?value . beta))))
+              (query-prolog rulebase (quote (dispatch ?value))))
+    (is-equal (quote (nil))
+              (query-prolog rulebase (quote (dispatch alpha extra))))))
+
+(progn
+  (deftest predicate-index-bound-cyclic-root-keeps-full-snapshot-order ()
+  (let* ((cycle (list (quote root)))
+         (environment (list (cons (quote ?value) cycle)))
+         (rulebase
+           (prolog
+            ((cyclic-index first))
+            ((cyclic-index ?item))
+            ((cyclic-index last))))
+         (session (cl-prolog::%make-rulebase-table-session rulebase))
+         (state
+           (cl-prolog::%make-proof-state
+            rulebase
+            environment
+            (cl-prolog::%make-environment-index environment)
+            nil
+            cl-prolog::+default-prolog-module+
+            session
+            (cl-prolog::%make-cut-tag)))
+         (descriptor
+           (cl-prolog::%rulebase-predicate-descriptor
+            rulebase cl-prolog::+default-prolog-module+
+            (quote cyclic-index) 1))
+         (entries (cl-prolog::%predicate-descriptor-entries descriptor)))
+    (setf (cdr cycle) cycle)
+    (let ((snapshot
+            (cl-prolog::%proof-predicate-entries
+             (quote (cyclic-index ?value)) state)))
+      (is (eq entries snapshot))
+      (is-equal
+       (quote ((cyclic-index first)
+               (cyclic-index ?item)
+               (cyclic-index last)))
+       (stored-clause-heads snapshot))
+      (setf (car cycle) (quote changed))
+      (is (eq snapshot
+              (cl-prolog::%proof-predicate-entries
+               (quote (cyclic-index ?value)) state))))))
+
+  (deftest tabled-cyclic-goal-retains-cyclic-answer ()
+    (let* ((cycle (list (quote root)))
+           (environment (list (cons (quote ?value) cycle)))
+           (rulebase (prolog ((tabled-cycle ?item)))))
+      (setf (cdr cycle) cycle)
+      (cl-prolog::%add-rulebase-table-declaration!
+       rulebase (quote tabled-cycle) 1 :test)
+      (let ((answers
+              (query-prolog rulebase (quote (tabled-cycle ?value))
+                            :environment environment)))
+        (is (= 1 (length answers)))
+        (let ((resolved
+                (cl-prolog:logic-substitute (quote ?value) (first answers))))
+          (is (consp resolved))
+          (is (eq resolved (cdr resolved)))))))
+
+  (deftest predicate-index-proof-cache-follows-rulebase-revisions ()
     (let* ((rulebase (prolog ((indexed original))))
            (session (cl-prolog::%make-rulebase-table-session rulebase))
            (state
@@ -247,7 +319,7 @@
               (cl-prolog::%proof-predicate-entries (quote (indexed ?value)) state)))
         (is (not (eq first-snapshot next-snapshot)))
         (is-equal (quote ((indexed original) (indexed added)))
-                  (stored-clause-heads next-snapshot)))))
+                  (stored-clause-heads next-snapshot))))))
 
 (deftest ordinary-predicates-are-not-replayed-for-tabling ()
   (let ((rulebase (prolog
@@ -387,6 +459,70 @@
                  (cl-prolog::proof-state-environment-index extended)))
       (is (not (eq (cl-prolog::proof-state-environment-index state)
                    (cl-prolog::proof-state-environment-index extended))))))
+
+  (deftest proof-state-explicit-environment-index-takes-precedence ()
+    (let* ((rulebase (make-rulebase))
+           (bindings (quote ((?seed . initial))))
+           (state
+             (cl-prolog::%make-proof-state
+              rulebase
+              bindings
+              (cl-prolog::%make-environment-index bindings)
+              nil
+              cl-prolog::+default-prolog-module+
+              (cl-prolog::%make-rulebase-table-session rulebase)
+              (cl-prolog::%make-cut-tag)))
+           (updated-bindings (quote ((?seed . updated))))
+           (supplied-index
+             (cl-prolog::%make-environment-index
+              (quote ((?seed . supplied)))))
+           (updated
+             (cl-prolog::%state-with
+              state
+              :bindings updated-bindings
+              :environment-index supplied-index)))
+      (is (eq supplied-index
+              (cl-prolog::proof-state-environment-index updated)))
+      (is-equal (quote supplied)
+                (cl-prolog::%logic-substitute-indexed
+                 (quote ?seed)
+                 (cl-prolog::proof-state-environment-index updated)))))
+
+  (deftest proof-state-unchanged-cut-tag-preserves-identity ()
+    (let* ((rulebase (make-rulebase))
+           (state
+             (cl-prolog::%make-proof-state
+              rulebase
+              nil
+              (cl-prolog::%make-environment-index nil)
+              nil
+              cl-prolog::+default-prolog-module+
+              (cl-prolog::%make-rulebase-table-session rulebase)
+              (cl-prolog::%make-cut-tag))))
+      (is (eq state
+              (cl-prolog::%state-with
+               state
+               :cut-tag (cl-prolog::proof-state-cut-tag state))))))
+
+    (deftest proof-state-module-update-bypasses-unchanged-cut-tag-identity ()
+    (let* ((rulebase (make-rulebase))
+           (state
+             (cl-prolog::%make-proof-state
+              rulebase
+              nil
+              (cl-prolog::%make-environment-index nil)
+              nil
+              cl-prolog::+default-prolog-module+
+              (cl-prolog::%make-rulebase-table-session rulebase)
+              (cl-prolog::%make-cut-tag)))
+           (updated
+             (cl-prolog::%state-with
+              state
+              :cut-tag (cl-prolog::proof-state-cut-tag state)
+              :module (quote other))))
+      (is (not (eq state updated)))
+      (is-equal (quote other)
+                (cl-prolog::proof-state-module updated))))
 
   (deftest indexed-query-state-handles-initial-bindings-builtins-and-projection ()
     (is-equal
@@ -559,6 +695,57 @@
            (hash-table-count symbols)
            (hash-table-count atoms)))))
 
+(progn
+  (deftest predicate-descriptor-high-cardinality-keys-preserve-order ()
+    (let* ((key-count 512)
+           (target 257)
+           (rulebase
+             (make-rulebase
+              :clauses
+              (append
+               (loop for index below key-count
+                     collect
+                     (make-clause (list 'high-cardinality index 'exact-before)))
+               (list (make-clause '(high-cardinality ?value wildcard)))
+               (loop for index below key-count
+                     collect
+                     (make-clause (list 'high-cardinality index 'exact-after))))))
+           (descriptor
+             (cl-prolog::%rulebase-predicate-descriptor
+              rulebase cl-prolog::+default-prolog-module+
+              'high-cardinality 2)))
+      (is-equal
+       `((high-cardinality ,target exact-before)
+         (high-cardinality ?value wildcard)
+         (high-cardinality ,target exact-after))
+       (stored-clause-heads
+        (cl-prolog::%predicate-descriptor-first-argument-entries
+         descriptor target)))))
+
+  (deftest predicate-index-resolves-first-argument-aliases-before-selection ()
+    (let* ((environment '((?outer . ?inner) (?inner . exact-after)))
+           (rulebase
+             (prolog
+              ((alias-index exact-before exact-before))
+              ((alias-index ?value wildcard))
+              ((alias-index exact-after exact-after))))
+           (session (cl-prolog::%make-rulebase-table-session rulebase))
+           (state
+             (cl-prolog::%make-proof-state
+              rulebase
+              environment
+              (cl-prolog::%make-environment-index environment)
+              nil
+              cl-prolog::+default-prolog-module+
+              session
+              (cl-prolog::%make-cut-tag))))
+      (is-equal
+       '((alias-index ?value wildcard)
+         (alias-index exact-after exact-after))
+       (stored-clause-heads
+        (cl-prolog::%proof-predicate-entries
+         '(alias-index ?outer ?result) state))))))
+
 (deftest predicate-descriptor-distinguishes-symbol-identity-and-eql-atoms ()
   (let* ((package-a
            (make-package
@@ -710,3 +897,43 @@
          (stored-clause-heads
           (cl-prolog::%predicate-descriptor-entries copy-descriptor)))))))
 )
+
+(progn
+  (deftest table-answer-replay-reuses-ground-answer-across-consumers ()
+    (let ((rulebase (prolog ((tabled-ground alpha)))))
+      (cl-prolog::%add-rulebase-table-declaration!
+       rulebase (quote tabled-ground) 1 :test)
+      (let ((solutions
+              (query-prolog
+               rulebase
+               (quote
+                ((tabled-ground ?first)
+                 (tabled-ground ?second)
+                 (tabled-ground ?third))))))
+        (is (= 1 (length solutions)))
+        (let ((environment (first solutions)))
+          (is-equal (quote alpha)
+                    (logic-substitute (quote ?first) environment))
+          (is-equal (quote alpha)
+                    (logic-substitute (quote ?second) environment))
+          (is-equal (quote alpha)
+                    (logic-substitute (quote ?third) environment))))))
+
+  (deftest table-answer-replay-freshens-nonground-answer-per-consumer ()
+    (let ((rulebase (prolog ((tabled-variable ?item)))))
+      (cl-prolog::%add-rulebase-table-declaration!
+       rulebase (quote tabled-variable) 1 :test)
+      (let ((solutions
+              (query-prolog
+               rulebase
+               (quote
+                ((tabled-variable ?first)
+                 (tabled-variable ?second)
+                 (= ?first alpha)
+                 (= ?second beta))))))
+        (is (= 1 (length solutions)))
+        (let ((environment (first solutions)))
+          (is-equal (quote alpha)
+                    (logic-substitute (quote ?first) environment))
+          (is-equal (quote beta)
+                    (logic-substitute (quote ?second) environment)))))))

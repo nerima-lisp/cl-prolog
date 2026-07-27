@@ -1,6 +1,15 @@
 ;;;; Unification protocol tests.
 (in-package #:cl-prolog.tests)
 
+(defun %test-environment-index-entry (variable index)
+  (multiple-value-bind (binding present-p)
+      (cl-prolog::%environment-index-binding variable index)
+    (if present-p
+        (values (cons (cdr binding)
+                      (cl-prolog::%environment-index-rank variable index))
+                t)
+        (values nil nil))))
+
 (deftest-unification
   unification-protocol
   (:substitute (pair ?x ?y) (pair left right) :expected (pair left right))
@@ -17,27 +26,38 @@
     (:outer (:inner . :buy) :buy))
   (:substitute ?x ?y :initial-env ((?y . done)) :expected done))
 
-(deftest
-  cyclic-unification-and-substitution-terminate
-  ()
-  (let ((left (cons 'node nil))
-        (right (cons 'node nil))
-        (different (cons 'other nil)))
-    (setf (cdr left) left
-          (cdr right) right
-          (cdr different) different)
-    (is (nth-value 1 (unify left right)))
-    (is (not (nth-value 1 (unify left different))))
-    (let ((copy (logic-substitute left nil)))
-      (is (not (eq copy left)))
-      (is (eq copy (cdr copy)))))
-  (let* ((existing (fresh-logic-variable "?EXISTING"))
-         (new (fresh-logic-variable "?NEW"))
-         (environment (list (cons existing 'bound))))
-    (multiple-value-bind (extended ok) (unify new 'value environment)
-      (is ok)
-      (is (eq 'value (cdr (assoc new extended :test (function eq)))))
-      (is (eq 'bound (cdr (assoc existing extended :test (function eq))))))))
+(progn
+  (deftest
+    cyclic-unification-and-substitution-terminate
+    ()
+    (let ((left (cons 'node nil))
+          (right (cons 'node nil))
+          (different (cons 'other nil)))
+      (setf (cdr left) left
+            (cdr right) right
+            (cdr different) different)
+      (is (nth-value 1 (unify left right)))
+      (is (not (nth-value 1 (unify left different))))
+      (let ((copy (logic-substitute left nil)))
+        (is (not (eq copy left)))
+        (is (eq copy (cdr copy)))))
+    (let* ((existing (fresh-logic-variable "?EXISTING"))
+           (new (fresh-logic-variable "?NEW"))
+           (environment (list (cons existing 'bound))))
+      (multiple-value-bind (extended ok) (unify new 'value environment)
+        (is ok)
+        (is (eq 'value (cdr (assoc new extended :test (function eq)))))
+        (is (eq 'bound (cdr (assoc existing extended :test (function eq))))))))
+  (deftest
+    large-isomorphic-cyclic-lists-unify-after-scratch-hash-migration
+    (:timeout 2)
+    (let ((left (loop repeat 33 collect 'node))
+          (right (loop repeat 33 collect 'node)))
+      (setf (cdr (last left)) left
+            (cdr (last right)) right)
+      (multiple-value-bind (environment ok) (unify left right)
+        (is ok)
+        (is (null environment))))))
 
 (deftest
   cyclic-substitution-preserves-sharing-and-variables
@@ -57,12 +77,18 @@
   (deftest
     cyclic-variable-scan-and-query-collection-terminate
     ()
-    (let ((ground-cycle (cons 'ground nil))
-          (query-cycle (cons '?x nil)))
-      (setf (cdr ground-cycle) ground-cycle
-            (cdr query-cycle) query-cycle)
-      (is (not (cl-prolog::%term-has-variables-p ground-cycle)))
-      (is-equal '(?x) (cl-prolog::%collect-query-variables query-cycle))))
+  (let* ((variable (fresh-logic-variable "?TERM-HAS-VARIABLES"))
+         (ground-cycle (cons 'ground nil))
+         (variable-cycle (cons variable nil))
+         (query-cycle (cons '?x nil)))
+    (setf (cdr ground-cycle) ground-cycle
+          (cdr variable-cycle) variable-cycle
+          (cdr query-cycle) query-cycle)
+    (is (not (cl-prolog::%term-has-variables-p 'ground)))
+    (is (cl-prolog::%term-has-variables-p variable))
+    (is (not (cl-prolog::%term-has-variables-p ground-cycle)))
+    (is (cl-prolog::%term-has-variables-p variable-cycle))
+    (is-equal '(?x) (cl-prolog::%collect-query-variables query-cycle))))
   (deftest
     question-prefixed-atoms-do-not-unify-as-variables
     ()
@@ -284,29 +310,29 @@
           (is
             (eq :left
                 (car
-                  (cl-prolog::%environment-index-entry
+                  (%test-environment-index-entry
                     left-variable
                     left-index))))
           (is
             (eq :right
                 (car
-                  (cl-prolog::%environment-index-entry
+                  (%test-environment-index-entry
                     right-variable
                     right-index))))
           (multiple-value-bind (entry present-p)
-              (cl-prolog::%environment-index-entry
+              (%test-environment-index-entry
                 right-variable
                 left-index)
             (declare (ignore entry))
             (is (not present-p)))
           (multiple-value-bind (entry present-p)
-              (cl-prolog::%environment-index-entry
+              (%test-environment-index-entry
                 left-variable
                 right-index)
             (declare (ignore entry))
             (is (not present-p)))
           (multiple-value-bind (entry present-p)
-              (cl-prolog::%environment-index-entry
+              (%test-environment-index-entry
                 left-variable
                 parent-index)
             (declare (ignore entry))
@@ -327,7 +353,7 @@
           (= 0
              (cl-prolog::%environment-index-overlay-length parent-index)))
         (multiple-value-bind (entry present-p)
-            (cl-prolog::%environment-index-entry variable parent-index)
+            (%test-environment-index-entry variable parent-index)
           (declare (ignore entry))
           (is (not present-p))))))
   (deftest environment-index-compaction-preserves-ranks-and-cycle-choice ()
@@ -357,13 +383,13 @@
               (cl-prolog::%environment-index-table compacted))))
       (is
         (= -1
-           (cdr (cl-prolog::%environment-index-entry x compacted))))
+           (cdr (%test-environment-index-entry x compacted))))
       (is
         (= -2
-           (cdr (cl-prolog::%environment-index-entry y compacted))))
+           (cdr (%test-environment-index-entry y compacted))))
       (is
         (= -3
-           (cdr (cl-prolog::%environment-index-entry z compacted))))
+           (cdr (%test-environment-index-entry z compacted))))
       (is (eq z (cl-prolog::%walk-term-indexed x compacted)))))
   (deftest environment-index-after-bindings-distinguishes-prefix-and-rebuild ()
     (let* ((variable (fresh-logic-variable "?PREFIX"))
@@ -397,15 +423,15 @@
       (is
         (eq :newest
             (car
-              (cl-prolog::%environment-index-entry variable extended))))
+              (%test-environment-index-entry variable extended))))
       (is
         (= -2
            (cdr
-             (cl-prolog::%environment-index-entry variable extended))))
+             (%test-environment-index-entry variable extended))))
       (is
         (eq :base
             (car
-              (cl-prolog::%environment-index-entry
+              (%test-environment-index-entry
                 variable
                 parent-index))))
       (is
@@ -418,7 +444,7 @@
       (is
         (eq :newest
             (car
-              (cl-prolog::%environment-index-entry variable rebuilt))))))
+              (%test-environment-index-entry variable rebuilt))))))
   (deftest environment-index-long-alias-chain-keeps-overlay-bounded
     (:timeout 5)
     (let* ((variables
@@ -452,6 +478,27 @@
       (is
         (eq :resolved
             (cl-prolog::%walk-term-indexed (car variables) index)))))))
+
+(deftest
+    indexed-substitution-upgrades-copy-map-with-bound-alias
+    ()
+  (let* ((alias (fresh-logic-variable "?COPY-ALIAS"))
+         (bound (fresh-logic-variable "?COPY-BOUND"))
+         (shared (cons alias nil))
+         (nodes (loop repeat (1+ cl-prolog::+freshening-map-threshold+)
+                     collect (cons :node :tail)))
+         (root (cons shared (cons shared nodes)))
+         (index (cl-prolog::%make-environment-index
+                  (list (cons alias bound)
+                        (cons bound :resolved)))))
+    (setf (cdr shared) shared)
+    (let ((copy (cl-prolog::%logic-substitute-indexed root index)))
+      (is (not (eq copy root)))
+      (is (eq (car copy) (cadr copy)))
+      (is (not (eq (car copy) shared)))
+      (is (eq :resolved (car (car copy))))
+      (is (eq (car copy) (cdr (car copy))))
+      (is (not (eq (caddr copy) (first nodes)))))))
 
 (progn
   (deftest
@@ -604,46 +651,94 @@
   (deftest
     unification-scratch-migrates-and-resets
     ()
+  (let* ((scratch (cl-prolog::%make-unification-scratch))
+         (left (cons :left nil))
+         (rhs-count 64)
+         (rights (loop repeat rhs-count collect (cons :right nil))))
+    (loop for right in rights
+          for expected-count from 1
+          do (is
+               (not
+                 (cl-prolog::%unification-scratch-remember-pair
+                   scratch left right)))
+             (is
+               (= expected-count
+                  (cl-prolog::%unification-scratch-pair-count scratch))))
+    (is (cl-prolog::%unification-scratch-hash-mode-p scratch))
+    (is (= rhs-count (cl-prolog::%unification-scratch-pair-count scratch)))
+    (let* ((table (cl-prolog::%unification-scratch-pair-table scratch))
+           (right-table (gethash left table)))
+      (is (hash-table-p right-table))
+      (is (= rhs-count (hash-table-count right-table))))
+    (loop for right in rights
+          do (is
+               (cl-prolog::%unification-scratch-remember-pair
+                 scratch left right)))
+    (is (= rhs-count (cl-prolog::%unification-scratch-pair-count scratch)))
+    (is
+      (not
+        (cl-prolog::%unification-scratch-remember-pair
+          scratch left (cons :new-right nil))))
+    (is (= (1+ rhs-count) (cl-prolog::%unification-scratch-pair-count scratch)))
+    (let ((pairs (cl-prolog::%unification-scratch-pairs scratch))
+          (table (cl-prolog::%unification-scratch-pair-table scratch)))
+      (cl-prolog::%reset-unification-scratch scratch)
+      (is (zerop (cl-prolog::%unification-scratch-pair-count scratch)))
+      (is (not (cl-prolog::%unification-scratch-hash-mode-p scratch)))
+      (is (not (cl-prolog::%unification-scratch-active-p scratch)))
+      (is (notany (function identity) pairs))
+      (is (zerop (hash-table-count table)))
+      (is
+        (not
+          (cl-prolog::%unification-scratch-remember-pair
+            scratch (cons :fresh nil) (cons :fresh nil))))
+      (is (= 1 (cl-prolog::%unification-scratch-pair-count scratch)))
+      (is (not (cl-prolog::%unification-scratch-hash-mode-p scratch)))
+      (cl-prolog::%reset-unification-scratch scratch))))
+  (deftest
+    unification-scratch-hash-mode-uses-eq-for-both-pair-components
+    ()
     (let* ((scratch (cl-prolog::%make-unification-scratch))
-           (lefts
-          (loop repeat 33
-                collect (cons nil nil)))
-           (rights
-          (loop repeat 33
-                collect (cons nil nil))))
-      (loop for left in lefts
-            for right in rights
-            for expected-count from 1
-            do (is (not (cl-prolog::%unification-scratch-remember-pair scratch left right))) (is (= expected-count (cl-prolog::%unification-scratch-pair-count scratch))))
+           (seed-left (cons :seed-left nil))
+           (seed-rights (loop repeat 32 collect (cons :seed-right nil)))
+           (left-a (list :same))
+           (left-b (list :same))
+           (right-a (list :same))
+           (right-b (list :same)))
+      (loop for right in seed-rights
+            do (is
+                 (not
+                   (cl-prolog::%unification-scratch-remember-pair
+                     scratch seed-left right))))
+      (is (equal left-a left-b))
+      (is (not (eq left-a left-b)))
+      (is (equal right-a right-b))
+      (is (not (eq right-a right-b)))
+      (is
+        (not
+          (cl-prolog::%unification-scratch-remember-pair
+            scratch left-a right-a)))
       (is (cl-prolog::%unification-scratch-hash-mode-p scratch))
-      (is (= 33 (cl-prolog::%unification-scratch-pair-count scratch)))
       (is
         (cl-prolog::%unification-scratch-remember-pair
-          scratch
-          (first lefts)
-          (first rights)))
+          scratch left-a right-a))
+      (is
+        (not
+          (cl-prolog::%unification-scratch-remember-pair
+            scratch left-b right-b)))
       (is
         (cl-prolog::%unification-scratch-remember-pair
-          scratch
-          (car (last lefts))
-          (car (last rights))))
-      (let ((pairs (cl-prolog::%unification-scratch-pairs scratch))
-            (table (cl-prolog::%unification-scratch-pair-table scratch)))
-        (cl-prolog::%reset-unification-scratch scratch)
-        (is (zerop (cl-prolog::%unification-scratch-pair-count scratch)))
-        (is (not (cl-prolog::%unification-scratch-hash-mode-p scratch)))
-        (is (not (cl-prolog::%unification-scratch-active-p scratch)))
-        (is (notany (function identity) pairs))
-        (is (zerop (hash-table-count table)))
-        (is
-          (not
-            (cl-prolog::%unification-scratch-remember-pair
-              scratch
-              (cons :fresh nil)
-              (cons :fresh nil))))
-        (is (= 1 (cl-prolog::%unification-scratch-pair-count scratch)))
-        (is (not (cl-prolog::%unification-scratch-hash-mode-p scratch)))
-        (cl-prolog::%reset-unification-scratch scratch))))
+          scratch left-b right-b))
+      (is (= 34 (cl-prolog::%unification-scratch-pair-count scratch)))
+      (let* ((table (cl-prolog::%unification-scratch-pair-table scratch))
+             (right-table-a (gethash left-a table))
+             (right-table-b (gethash left-b table)))
+        (is (eq (hash-table-test table) (quote eq)))
+        (is (hash-table-p right-table-a))
+        (is (hash-table-p right-table-b))
+        (is (eq (hash-table-test right-table-a) (quote eq)))
+        (is (eq (hash-table-test right-table-b) (quote eq))))
+      (cl-prolog::%reset-unification-scratch scratch)))
   (deftest
     cyclic-unification-scratch-success-and-failure
     ()
