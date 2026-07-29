@@ -1,5 +1,27 @@
 {
   "nodes": {
+    "cl-nix-forge": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "treefmt-nix": "treefmt-nix"
+      },
+      "locked": {
+        "lastModified": 1785343250,
+        "narHash": "sha256-D270XDkMhwxKpS7M3hkmICogce5Ms0gi3miMJVGOoOo=",
+        "owner": "nerima-lisp",
+        "repo": "cl-nix-forge",
+        "rev": "b028786a70d883e82ecc9f6b858ebc669daaec41",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v0.3.0",
+        "repo": "cl-nix-forge",
+        "type": "github"
+      }
+    },
     "cl-weave": {
       "inputs": {
         "nixpkgs": [
@@ -46,7 +68,7 @@
           "nixpkgs"
         ],
         "rust-overlay": "rust-overlay",
-        "treefmt-nix": "treefmt-nix"
+        "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
         "lastModified": 1785001695,
@@ -65,10 +87,11 @@
     },
     "root": {
       "inputs": {
+        "cl-nix-forge": "cl-nix-forge",
         "cl-weave": "cl-weave",
         "nixpkgs": "nixpkgs",
         "paredit-cli": "paredit-cli",
-        "treefmt-nix": "treefmt-nix_2"
+        "treefmt-nix": "treefmt-nix_3"
       }
     },
     "rust-overlay": {
@@ -95,6 +118,27 @@
     "treefmt-nix": {
       "inputs": {
         "nixpkgs": [
+          "cl-nix-forge",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1784369104,
+        "narHash": "sha256-47cxbcZODibHv3rELFQ9vZly0vUNkND/atn/U7HLeb0=",
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "rev": "df3c0640565d04a0261253cdd89fce78ec50168a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "type": "github"
+      }
+    },
+    "treefmt-nix_2": {
+      "inputs": {
+        "nixpkgs": [
           "paredit-cli",
           "nixpkgs"
         ]
@@ -113,7 +157,7 @@
         "type": "github"
       }
     },
-    "treefmt-nix_2": {
+    "treefmt-nix_3": {
       "inputs": {
         "nixpkgs": [
           "nixpkgs"
