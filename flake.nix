@@ -14,15 +14,13 @@
     # `github:nerima-lisp/cl-nix-forge` follows that repository's default
     # branch and would change this build without warning.
     #
-    # v0.2.0 is the newest tag that exists. It predates three fixes on
-    # cl-nix-forge's main -- `root` becoming required, `mkPackageFlake`'s
-    # `executable` argument, and `mkExecutable`'s `installSource` -- and none
-    # of the three can bite here: cl-prolog delivers no CLI binary of its own
-    # (`packages.default` is the ASDF system), and `root` is passed
-    # explicitly below rather than left to the broken default. Move this pin
-    # to the next tag when one is cut.
+    # v0.4.0 builds the generated dev shell from the check-enabled
+    # derivation, so `lispCheckDependencies` land on its CL_SOURCE_REGISTRY.
+    # That is what lets `devShellPackages` below carry only the interactive
+    # extras: under v0.3.0 this file had to replace `devShells.default`
+    # outright to get cl-weave into `nix develop`.
     cl-nix-forge = {
-      url = "github:nerima-lisp/cl-nix-forge/v0.3.0";
+      url = "github:nerima-lisp/cl-nix-forge/v0.4.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -266,9 +264,24 @@
       # its own treefmt-nix version.
       treefmt.evalModule = treefmt-nix.lib.evalModule;
 
-      # NOTE: no `devShellPackages` argument. The dev shell is overridden
-      # below, so anything passed here would be computed into a shell that is
-      # then discarded -- one silent source of truth too many.
+      # The interactive-only extras, and only those. sbcl and cl-weave both
+      # arrive through `inputsFrom` on the derivation the preset builds this
+      # shell from -- the CHECK-ENABLED one, whose `registryPath` carries
+      # `lispCheckDependencies` -- so `sbcl --script run-tests.lisp` inside
+      # `nix develop`, the workflow README documents, resolves cl-weave
+      # without it being named again here.
+      #
+      # `cl-weave.packages.*.default` below is a different thing from that
+      # registry entry: it is the delivered CLI *binary*, on PATH so `cl-weave
+      # run` works by hand. `self.formatter` is the preset's own treefmt
+      # wrapper -- the SAME evaluation `checks.formatting` uses, not a second
+      # one -- so formatting in the shell cannot disagree with the gate.
+      devShellPackages = ctx: [
+        self.formatter.${ctx.system}
+        ctx.pkgs.python3Packages.mkdocs-material
+        cl-weave.packages.${ctx.system}.default
+        paredit-cli.packages.${ctx.system}.default
+      ];
 
       overrideOutputs = ctx: {
         # See `testApp` above: cl-prolog's test app is deliberately a
@@ -276,28 +289,6 @@
         # thing that makes `checks.app-test` more than a duplicate gate.
         apps.test = testApp ctx;
         apps.default = testApp ctx;
-
-        # The preset builds its dev shell from `ctx.package`, whose resolved
-        # registry does NOT include `lispCheckDependencies` -- so `sbcl
-        # --script run-tests.lisp` inside `nix develop` would fail to find
-        # cl-weave, which is precisely the workflow README documents.
-        # `enableCheck` is the same derivation with `doCheck` on, and its
-        # `registryPath` therefore carries cl-weave.
-        #
-        # sbcl arrives through `inputsFrom` on that derivation; the packages
-        # below are the interactive-only extras. `self.formatter` is the
-        # preset's own treefmt wrapper -- the SAME evaluation
-        # `checks.formatting` uses, not a second one -- so formatting in the
-        # shell cannot disagree with the gate.
-        devShells.default = ctx.cl.mkDevShell {
-          drv = ctx.package.enableCheck;
-          extraPackages = [
-            self.formatter.${ctx.system}
-            ctx.pkgs.python3Packages.mkdocs-material
-            cl-weave.packages.${ctx.system}.default
-            paredit-cli.packages.${ctx.system}.default
-          ];
-        };
       };
 
       # Granularity lives here, NOT in extra GitHub Actions jobs: `nix flake
