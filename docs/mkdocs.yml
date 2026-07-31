@@ -163,7 +163,6 @@ nav:
       - Development: development.md
       - Testing: testing.md
       - Release Checklist: release-checklist.md
-      - Changelog: changelog.md
 
 # docs/notes/ is for measurements worth keeping but not worth publishing.
 # Without this declaration --strict fails the build the moment one is added.

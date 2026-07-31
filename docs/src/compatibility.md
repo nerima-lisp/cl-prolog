@@ -17,7 +17,7 @@ and the separation between rule data and solver logic. Specifically:
 
 - **Undocumented `%...` internals.** Symbols prefixed with `%` are private.
   They are not exported, they are not in [API Reference](api-reference.md), and
-  they change without a changelog entry.
+  they change without a release note.
 - **Full ISO Prolog behavior.** This is a focused Prolog runtime, not a
   standalone ISO system. [Semantics](semantics.md) records which parts of
   ISO/IEC 13211-1 the engine implements and where it departs; the INRIA
@@ -36,6 +36,6 @@ verified.
 
 The `:version` in `cl-prolog.asd` is the single source of truth: `flake.nix`
 reads it, and the release workflow refuses to publish a tag that disagrees
-with it. Breaking changes to the supported surface above are recorded under
-their release heading in
-[CHANGELOG.md](https://github.com/nerima-lisp/cl-prolog/blob/main/CHANGELOG.md).
+with it. Breaking changes to the supported surface above are recorded in the
+[release notes](https://github.com/nerima-lisp/cl-prolog/releases) for the
+version they shipped in.

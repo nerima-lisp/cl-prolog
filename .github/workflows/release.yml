@@ -84,36 +84,30 @@ jobs:
             exit 1
           fi
 
-      # Extracts this version's CHANGELOG section as the release body. Requires
-      # the Keep a Changelog heading format `## [X.Y.Z] - YYYY-MM-DD`.
+      # Creates the release as an empty draft. This workflow does not produce a
+      # release body at all.
       #
-      # Written straight to a file rather than through GITHUB_ENV: a CHANGELOG
-      # line can then never be read as an environment assignment.
-      - name: Extract release notes
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          VERSION="$version" perl -ne '
-            BEGIN { $heading = "## [$ENV{VERSION}]"; }
-            if (!$found) {
-              if (index($_, $heading) == 0
-                  && substr($_, length($heading), 1) =~ /(?:\s|\z)/) {
-                $found = 1;
-              }
-              next;
-            }
-            exit if /^## /;
-            print;
-          ' CHANGELOG.md > release-notes.md
-          if [[ ! -s release-notes.md ]]; then
-            echo "::error::CHANGELOG.md has no section for [$version]" >&2
-            exit 1
-          fi
-
+      # As of the 2026-08-01 revision the GitHub Release description is the only
+      # canonical changelog in this org; there is no CHANGELOG.md to read from.
+      # See RELEASE_STANDARD.md. After this job goes green the maintainer fills
+      # the body in and publishes:
+      #
+      #   gh release edit "$TAG" --notes-file <file> --draft=false
+      #
+      # `--draft` is load-bearing. Publishing straight away would make "the
+      # maintainer forgot the notes" a user-visible state. A draft appears
+      # neither under "Latest release" nor in the default output of
+      # `gh release list`, so an unfinished release never reaches downstream.
+      #
+      # `--generate-notes` is deliberately left off. Generated notes are a list
+      # of commit titles and PR numbers, and RELEASE_STANDARD.md requires the
+      # notes to be selected by "does a user of this package have to change
+      # their own code" — a judgement no generator can make.
+      #
       # `gh` ships on the runner, so this needs no third-party action at all —
       # one fewer supplier to trust than the template's
       # softprops/action-gh-release.
-      - name: Create GitHub Release
+      - name: Create draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -122,4 +116,5 @@ jobs:
           set -euo pipefail
           gh release create "$TAG" \
             --title "$TAG" \
-            --notes-file release-notes.md
+            --draft \
+            --notes ""

@@ -2,20 +2,27 @@
 ;;;; does not depend on the reader's package state at load time, and a single
 ;;;; spelling keeps `grep` reliable across the org.
 
+;;;; This form comes FIRST, before any defsystem. ASDF binds *package* to
+;;;; ASDF-USER only for a file it loads itself; read any other way -- a REPL
+;;;; `load`, an editor evaluating the buffer, flake.nix parsing :version -- the
+;;;; file is read in whatever package happens to be current. Saying it makes
+;;;; the file self-contained.
+(in-package #:asdf-user)
+
 (asdf:defsystem "cl-prolog"
   :description "A small, dependency-free Common Lisp Prolog engine."
   :long-description "A macro-first Common Lisp Prolog engine with CPS proof search, an extensible builtin registry, and a compact rule DSL."
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :homepage "https://github.com/nerima-lisp/cl-prolog"
-  :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
-  :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
-  :long-name "cl-prolog"
   ;; Single source of truth for the version. flake.nix parses this exact form
   ;; (first match wins) and release.yml refuses to publish a tag that
   ;; disagrees with it, so a release edits this one line.
   :version "1.1.0"
+  :homepage "https://github.com/nerima-lisp/cl-prolog"
+  :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
+  :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
+  :long-name "cl-prolog"
   :pathname "src"
   :serial t
   :components ((:file "package")

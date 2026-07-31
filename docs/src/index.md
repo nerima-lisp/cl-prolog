@@ -140,6 +140,6 @@ repository rather than copied into each of the 21 packages:
 
 What is specific to this package lives here: [Development](development.md) for
 the workflow, [Compatibility](compatibility.md) for what the public surface
-promises, and
-[CHANGELOG.md](https://github.com/nerima-lisp/cl-prolog/blob/main/CHANGELOG.md)
+promises, and the
+[releases](https://github.com/nerima-lisp/cl-prolog/releases)
 for the per-entry history.
