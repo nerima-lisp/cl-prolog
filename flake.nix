@@ -27,7 +27,7 @@
     # cl-weave is the testing library used by the cl-prolog/test ASDF system.
     # It follows this flake's nixpkgs so both share a single SBCL.
     cl-weave = {
-      url = "github:nerima-lisp/cl-weave/v1.0.0";
+      url = "github:nerima-lisp/cl-weave/v1.1.0";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.paredit-cli.follows = "paredit-cli";
     };
@@ -61,37 +61,21 @@
       treefmt-nix,
     }:
     let
-      # Only what is verified: x86_64-linux by CI, aarch64-darwin by the
-      # maintainer's local `nix flake check`. aarch64-linux and x86_64-darwin
-      # are not declared because nothing runs them, and a platform no runner
-      # can build makes `nix flake check --all-systems` fail with "platform
-      # mismatch" rather than skip it. See ADR-0078.
-      systems = [
-        "x86_64-linux"
-        "aarch64-darwin"
-      ];
-
-      # cl-weave as an ASDF SYSTEM, for `lispCheckDependencies`.
+      # Only what is verified, and CI verifies exactly one platform:
+      # x86_64-linux. aarch64-darwin was dropped in the 2026-08-01 revision of
+      # PACKAGE_STANDARD.md -- it rested on the maintainer running `nix flake
+      # check` locally, which nothing enforces, so it was a promise without a
+      # gate. aarch64-linux and x86_64-darwin were never declared. See
+      # ADR-0078.
       #
-      # It is built here from the flake input's source rather than taken as
-      # `cl-weave.packages.${system}.default`, because v1.0.0 predates its own
-      # migration: that attribute is the delivered CLI *binary*, not a
-      # registry entry cl-nix-forge can compose with. Do NOT reach for
-      # `fromDerivation` on the input instead -- that puts cl-weave's
-      # uncompiled source on the registry, and `lispDerivation` sets
-      # ASDF_OUTPUT_TRANSLATIONS to the identity mapping, so ASDF then tries
-      # to write fasls next to those sources inside the read-only Nix store.
+      # Consequence: `nix develop` and `nix build` no longer resolve on macOS,
+      # because mkPackageFlake generates packages/checks/apps/devShells from
+      # this one list. Development happens on Linux.
       #
-      # Once cl-weave is migrated and tagged v2.0.0 this whole binding
-      # collapses to `cl-weave.packages.${ctx.system}.cl-weave`.
-      clWeaveSystem =
-        ctx:
-        ctx.cl.lispDerivation {
-          pname = "cl-weave";
-          version = ctx.cl.fromAsdSystem "${cl-weave}/cl-weave.asd";
-          src = cl-weave;
-          lispSystem = "cl-weave";
-        };
+      # NOTE: `coverageReport` below carries its own `systems = [ "cl-prolog"
+      # "cl-prolog/weave" ]`. Those are ASDF SYSTEM NAMES, not platforms --
+      # leave them alone.
+      systems = [ "x86_64-linux" ];
 
       # `nix run .#test` -- and, through `apps.default`, README's headline
       # `nix run github:nerima-lisp/cl-prolog`.
@@ -110,10 +94,11 @@
       # dumped in -- a build sandbox that no longer exists -- so cl-weave's
       # shipped source tree has to be back on the registry before
       # `cl-prolog/weave` can resolve its `:depends-on`. `share/common-lisp/
-      # source//` is the layout v1.0.0's `packages.default` publishes for
-      # exactly that. Unlike the `lispDerivation` above this is a plain shell
-      # wrapper with ASDF's default output translations, so those fasls land
-      # under $HOME/.cache and never in the store.
+      # source//` is the layout cl-weave's `packages.default` publishes for
+      # exactly that. Unlike the `lispDerivation` that `lispCheckDependencies`
+      # puts on the registry below, this is a plain shell wrapper with ASDF's
+      # default output translations, so those fasls land under $HOME/.cache and
+      # never in the store.
       testApp =
         ctx:
         let
@@ -236,7 +221,18 @@
       # derivation, never a CL_SOURCE_REGISTRY string -- assembling that
       # registry is cl-nix-forge's job and it does it transitively, for
       # `checks.default`, `checks.examples` and `packages.coverage` alike.
-      lispCheckDependencies = ctx: [ (clWeaveSystem ctx) ];
+      #
+      # `packages.*.cl-weave` is cl-weave's ASDF SYSTEM, built by cl-weave's
+      # own flake -- a different output from `packages.*.default`, which is the
+      # delivered CLI *binary* the dev shell and `apps.test` use. Taking the
+      # system means this repository never compiles cl-weave itself.
+      #
+      # Do NOT reach for `fromDerivation` on the flake input instead, here or
+      # for the next sibling dependency added to this list: that puts
+      # cl-weave's uncompiled source on the registry, and `lispDerivation` sets
+      # ASDF_OUTPUT_TRANSLATIONS to the identity mapping, so ASDF then tries to
+      # write fasls next to those sources inside the read-only Nix store.
+      lispCheckDependencies = ctx: [ cl-weave.packages.${ctx.system}.cl-weave ];
 
       # `checks.default` runs run-tests.lisp -- the same file a developer runs
       # by hand -- rather than re-spelling the ASDF invocation here, so the
