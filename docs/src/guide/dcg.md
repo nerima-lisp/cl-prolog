@@ -3,7 +3,7 @@
 Definite Clause Grammars (DCGs) are a front end for describing token grammars.
 `def-dcg-rule` compiles a grammar body into an ordinary rule with two stream
 arguments (the input and the remainder), so grammars run on the same engine as
-everything else. See [Architecture](architecture.md) for how the front ends
+everything else. See [Architecture](../reference/architecture.md) for how the front ends
 converge on one runtime.
 
 ## A worked grammar
@@ -81,7 +81,7 @@ Usable as goals inside a grammar body:
 | `dcg-token-match-value`  | Match a token kind and value.                              |
 
 The exported DCG symbols are also listed in the
-[API Reference](api-reference.md#dcg).
+[API Reference](../reference/api.md#dcg).
 
 ## Next steps
 

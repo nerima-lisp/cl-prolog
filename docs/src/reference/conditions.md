@@ -3,7 +3,7 @@
 cl-prolog surfaces failures through the Common Lisp condition system. This page
 catalogues the exported condition types, their readers, and when each is
 signalled. The one-line symbol index also appears in the
-[API Reference](api-reference.md#conditions).
+[API Reference](api.md#conditions).
 
 ## Two distinct failure modes
 
@@ -79,7 +79,7 @@ These mirror the ISO error taxonomy. All are subtypes of
 | `arithmetic-evaluation-error`  | `arithmetic-error-expression`, `arithmetic-error-reason` |
 
 The readers return the offending expression and a reason describing why
-evaluation failed. See [Arithmetic and Comparison](arithmetic.md).
+evaluation failed. See [Arithmetic and Comparison](../guide/arithmetic.md).
 
 ## Parser resource limits
 
@@ -119,4 +119,4 @@ Because these are ordinary Common Lisp conditions, standard handlers apply:
 ```
 
 For failures *inside* Prolog, prefer Prolog-level `catch/3` and `throw/1` — see
-the control goals in [Builtin Goals](builtin-goals.md).
+the control goals in [Builtin Goals](../guide/builtin-goals.md).

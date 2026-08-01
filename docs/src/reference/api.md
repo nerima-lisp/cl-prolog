@@ -2,11 +2,12 @@
 
 The core `cl-prolog` system exposes the public `cl-prolog` package. This page
 lists every symbol exported by that package; the separately loaded public
-test-helper package `cl-prolog/weave` is documented in [Testing](testing.md).
+test-helper package `cl-prolog/weave` is documented in
+[Development](../project/development.md).
 Anything not listed here is internal.
 
-See [Querying](querying.md), [Builtin goals](builtin-goals.md),
-[Rule DSL](rule-dsl.md), and [DCG](dcg.md) for narrative explanations and
+See [Querying](../guide/querying.md), [Builtin goals](../guide/builtin-goals.md),
+[Rule DSL](../guide/rule-dsl.md), and [DCG](../guide/dcg.md) for narrative explanations and
 examples.
 
 ## Data
@@ -83,7 +84,7 @@ registry and its defining machinery are internal implementation details.
 The query functions accept an explicit rulebase and query. The mapping and
 list-returning APIs support `:max-depth`, `:environment`, `:project`, and
 `:limit`; `prolog-succeeds-p` supports `:max-depth`. See
-[Querying](querying.md) for contracts and result shapes.
+[Querying](../guide/querying.md) for contracts and result shapes.
 
 ## Parser, Writer, and Loader
 
@@ -161,13 +162,13 @@ notes.
 - `with-prolog-query`
 - `prolog-match`
 
-See [Rule DSL](rule-dsl.md) for macro forms and examples.
+See [Rule DSL](../guide/rule-dsl.md) for macro forms and examples.
 
 ## Builtin Goal Symbols
 
 These exported symbols form the public Lisp package surface for builtin goals.
 The same names can be written in parsed Prolog syntax with their supported
-arities. See [Builtin goals](builtin-goals.md) for behavior-oriented guidance.
+arities. See [Builtin goals](../guide/builtin-goals.md) for behavior-oriented guidance.
 
 - Control and meta-call: `!`, `call`, `call_nth`,
   `call_with_depth_limit`, `once`, `setup_call_cleanup`, `call_cleanup`,
@@ -179,7 +180,7 @@ arities. See [Builtin goals](builtin-goals.md) for behavior-oriented guidance.
   `retractall`, `current_predicate`, `predicate_property`, `abolish`, `clause`
 - Unification and term construction: `\=`, `=..` (univ). `..` is the exported
   finite-domain range operator (`xfx`, priority 450) used inside `in`/`ins`
-  domains — see [Arithmetic and Comparison](arithmetic.md#domain-assignment) —
+  domains — see [Arithmetic and Comparison](../guide/arithmetic.md#domain-assignment) —
   not a callable goal.
 - Arithmetic evaluation and comparison: `is`, `=:=`, `=\=`, `<`, `=<`, `>`,
   `>=`
@@ -202,7 +203,7 @@ ordinary Common Lisp host-function APIs: invoking the relation still happens
 through the Prolog query interface. Goals not called out as exported here are
 source/query-goal vocabulary only. This catalogue lists them by predicate
 indicator; see
-[Builtin Goals](builtin-goals.md) for behavior-oriented notes.
+[Builtin Goals](../guide/builtin-goals.md) for behavior-oriented notes.
 
 - **Operators:** `op/3` defines operators in the rulebase operator table;
   `current_op/3` enumerates them.
@@ -230,7 +231,7 @@ indicator; see
   and the exported query goals `succ/2` (the non-negative successor relation,
   usable in either direction) and `plus/3` (`A + B =:= C`, any single
   unknown). See
-  [Arithmetic and Comparison](arithmetic.md#relational-arithmetic).
+  [Arithmetic and Comparison](../guide/arithmetic.md#relational-arithmetic).
 - **List library:** the exported query goals `sum_list/2` (`sumlist/2`),
   `numlist/3`, `list_to_set/2`, `subtract/3`, `intersection/3`, `union/3`,
   and `permutation/2`; plus `max_list/2` and `min_list/2`.
@@ -266,8 +267,8 @@ indicator; see
     relations when used in a Lisp-shaped query; they are not Common Lisp
     functions to call directly. The remaining goals in this section are
     available through parsed source and the query-goal vocabulary without being
-    exported package symbols. The [Rule DSL](rule-dsl.md) and
-    [Extending the Engine](extending.md) pages cover the Lisp-facing API.
+    exported package symbols. The [Rule DSL](../guide/rule-dsl.md) and
+    [Extending the Engine](../guide/extending.md) pages cover the Lisp-facing API.
 
 ## DCG
 
@@ -278,7 +279,7 @@ indicator; see
 
 DCG tokens are either a bare token-kind symbol or a `(kind . value)` cons.
 `dcg-token-match` matches the kind and returns the remaining input;
-`dcg-token-match-value` matches both kind and value. See [DCG](dcg.md).
+`dcg-token-match-value` matches both kind and value. See [DCG](../guide/dcg.md).
 
 ## Conditions
 

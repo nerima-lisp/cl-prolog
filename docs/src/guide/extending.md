@@ -75,7 +75,7 @@ Querying `(choose ?x)` then proves twice, binding `?x` to `left` and `right`.
 The occurs check is always enabled, so unification never introduces cyclic
 terms. Environments are **persistent** association lists: `unify` extends rather
 than mutates, so older environments remain valid choice points. See the
-[API Reference](api-reference.md#unification) for `unify`, `logic-substitute`,
+[API Reference](../reference/api.md#unification) for `unify`, `logic-substitute`,
 `logic-var-p`, and `fresh-logic-variable`.
 
 ## Dispatch rules
@@ -95,4 +95,4 @@ mechanism: the DSL macros compile the expression into a precompiled closure
 invoked as a `(:when function variable...)` goal. Guards are for pure Lisp
 predicates over already-bound values; foreign predicates are for goals that
 must unify outputs or emit multiple solutions. See
-[Architecture](architecture.md#guards) for how guards are compiled.
+[Architecture](../reference/architecture.md#guards) for how guards are compiled.

@@ -50,7 +50,7 @@ parent of some Z who is an ancestor of Y."
 - The clause head is the relation being defined; the goals after it are its
   body.
 - Clauses are tried in definition order, so the base case is attempted first.
-  See [Semantics](semantics.md) for the exact search order.
+  See [Semantics](../reference/semantics.md) for the exact search order.
 
 ## 4. Ask for every solution
 

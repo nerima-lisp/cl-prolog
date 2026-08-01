@@ -164,7 +164,7 @@
   ;; compound '{}'(T), because DCG bodies are built on that representation.
   ("6.3.6*" "X = {a}, X = {}(a)" "uncaught host condition")
   ;; 8.2.1: the occurs_check flag defaults to true here, so =/2 refuses the
-  ;; cyclic binding ISO would let it make.  See docs/src/semantics.md.
+  ;; cyclic binding ISO would let it make.  See docs/src/reference/semantics.md.
   ("8.2.1*" "X = f(X)" :false)
   ;; 6.3.3: a functor is not required to be followed immediately by `(', so a
   ;; bare +(1,2) reads as the prefix operator applied to (1,2) and the writer

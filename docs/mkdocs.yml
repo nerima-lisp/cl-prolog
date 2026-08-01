@@ -122,12 +122,19 @@ markdown_extensions:
       permalink: true
       title: On this page
 
-# DOCS_STANDARD.md fixes these six sections, in this order. They track the
+# DOCS_STANDARD.md fixes these five sections, in this order. They track the
 # reader's state: Getting Started has not run anything yet, Guide has it
 # working but does not know the design, Reference is looking up one answer
-# while writing, Internals is about to change the engine, Project is about to
-# contribute. Readership falls off along that order, so reference and
-# internals sit at the back.
+# while writing, Project is about to contribute. Readership falls off along
+# that order, so reference sits at the back.
+#
+# The section names match the directories under docs/src/, so the nav and the
+# tree give the same answer to "where does this page live". index.md and
+# getting-started.md stay at the root rather than under guide/: a reader who
+# has not run anything yet should not have to open the Guide first.
+#
+# The former Internals section is gone: architecture.md and benchmarks.md are
+# both pages a reader consults for one answer, so they moved into reference/.
 #
 # Guide topics are ordered by dependency, not alphabetically: each page uses
 # vocabulary the previous one introduced.
@@ -136,33 +143,28 @@ markdown_extensions:
 # unlisted page, which is what keeps this list from falling behind.
 nav:
   - Home: index.md
-  - Getting Started:
-      - Installation: installation.md
-      - Quick Start: quick-start.md
-      - Your First Program: first-program.md
+  - Getting Started: getting-started.md
   - Guide:
-      - Querying: querying.md
-      - Rule DSL: rule-dsl.md
-      - Builtin Goals: builtin-goals.md
-      - Arithmetic and Comparison: arithmetic.md
-      - DCG Grammars: dcg.md
-      - Extending the Engine: extending.md
-      - Cookbook: cookbook.md
-      - Examples: examples.md
-      - Troubleshooting: troubleshooting.md
+      - Your First Program: guide/first-program.md
+      - Querying: guide/querying.md
+      - Rule DSL: guide/rule-dsl.md
+      - Builtin Goals: guide/builtin-goals.md
+      - Arithmetic and Comparison: guide/arithmetic.md
+      - DCG Grammars: guide/dcg.md
+      - Extending the Engine: guide/extending.md
+      - Cookbook: guide/cookbook.md
+      - Examples: guide/examples.md
+      - Troubleshooting: guide/troubleshooting.md
   - Reference:
-      - API Reference: api-reference.md
-      - Semantics: semantics.md
-      - Conditions and Errors: conditions.md
-      - Compatibility: compatibility.md
-      - Parser Resource Limits: parser-limits.md
-  - Internals:
-      - Architecture: architecture.md
-      - Benchmarks: benchmarks.md
+      - API: reference/api.md
+      - Semantics: reference/semantics.md
+      - Conditions and Errors: reference/conditions.md
+      - Compatibility: reference/compatibility.md
+      - Parser Resource Limits: reference/parser-limits.md
+      - Architecture: reference/architecture.md
+      - Benchmarks: reference/benchmarks.md
   - Project:
-      - Development: development.md
-      - Testing: testing.md
-      - Release Checklist: release-checklist.md
+      - Development: project/development.md
 
 # docs/notes/ is for measurements worth keeping but not worth publishing.
 # Without this declaration --strict fails the build the moment one is added.

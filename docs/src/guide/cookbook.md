@@ -143,7 +143,7 @@ clauses in the rulebase passed to the query:
 
 Born/died revisions give logical-update semantics: a running query proceeds
 over its snapshot even as the database changes. Use `copy-rulebase` first when
-you need isolation. See [Architecture](architecture.md#explicit-dynamic-mutation).
+you need isolation. See [Architecture](../reference/architecture.md#explicit-dynamic-mutation).
 
 ## Bind variables from the first solution
 
@@ -182,5 +182,5 @@ with `prolog-depth-limit-exceeded` instead of looping:
 (query-prolog *family* '(ancestor tom ?who) :max-depth 3)
 ```
 
-See [Semantics](semantics.md) and [Conditions and Errors](conditions.md) for
+See [Semantics](../reference/semantics.md) and [Conditions and Errors](../reference/conditions.md) for
 what each depth value means.

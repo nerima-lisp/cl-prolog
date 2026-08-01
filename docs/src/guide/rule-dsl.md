@@ -21,7 +21,7 @@ goals.
 
 Logic variables are `?`-prefixed symbols. Facts and rules share one
 definition-ordered sequence per predicate — see
-[Semantics](semantics.md#proof-search-semantics).
+[Semantics](../reference/semantics.md#proof-search-semantics).
 
 ## Building rulebases
 
@@ -90,7 +90,7 @@ invokes over already-bound values.
 
 A guard is for a **pure Lisp predicate** over bound values. When you need a goal
 that unifies outputs or emits several solutions, reach for a foreign predicate
-instead. See [Architecture](architecture.md#guards) for the compilation model.
+instead. See [Architecture](../reference/architecture.md#guards) for the compilation model.
 
 ## Foreign predicates
 
@@ -116,7 +116,7 @@ produce values without touching a shared database. Mutation is still available
 and deliberate — `asserta/1`, `assertz/1`, `retract/1`, and friends operate on
 the rulebase passed to a query, with logical-update semantics. See the
 [Cookbook](cookbook.md#mutate-a-rulebase-deliberately) and
-[Architecture](architecture.md#explicit-dynamic-mutation).
+[Architecture](../reference/architecture.md#explicit-dynamic-mutation).
 
 ## Next steps
 

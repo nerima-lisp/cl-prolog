@@ -15,7 +15,7 @@ sbcl --non-interactive \
     The example files are **not** standalone scripts. Invoking one directly
     with `sbcl --script` does not load the `cl-prolog` package. Load them
     through the `cl-prolog/examples` system, which is also exercised by the
-    `checks.examples` Nix check ([Development](development.md)).
+    `checks.examples` Nix check ([Development](../project/development.md)).
 
 ## `quick-start.lisp` — the smallest useful program
 
@@ -95,4 +95,4 @@ so they work with no user clauses at all:
 
 - [Cookbook](cookbook.md) — more task-oriented recipes.
 - [Builtin Goals](builtin-goals.md) — the full builtin catalogue.
-- [Testing](testing.md) — how the query test helpers assert on these shapes.
+- [Development](../project/development.md) — how the query test helpers assert on these shapes.

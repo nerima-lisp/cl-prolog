@@ -8,15 +8,15 @@ Changes preserve the documented `cl-prolog` public API, the CPS query surface,
 and the separation between rule data and solver logic. Specifically:
 
 - documented public `cl-prolog` behavior, as described in
-  [API Reference](api-reference.md)
+  [API Reference](api.md)
 - macro-first rule definition and CPS query semantics, as described in
-  [Rule DSL](rule-dsl.md) and [Querying](querying.md)
+  [Rule DSL](../guide/rule-dsl.md) and [Querying](../guide/querying.md)
 - reproducible packaging and example execution through the flake
 
 ## Not supported
 
 - **Undocumented `%...` internals.** Symbols prefixed with `%` are private.
-  They are not exported, they are not in [API Reference](api-reference.md), and
+  They are not exported, they are not in [API Reference](api.md), and
   they change without a release note.
 - **Full ISO Prolog behavior.** This is a focused Prolog runtime, not a
   standalone ISO system. [Semantics](semantics.md) records which parts of
@@ -24,7 +24,7 @@ and the separation between rule data and solver logic. Specifically:
   conformance corpus in `t/iso/` measures how far that goes.
 - **Unbounded relational enumeration in every argument direction.** A goal that
   is relational in one mode is not guaranteed to enumerate in all of them.
-  [Builtin Goals](builtin-goals.md) states the modes each builtin supports.
+  [Builtin Goals](../guide/builtin-goals.md) states the modes each builtin supports.
 
 ## Implementation support
 

@@ -58,6 +58,6 @@ gates a merge, consistent with the diagnostic-not-a-gate design above.
 
 ## See also
 
-- [Testing](testing.md) — the regression suite and query helpers.
+- [Development](../project/development.md) — the regression suite and query helpers.
 - [Architecture](architecture.md) — the proof-state prover the benchmarks
   measure.

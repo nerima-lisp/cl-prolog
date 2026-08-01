@@ -73,7 +73,7 @@ inputs; rebind it (or reset the parser's symbol table) if that happens.
 ## See also
 
 - [Conditions and Errors](conditions.md) — the full condition catalogue.
-- [Troubleshooting](troubleshooting.md#parsing-signalled-prolog-parser-resource-error)
+- [Troubleshooting](../guide/troubleshooting.md#parsing-signalled-prolog-parser-resource-error)
   — a focused recovery recipe.
 - [Semantics](semantics.md#parser-resource-limits) — where limits sit in the
   parsing model.

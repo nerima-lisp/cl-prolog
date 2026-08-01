@@ -2,7 +2,7 @@
 
 Every query takes an explicit rulebase and a goal, and returns solutions. There
 is no global database — see [Rule DSL](rule-dsl.md) for building rulebases and
-[Architecture](architecture.md#explicit-dynamic-mutation) for why state is
+[Architecture](../reference/architecture.md#explicit-dynamic-mutation) for why state is
 explicit.
 
 ```lisp
@@ -52,7 +52,7 @@ dispatches like `cond` over queries (both are covered in the
 
 `map-prolog-solutions`, `query-prolog`, `query-prolog-first`, and (for
 `:max-depth`) `prolog-succeeds-p` accept these. See the
-[API Reference](api-reference.md#queries) for the exact per-function support.
+[API Reference](../reference/api.md#queries) for the exact per-function support.
 
 ## Result conventions
 
@@ -85,7 +85,7 @@ builtin or unification step.
 
 Exhaustion signals `prolog-depth-limit-exceeded` rather than masquerading as
 logical failure, so an incomplete search is never reported as "no solutions".
-See [Semantics](semantics.md) and [Conditions and Errors](conditions.md).
+See [Semantics](../reference/semantics.md) and [Conditions and Errors](../reference/conditions.md).
 
 ## Validation
 

@@ -1,7 +1,7 @@
 name: Benchmarks
 
 # Diagnostic only — never a merge gate. benchmarks/performance.lisp exists to
-# measure and compare, not to pass or fail (see docs/src/benchmarks.md).
+# measure and compare, not to pass or fail (see docs/src/reference/benchmarks.md).
 # Manual dispatch plus a weekly schedule keep it off the PR path entirely, so
 # runner-to-runner noise can never block a merge.
 on:

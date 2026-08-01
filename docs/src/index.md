@@ -34,8 +34,8 @@ Facts are one-element clauses; rules are a head followed by body goals. Logic
 variables are `?`-prefixed symbols.
 
 !!! tip "New here?"
-    Start with [Installation](installation.md) and [Quick Start](quick-start.md),
-    then follow [Your First Program](first-program.md) to build a knowledge base
+    Start with [Getting Started](getting-started.md), then follow
+    [Your First Program](guide/first-program.md) to build a knowledge base
     step by step.
 
 ## Explore the docs
@@ -48,9 +48,8 @@ variables are `?`-prefixed symbols.
 
     Install the library, run your first query, and build a family tree.
 
-    [:octicons-arrow-right-24: Installation](installation.md) ·
-    [Quick Start](quick-start.md) ·
-    [First Program](first-program.md)
+    [:octicons-arrow-right-24: Getting Started](getting-started.md) ·
+    [First Program](guide/first-program.md)
 
 -   :material-book-open-variant: **Guide**
 
@@ -58,9 +57,9 @@ variables are `?`-prefixed symbols.
 
     Querying, the rule DSL, builtins, arithmetic, DCG grammars, and recipes.
 
-    [:octicons-arrow-right-24: Querying](querying.md) ·
-    [Builtin Goals](builtin-goals.md) ·
-    [Cookbook](cookbook.md)
+    [:octicons-arrow-right-24: Querying](guide/querying.md) ·
+    [Builtin Goals](guide/builtin-goals.md) ·
+    [Cookbook](guide/cookbook.md)
 
 -   :material-file-document-outline: **Reference**
 
@@ -68,19 +67,20 @@ variables are `?`-prefixed symbols.
 
     The exported symbol index, proof semantics, conditions, and parser limits.
 
-    [:octicons-arrow-right-24: API Reference](api-reference.md) ·
-    [Semantics](semantics.md) ·
-    [Conditions](conditions.md)
+    [:octicons-arrow-right-24: API Reference](reference/api.md) ·
+    [Semantics](reference/semantics.md) ·
+    [Conditions](reference/conditions.md)
 
 -   :material-cog-outline: **Internals & Project**
 
     ---
 
-    The CPS engine's architecture, testing, benchmarks, and release process.
+    The CPS engine's architecture, plus the test, benchmark, and release
+    workflow.
 
-    [:octicons-arrow-right-24: Architecture](architecture.md) ·
-    [Testing](testing.md) ·
-    [Development](development.md)
+    [:octicons-arrow-right-24: Architecture](reference/architecture.md) ·
+    [Benchmarks](reference/benchmarks.md) ·
+    [Development](project/development.md)
 
 </div>
 
@@ -97,7 +97,7 @@ variables are `?`-prefixed symbols.
 - An **SLG tabling engine** with automatic left-recursion handling.
 - **DCG** grammar rules and combinators.
 - A **transactional source loader** for Prolog text with configurable
-  [parser resource limits](parser-limits.md).
+  [parser resource limits](reference/parser-limits.md).
 - **Foreign predicates** via `define-foreign-predicate` as the supported
   extension surface.
 
@@ -124,8 +124,8 @@ Apple Silicon (`aarch64-darwin`):
 nix run github:nerima-lisp/cl-prolog
 ```
 
-See [Installation](installation.md) for the full matrix of load paths; use its
-ASDF instructions on other environments.
+See [Getting Started](getting-started.md) for the full matrix of load paths;
+use its ASDF instructions on other environments.
 
 ## Project policy
 
@@ -138,8 +138,8 @@ repository rather than copied into each of the 21 packages:
 - [Security policy](https://github.com/nerima-lisp/.github/blob/main/SECURITY.md)
 - [Support](https://github.com/nerima-lisp/.github/blob/main/SUPPORT.md)
 
-What is specific to this package lives here: [Development](development.md) for
-the workflow, [Compatibility](compatibility.md) for what the public surface
+What is specific to this package lives here: [Development](project/development.md) for
+the workflow, [Compatibility](reference/compatibility.md) for what the public surface
 promises, and the
 [releases](https://github.com/nerima-lisp/cl-prolog/releases)
 for the per-entry history.

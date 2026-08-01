@@ -2,7 +2,7 @@
 
 This page states the operational rules the engine follows. For the machinery
 behind them, see [Architecture](architecture.md); for the exported symbols, see
-the [API Reference](api-reference.md).
+the [API Reference](api.md).
 
 ## Core rules
 
@@ -77,7 +77,7 @@ unification step:
 - `1` — one level of rule expansion.
 - larger values — deeper derived proofs.
 
-`nil` means unbounded. See [Querying](querying.md#depth-bounds) for the caller's
+`nil` means unbounded. See [Querying](../guide/querying.md#depth-bounds) for the caller's
 view and [Conditions and Errors](conditions.md) for the exhaustion condition.
 
 ## Cut in detail

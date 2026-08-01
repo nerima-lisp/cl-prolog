@@ -2,7 +2,7 @@
 
 The list below is a representative, task-oriented overview, not an exhaustive
 list. The authoritative list of builtin symbols exported to Lisp callers is
-the [API Reference](api-reference.md#builtin-goal-symbols). Parsed Prolog
+the [API Reference](../reference/api.md#builtin-goal-symbols). Parsed Prolog
 source also uses implemented goal names that need not be exported as Common
 Lisp package symbols.
 
@@ -10,7 +10,7 @@ Lisp package symbols.
     Arithmetic has a dedicated page:
     [Arithmetic and Comparison](arithmetic.md). To add your own goals, see
     [Extending the Engine](extending.md). The conditions these goals raise are
-    catalogued in [Conditions and Errors](conditions.md).
+    catalogued in [Conditions and Errors](../reference/conditions.md).
 
 - **Unification:** `(= a b)`, `(\= a b)`, and
   `(unifiable a b ?unifier)` unify two terms, require that they cannot unify,
@@ -45,7 +45,7 @@ Lisp package symbols.
   occurrence), and `(permutation ?l ?p)` (enumerates permutations of the
   instantiated-list argument). `(subtract ?a ?b ?c)`, `(intersection ?a ?b ?c)`,
   and `(union ?a ?b ?c)` test membership by unifiability, discarding any
-  bindings (identical to SWI on ground lists; see [Semantics](semantics.md)).
+  bindings (identical to SWI on ground lists; see [Semantics](../reference/semantics.md)).
 - **Apply library (`library(apply)`):** `(maplist g ?l1 ...)` applies `g`
   across one or more lists in lockstep (arity 2 and up; the common SWI surface
   is `/2..5`); `(foldl g ?l ?v0 ?v)` through `(foldl g ?l1 ?l2 ?l3 ?v0 ?v)`

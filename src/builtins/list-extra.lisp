@@ -111,7 +111,7 @@ format builtins to cap attacker-controlled allocation."
 ;;; Unlike SWI's memberchk, a successful unification's bindings are discarded
 ;;; rather than propagated, so these never bind variables in the caller's
 ;;; terms; on ground lists the behavior is identical to SWI.  This divergence
-;;; is documented in docs/src/semantics.md.
+;;; is documented in docs/src/reference/semantics.md.
 
 (defun %unifiable-member-p (item list environment)
   "True when ITEM unifies with some element of LIST, discarding bindings."

@@ -131,14 +131,14 @@ numeric values:
     `=:=` compares *numeric values* after evaluation. To compare terms by the
     standard order of terms instead (`==`, `@<`, `compare`, …), see the term
     comparison goals in [Builtin Goals](builtin-goals.md) and the symbol list
-    in the [API Reference](api-reference.md#builtin-goal-symbols).
+    in the [API Reference](../reference/api.md#builtin-goal-symbols).
 
 ## Relational arithmetic
 
 Three goals relate integers rather than evaluating a one-shot expression. They
 are callable in queries and parsed Prolog source, but are not exported as Common
 Lisp symbols (see the
-[Prolog-source goals](api-reference.md#prolog-source-goals) catalogue).
+[Prolog-source goals](../reference/api.md#prolog-source-and-query-goals) catalogue).
 
 - **`(between low high value)`** — `low` and `high` must be instantiated
   integers. When `value` is unbound it enumerates every integer from `low` to
@@ -185,7 +185,7 @@ write the condition as an expression and the macro compiles it to a closure:
 ;; => (((?WHO . BOB)))
 ```
 
-See [Rule DSL](rule-dsl.md) for `:when` guards and [Semantics](semantics.md)
+See [Rule DSL](rule-dsl.md) for `:when` guards and [Semantics](../reference/semantics.md)
 for how guards are evaluated at proof time.
 
 ## Finite-domain constraints

@@ -5,7 +5,7 @@
 ;;;; their keys; the empty assoc is `assoc([])'.  (SWI uses an opaque AVL tree;
 ;;;; this list-backed form is O(n) per op but has the same observable relation.
 ;;;; It is an ordinary inspectable/unifiable compound, unlike SWI's opaque
-;;;; type -- see docs/src/semantics.md.)  Keys are compared with %COMPARE-TERMS,
+;;;; type -- see docs/src/reference/semantics.md.)  Keys are compared with %COMPARE-TERMS,
 ;;;; so any ground term may be a key.
 
 (in-package #:cl-prolog)
