@@ -18,7 +18,7 @@
   ;; Single source of truth for the version. flake.nix parses this exact form
   ;; (first match wins) and release.yml refuses to publish a tag that
   ;; disagrees with it, so a release edits this one line.
-  :version "1.1.0"
+  :version "1.2.0"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -91,7 +91,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.1.0"
+  :version "1.2.0"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -110,7 +110,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.1.0"
+  :version "1.2.0"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -175,7 +175,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.1.0"
+  :version "1.2.0"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -185,3 +185,54 @@
   :components ((:file "quick-start")
                (:file "family-tree")
                (:file "relational-lists")))
+
+;;; Generic, program-representation-independent call-graph analysis:
+;;; reachability, dead-code/mutual-recursion detection, FD-constraint graph
+;;; coloring, and a DCG grammar for a small textual edge notation. Split out
+;;; of nerima-lisp/cl-cc's packages/prolog-tools, which paired this with a
+;;; thin adapter walking cl-cc's own AST nodes; cl-cc now depends on this
+;;; system and keeps only that adapter.
+(asdf:defsystem "cl-prolog/callgraph"
+  :description "Generic Prolog-backed call-graph analysis (reachability, dead-code, FD-constraint coloring, edge-notation DCG)."
+  :author "takeokunn <bararararatty@gmail.com>"
+  :maintainer "takeokunn <bararararatty@gmail.com>"
+  :license "MIT"
+  :version "1.2.0"
+  :homepage "https://github.com/nerima-lisp/cl-prolog"
+  :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
+  :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
+  :depends-on (#:cl-prolog)
+  :serial t
+  :pathname "callgraph"
+  :components ((:file "package")
+               (:file "call-graph")
+               (:file "edge-dcg")
+               (:file "graph-coloring"))
+  :in-order-to ((asdf:test-op (asdf:test-op "cl-prolog/callgraph/test"))))
+
+;;; A separate secondary system, not folded into `cl-prolog/test`: this
+;;; keeps callgraph's cl-weave dependency scoped to exactly the package it
+;;; tests, mirrors `cl-prolog/callgraph` living in its own directory, and
+;;; lets it be run in isolation (`(asdf:test-system "cl-prolog/callgraph")`)
+;;; the same way nerima-lisp/cl-cc's own packages/prolog-tools test system
+;;; was run independently of that repo's umbrella test aggregate.
+(asdf:defsystem "cl-prolog/callgraph/test"
+  :description "cl-weave test suite for cl-prolog/callgraph."
+  :author "takeokunn <bararararatty@gmail.com>"
+  :maintainer "takeokunn <bararararatty@gmail.com>"
+  :license "MIT"
+  :version "1.2.0"
+  :homepage "https://github.com/nerima-lisp/cl-prolog"
+  :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
+  :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
+  :depends-on (#:cl-prolog/callgraph #:cl-weave)
+  :serial t
+  :pathname "callgraph/test"
+  :components ((:file "package")
+               (:file "call-graph-test")
+               (:file "edge-dcg-test")
+               (:file "graph-coloring-test"))
+  :perform (asdf:test-op (op c)
+             (declare (ignore op c))
+             (unless (uiop:symbol-call "CL-WEAVE" "RUN-ALL" :reporter :spec)
+               (error "cl-prolog/callgraph cl-weave test suite failed."))))
