@@ -79,6 +79,7 @@ variables are `?`-prefixed symbols.
     workflow.
 
     [:octicons-arrow-right-24: Architecture](reference/architecture.md) ·
+    [Call Graph Analysis](reference/callgraph.md) ·
     [Benchmarks](reference/benchmarks.md) ·
     [Development](project/development.md)
 
@@ -100,6 +101,10 @@ variables are `?`-prefixed symbols.
   [parser resource limits](reference/parser-limits.md).
 - **Foreign predicates** via `define-foreign-predicate` as the supported
   extension surface.
+- **Call graph analysis** (`cl-prolog/callgraph`) — Prolog-backed reachability,
+  dead-code and mutual-recursion detection, and FD-constraint graph coloring
+  over any caller/callee edge set. See
+  [Call Graph Analysis](reference/callgraph.md).
 
 ## Install
 

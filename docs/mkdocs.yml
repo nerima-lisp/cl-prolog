@@ -162,6 +162,7 @@ nav:
       - Compatibility: reference/compatibility.md
       - Parser Resource Limits: reference/parser-limits.md
       - Architecture: reference/architecture.md
+      - Call Graph Analysis: reference/callgraph.md
       - Benchmarks: reference/benchmarks.md
   - Project:
       - Development: project/development.md
