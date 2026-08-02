@@ -27,7 +27,7 @@
     # cl-weave is the testing library used by the cl-prolog/test ASDF system.
     # It follows this flake's nixpkgs so both share a single SBCL.
     cl-weave = {
-      url = "github:nerima-lisp/cl-weave/v1.1.0";
+      url = "github:nerima-lisp/cl-weave/v1.1.4";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.paredit-cli.follows = "paredit-cli";
     };
@@ -36,7 +36,7 @@
     # Lisp sources: a dev-shell binary for agent-driven refactors and a
     # structural-parse lint gate reused in `checks`.
     paredit-cli = {
-      url = "github:nerima-lisp/paredit-cli/v1.0.0";
+      url = "github:nerima-lisp/paredit-cli/v1.4.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
