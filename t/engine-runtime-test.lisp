@@ -422,9 +422,10 @@ produces the normal proof-search result."
              (setf (symbol-function
                     (quote cl-prolog::%unify-rule-program-head))
                    (lambda (goal program variables environment parent-index)
-                     (setf observed-variables variables)
-                     (funcall original goal program variables
-                              environment parent-index)))
+                     (multiple-value-prog1
+                         (funcall original goal program variables
+                                  environment parent-index)
+                       (setf observed-variables (copy-seq variables)))))
              (is (null
                   (query-prolog rulebase
                                 (quote (lazy-head-mismatch left right)))))

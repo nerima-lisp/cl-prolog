@@ -54,3 +54,5 @@ system-index.txt
 # MkDocs local build output. docs/mkdocs.yml sets site_dir: ../site, so a bare
 # `mkdocs build -f docs/mkdocs.yml` writes here rather than under docs/.
 /site/
+
+.worktrees/
