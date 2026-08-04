@@ -13,19 +13,22 @@
 
 (defmacro %with-propagated-bindings
     ((propagated propagated-index extended extended-index) &body body)
-  "Evaluate BODY for EXTENDED's bindings, routing through the constraint hook.
-
-BODY sees PROPAGATED and PROPAGATED-INDEX. When *CONSTRAINT-POST-UNIFY-HOOK*
-is set it decides which propagated bindings BODY runs on, and how often."
   (let ((continue (gensym "CONTINUE")))
-    `(flet ((,continue (,propagated)
-              (let ((,propagated-index
-                      (%environment-index-after-bindings
-                       ,propagated ,extended ,extended-index)))
-                ,@body)))
-       (if *constraint-post-unify-hook*
-           (funcall *constraint-post-unify-hook* ,extended (function ,continue))
-           (,continue ,extended)))))
+    `(if *constraint-post-unify-hook*
+         (flet ((,continue (,propagated)
+                  (let ((,propagated-index
+                          (%environment-index-after-bindings
+                           ,propagated ,extended ,extended-index)))
+                    ,@body)))
+           (declare (dynamic-extent #',continue))
+           (funcall *constraint-post-unify-hook*
+                    ,extended
+                    (function ,continue)))
+         (let* ((,propagated ,extended)
+                (,propagated-index
+                  (%environment-index-after-bindings
+                   ,propagated ,extended ,extended-index)))
+           ,@body))))
 
 (defun %conjunction-p (query)
   "True when QUERY is already a list of goals rather than a single goal."
@@ -161,6 +164,7 @@ is set it decides which propagated bindings BODY runs on, and how often."
                        (if (zerop variable-count)
                            #()
                            (make-array variable-count))))
+                (declare (dynamic-extent variables))
                 (dotimes (index variable-count)
                   (setf (svref variables index)
                         (%fresh-rule-program-variable)))
@@ -281,7 +285,7 @@ Return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
         (%resolve-user-goal normalized-goal state explicit-module)
       (if defining-module
           (%prove-clauses/k resolved-user-goal
-                            (%state-with state :module defining-module)
+                            (if (eq defining-module (proof-state-module state)) state (%state-with state :module defining-module))
                             succeed)
           ;; ISO 13211-1 7.7.7 and 7.11.2.4: what an undefined procedure
           ;; does is the unknown' flag's to decide.  error' (the default)
@@ -383,31 +387,178 @@ body throws here, abandoning the remaining clause alternatives."
               (%prove-rule/k goal entry state cut-tag succeed)))))))
 
 (progn
+  (defvar *rule-program-goal-materialization-count* nil)
+
   (declaim (inline %rule-program-operand-value))
   (defun %rule-program-operand-value (operand variables)
     (ecase (%clause-template-reference-kind operand)
       (:literal (%clause-template-reference-value operand))
-      (:variable (svref variables (%clause-template-reference-value operand)))))
+      (:variable
+       (let* ((index (%clause-template-reference-value operand))
+              (variable (svref variables index)))
+         (or variable
+             (setf (svref variables index)
+                   (%fresh-rule-program-variable)))))))
+
   (defun %unify-rule-program-head (goal program variables environment parent-index)
     "Unify GOAL arguments with PROGRAM operands without materializing a rule head."
     (let ((arguments (cdr goal))
           (operands (%rule-program-head-operands program))
           (extended environment)
-          (index parent-index))
-      (dotimes (operand-index (length operands) (values extended t index))
-        (multiple-value-bind (next-extended ok next-index)
-            (%unify-indexed (car arguments)
-                            (%rule-program-operand-value
-                             (svref operands operand-index) variables)
-                            extended index (not (eq index parent-index)))
-          (unless ok
-            (return-from %unify-rule-program-head
-              (values nil nil parent-index)))
-          (setf extended next-extended
-                index next-index
-                arguments (cdr arguments))))))
+          (index parent-index)
+          (index-owned-p nil))
+      (labels ((extend-directly (variable term)
+                 (unless index-owned-p
+                   (setf index (%copy-environment-index index)
+                         index-owned-p t))
+                 (let ((binding (cons variable term))) (%push-environment-index-binding binding index) (push binding extended)))
+               (atomic-equal-p (left right)
+                 (or (eq left right)
+                     (and (symbolp left)
+                          (symbolp right)
+                          (%same-atom-text-p left right))
+                     (equal left right)))
+               (unify-operand (argument operand)
+                 (let ((value (%rule-program-operand-value operand variables)))
+                   (cond
+                     ((consp argument) (values nil nil))
+                     ((logic-var-p argument)
+                      (multiple-value-bind (binding present-p)
+                          (%environment-index-binding argument index)
+                        (declare (ignore binding))
+                        (if present-p
+                            (values nil nil)
+                            (if (and (logic-var-p value)
+                                     (nth-value 1
+                                       (%environment-index-binding value index)))
+                                (values nil nil)
+                                (progn
+                                  (unless (eq argument value)
+                                    (extend-directly argument value))
+                                  (values t t))))))
+                     ((logic-var-p value)
+                      (multiple-value-bind (binding present-p)
+                          (%environment-index-binding value index)
+                        (declare (ignore binding))
+                        (if present-p
+                            (values nil nil)
+                            (progn
+                              (extend-directly value argument)
+                              (values t t)))))
+                     ((consp value) (values nil nil))
+                     (t (values t (atomic-equal-p argument value)))))))
+        (dotimes (operand-index (length operands) (values extended t index))
+          (let ((argument (car arguments))
+                (operand (svref operands operand-index)))
+            (multiple-value-bind (handled-p ok)
+                (unify-operand argument operand)
+              (cond
+                ((and handled-p (not ok))
+                 (return-from %unify-rule-program-head
+                   (values nil nil parent-index)))
+                ((not handled-p)
+                 (multiple-value-bind (next-extended generic-ok next-index)
+                     (%unify-indexed argument
+                                     (%rule-program-operand-value operand variables)
+                                     extended index index-owned-p)
+                   (unless generic-ok
+                     (return-from %unify-rule-program-head
+                       (values nil nil parent-index)))
+                   (setf extended next-extended
+                         index next-index
+                         index-owned-p (not (eq index parent-index)))))))
+            (setf arguments (cdr arguments)))))))
+
+  (defun %unify-rule-program-instruction-head
+      (instruction caller-variables program callee-variables
+                   environment parent-index)
+    "Unify encoded caller operands with an encoded callee head."
+    (let ((caller-operands (%rule-instruction-operands instruction))
+          (callee-operands (%rule-program-head-operands program))
+          (extended environment)
+          (index parent-index)
+          (index-owned-p nil)
+          (scratch (and *unification-scratch* (not (%unification-scratch-active-p *unification-scratch*)) *unification-scratch*)))
+      (labels ((extend-directly (variable term)
+                                (unless index-owned-p
+                                  (setf index (%copy-environment-index index)
+                                        index-owned-p t))
+                                (let ((binding (cons variable term))) (%push-environment-index-binding binding index) (push binding extended)))
+               (atomic-equal-p (left right)
+                               (or (eq left right)
+                                   (and (symbolp left)
+                                        (symbolp right)
+                                        (%same-atom-text-p left right))
+                                   (equal left right)))
+               (unify-operands (caller-operand callee-operand)
+                               (let ((caller-value
+                                      (%rule-program-operand-value
+                                       caller-operand caller-variables))
+                                     (callee-value
+                                      (%rule-program-operand-value
+                                       callee-operand callee-variables)))
+                                 (cond
+                                  ((consp caller-value) (values nil nil))
+                                  ((logic-var-p caller-value)
+                                   (multiple-value-bind (binding present-p)
+                                       (%environment-index-binding caller-value index)
+                                     (declare (ignore binding))
+                                     (if present-p
+                                         (values nil nil)
+                                         (if (and (logic-var-p callee-value)
+                                                  (nth-value 1
+                                                             (%environment-index-binding
+                                                              callee-value index)))
+                                             (values nil nil)
+                                             (progn
+                                               (unless (eq caller-value callee-value)
+                                                 (extend-directly caller-value callee-value))
+                                               (values t t))))))
+                                  ((logic-var-p callee-value)
+                                   (multiple-value-bind (binding present-p)
+                                       (%environment-index-binding callee-value index)
+                                     (declare (ignore binding))
+                                     (if present-p
+                                         (values nil nil)
+                                         (progn
+                                           (extend-directly callee-value caller-value)
+                                           (values t t)))))
+                                  ((consp callee-value) (values nil nil))
+                                  (t (values t
+                                             (atomic-equal-p
+                                              caller-value callee-value)))))))
+        (dotimes (operand-index (length caller-operands)
+                                (values extended t index))
+          (let ((caller-operand (svref caller-operands operand-index))
+                (callee-operand (svref callee-operands operand-index)))
+            (multiple-value-bind (handled-p ok)
+                (unify-operands caller-operand callee-operand)
+              (cond
+               ((and handled-p (not ok))
+                (return-from %unify-rule-program-instruction-head
+                             (values environment nil parent-index)))
+               ((not handled-p)
+                (unless scratch
+                  (setf scratch (%make-unification-scratch)))
+                (let ((*unification-scratch* scratch))
+                  (multiple-value-bind (next-extended generic-ok next-index)
+                      (%unify-indexed
+                       (%rule-program-operand-value
+                        caller-operand caller-variables)
+                       (%rule-program-operand-value
+                        callee-operand callee-variables)
+                       extended index index-owned-p)
+                    (unless generic-ok
+                      (return-from %unify-rule-program-instruction-head
+                                   (values environment nil parent-index)))
+                    (setf extended next-extended
+                          index next-index
+                          index-owned-p (not (eq index parent-index)))))))))))))
+
   (defun %materialize-rule-program-goal (instruction variables)
     "Materialize one instruction with shared fresh variables."
+    (when *rule-program-goal-materialization-count*
+      (incf *rule-program-goal-materialization-count*))
     (let* ((operands (%rule-instruction-operands instruction))
            (arguments nil))
       (loop for index downfrom (1- (length operands)) to 0
@@ -415,60 +566,201 @@ body throws here, abandoning the remaining clause alternatives."
                       (svref operands index) variables)
                      arguments))
       (cons (%rule-instruction-predicate instruction) arguments)))
-  (defun %prove-rule-program-body/k (program variables goal-cache pc state succeed)
-    "Execute PROGRAM body from PC, materializing each reached goal at most once."
-    (let ((body (%rule-program-body program)))
-      (if (= pc (length body))
-          (funcall succeed state)
-          (let* ((cut-tag (proof-state-cut-tag state))
-                 (goal (or (svref goal-cache pc)
-                           (setf (svref goal-cache pc)
-                                 (%materialize-rule-program-goal
-                                  (svref body pc) variables)))))
-            (%prove-goal/k
-             goal state
-             (lambda (next-state)
-               (%prove-rule-program-body/k
-                program variables goal-cache (1+ pc)
-                (%state-with next-state :cut-tag cut-tag)
-                succeed)))))))
+
+  (defun %rule-program-instruction-left-recursive-p
+      (predicate arity state)
+    "Return the cached revision-scoped recursion status without making a goal."
+    (let* ((rulebase (proof-state-rulebase state))
+           (revision (rulebase-revision rulebase))
+           (module (proof-state-module state))
+           (cache (rulebase-left-recursion-analysis rulebase)))
+      (multiple-value-bind (index present-p)
+          (%left-recursion-scope-index cache revision module)
+        (unless present-p
+          (setf index
+                (multiple-value-bind (adjacency reverse-adjacency nodes)
+                    (%first-user-goal-adjacency state)
+                  (%make-left-recursion-index-from-recursive-nodes
+                   (%strongly-connected-recursive-nodes
+                    (%dfs-finish-order nodes adjacency)
+                    adjacency
+                    reverse-adjacency))))
+          (%cache-left-recursion-scope-index! cache revision module index))
+        (%left-recursion-index-recursive-p index predicate arity))))
+
+  (defun %rule-program-direct-entries (instruction variables state)
+    "Return a safe immutable candidate snapshot and whether direct dispatch applies."
+    (let* ((rulebase (proof-state-rulebase state))
+           (module (proof-state-module state))
+           (predicate (%rule-instruction-predicate instruction))
+           (operands (%rule-instruction-operands instruction))
+           (arity (length operands))
+           (descriptor
+             (%rulebase-predicate-descriptor
+              rulebase module predicate arity)))
+      (if (or (null descriptor)
+              (%goal-solver predicate arity)
+              (%foreign-goal-solver predicate arity)
+              (%rulebase-predicate-property rulebase predicate arity module)
+              (%rulebase-tabled-p rulebase predicate arity module)
+              (and (not *depth-limited-search-p*)
+                   (not (and *constraints-active-p-hook*
+                             (funcall *constraints-active-p-hook*)))
+                   (%rule-program-instruction-left-recursive-p
+                    predicate arity state)))
+          (values nil nil)
+          (let ((entries
+                  (if (plusp arity)
+                      (%predicate-descriptor-first-argument-entries
+                       descriptor
+                       (%walk-term-indexed
+                        (%rule-program-operand-value
+                         (svref operands 0) variables)
+                        (proof-state-environment-index state)))
+                      (%predicate-descriptor-entries descriptor))))
+            (if (every
+                 (lambda (entry)
+                   (%clause-template-rule-program
+                    (%stored-clause-template entry)))
+                 entries)
+                (values entries t)
+                (values nil nil))))))
+
+  (defun %state-descending-into-rule-program-instruction
+      (state bindings environment-index instruction variables cut-tag)
+    "Descend into an encoded rule, materializing only a depth error payload."
+    (let ((remaining (proof-state-remaining-depth state)))
+      (when (eql remaining 0)
+        (%raise-resource-error
+         "DEPTH_LIMIT"
+         (proof-state-bindings state)
+         (%iso-atom "CALL")
+         "explicit rule-resolution depth limit exceeded"
+         :condition-type (quote prolog-depth-limit-exceeded)
+         :goal (%materialize-rule-program-goal instruction variables)))
+      (%state-with state
+                   :bindings bindings
+                   :environment-index environment-index
+                   :remaining-depth (and remaining (1- remaining))
+                   :cut-tag cut-tag)))
+
+  (defun %prove-rule-program-direct-entry/k
+    (instruction caller-variables entry state cut-tag succeed)
+  "Try one snapshotted encoded fact or rule entry."
+  (let* ((clause (%stored-clause-clause entry))
+         (program
+           (%clause-template-rule-program
+            (%stored-clause-template entry)))
+         (variable-count (%rule-program-variable-count program))
+         (variables
+           (if (zerop variable-count)
+               #()
+               (make-array variable-count :initial-element nil)))
+         (goal-cache
+           (make-array (length (%rule-program-body program))
+                       :initial-element nil))
+         (parent-bindings (proof-state-bindings state))
+         (parent-index (proof-state-environment-index state)))
+    (declare (dynamic-extent variables goal-cache))
+    (multiple-value-bind (extended ok extended-index)
+        (%unify-rule-program-instruction-head
+         instruction caller-variables program variables
+         parent-bindings parent-index)
+      (when ok
+        (%with-propagated-bindings
+            (propagated propagated-index extended extended-index)
+          (if (null (clause-body clause))
+              (funcall succeed
+                       (%state-with
+                        state
+                        :bindings propagated
+                        :environment-index propagated-index))
+              (%prove-rule-program-body/k
+               program variables goal-cache 0
+               (%state-descending-into-rule-program-instruction
+                state propagated propagated-index
+                instruction caller-variables cut-tag)
+               succeed)))))))
+
+  (defun %prove-rule-program-direct/k
+      (instruction variables entries state succeed)
+    "Prove one encoded local user call over a single descriptor snapshot."
+    (let ((cut-tag (%make-cut-tag)))
+      (cl:catch cut-tag
+        (dolist (entry entries)
+          (%prove-rule-program-direct-entry/k
+           instruction variables entry state cut-tag succeed)))))
+
+  (defun %prove-rule-program-instruction/k
+    (instruction variables goal-cache pc state succeed)
+  "Dispatch one instruction directly when the complete local snapshot is safe."
+  (multiple-value-bind (entries direct-p)
+      (%rule-program-direct-entries instruction variables state)
+    (if direct-p
+        (if (null *call-depth-limit-token*)
+            (%prove-rule-program-direct/k
+             instruction variables entries state succeed)
+            (progn
+              (when (zerop *call-depth-limit-remaining*)
+                (cl:throw *call-depth-limit-token*
+                          *call-depth-limit-token*))
+              (let ((*call-depth-limit-remaining*
+                      (1- *call-depth-limit-remaining*))
+                    (*call-depth-limit-used*
+                      (1+ *call-depth-limit-used*)))
+                (%prove-rule-program-direct/k
+                 instruction variables entries state succeed))))
+        (let ((goal
+                (or (svref goal-cache pc)
+                    (setf (svref goal-cache pc)
+                          (%materialize-rule-program-goal
+                           instruction variables)))))
+          (%prove-goal/k goal state succeed)))))
+
+  (defun %prove-rule-program-body/k
+    (program variables goal-cache pc state succeed)
+  "Execute PROGRAM body, directly dispatching safe encoded local calls."
+  (let ((body (%rule-program-body program)))
+    (if (= pc (length body))
+        (funcall succeed state)
+        (let ((cut-tag (proof-state-cut-tag state)))
+          (flet ((%continue-rule-program-body (next-state)
+                   (%prove-rule-program-body/k
+                    program variables goal-cache (1+ pc)
+                    (%state-with next-state :cut-tag cut-tag)
+                    succeed)))
+            (declare (dynamic-extent (function %continue-rule-program-body)))
+            (%prove-rule-program-instruction/k
+             (svref body pc) variables goal-cache pc state
+             (function %continue-rule-program-body)))))))
+
   (defun %prove-rule-program/k (goal program state cut-tag succeed)
-    "Resolve GOAL using the restricted immutable rule instruction path."
-    (let* ((variables (make-array (%rule-program-variable-count program)))
-           (goal-cache (make-array (length (%rule-program-body program))
-                                   :initial-element nil))
-           (parent-bindings (proof-state-bindings state))
-           (parent-index (proof-state-environment-index state)))
-      (dotimes (index (length variables))
-        (setf (svref variables index) (%fresh-rule-program-variable)))
-      (multiple-value-bind (extended ok extended-index)
-          (%unify-rule-program-head
-           goal program variables parent-bindings parent-index)
-        (when ok
-          (%with-propagated-bindings
-              (propagated propagated-index extended extended-index)
+  "Resolve GOAL using the restricted immutable rule instruction path."
+  (let* ((variables
+           (make-array (%rule-program-variable-count program)
+                       :initial-element nil))
+         (parent-bindings (proof-state-bindings state))
+         (parent-index (proof-state-environment-index state)))
+    (declare (dynamic-extent variables))
+    (multiple-value-bind (extended ok extended-index)
+        (%unify-rule-program-head
+         goal program variables parent-bindings parent-index)
+      (when ok
+        (%with-propagated-bindings
+            (propagated propagated-index extended extended-index)
+          (let* ((rule-state
+                   (%state-descending-into-rule
+                    state propagated propagated-index goal cut-tag))
+                 (goal-cache
+                   (make-array
+                    (length (%rule-program-body program))
+                    :initial-element nil)))
+            (declare (dynamic-extent goal-cache))
             (%prove-rule-program-body/k
-             program variables goal-cache 0
-             (%state-descending-into-rule
-              state propagated propagated-index goal cut-tag)
-             succeed))))))
-  (defun %prove-generic-rule/k (goal entry state cut-tag succeed)
-    "Resolve GOAL through the general graph-template rule path."
-    (let ((fresh-rule (%materialize-stored-clause-for-proof
-                       entry (%stored-clause-template entry)))
-          (parent-bindings (proof-state-bindings state))
-          (parent-index (proof-state-environment-index state)))
-      (multiple-value-bind (extended ok extended-index)
-          (%unify-indexed goal (clause-head fresh-rule)
-                          parent-bindings parent-index nil)
-        (when ok
-          (%with-propagated-bindings
-              (propagated propagated-index extended extended-index)
-            (%prove-goals/k
-             (clause-body fresh-rule)
-             (%state-descending-into-rule
-              state propagated propagated-index goal cut-tag)
-             succeed))))))
+             program variables goal-cache 0 rule-state succeed)))))))
+
+  (defun %prove-generic-rule/k (goal entry state cut-tag succeed) "Resolve GOAL through the general graph-template rule path." (let* ((template (%stored-clause-template entry)) (stored-rule (%stored-clause-clause entry)) (context (unless (zerop (%clause-template-variable-count template)) (%make-clause-template-materialization-context template))) (head (if context (%materialize-clause-template-head template context) (clause-head stored-rule))) (parent-bindings (proof-state-bindings state)) (parent-index (proof-state-environment-index state))) (multiple-value-bind (extended ok extended-index) (%unify-indexed goal head parent-bindings parent-index nil) (when ok (%with-propagated-bindings (propagated propagated-index extended extended-index) (%prove-goals/k (if context (%materialize-clause-template-body template context) (clause-body stored-rule)) (%state-descending-into-rule state propagated propagated-index goal cut-tag) succeed))))))
+
   (defun %prove-rule/k (goal entry state cut-tag succeed)
     "Resolve GOAL against one stored rule; a cut in the body prunes the clause list."
     (let* ((template (%stored-clause-template entry))
@@ -492,23 +784,48 @@ passed to (return-from BLOCK-NAME ...)."
 (defun %provable-p (query rulebase environment depth
                     &optional (module +default-prolog-module+))
   "Return true when QUERY has at least one proof."
-  (let ((*unification-scratch*
-          (or *unification-scratch* (%make-unification-scratch))))
-    (%with-logic-variable-order
-      (block provable
-        (let ((cut-tag (%make-cut-tag)))
-          (cl:catch cut-tag
-            (%prove-goals/k
-             (%normalize-query query)
-             (%make-proof-state
-              rulebase
-              environment
-              (%make-environment-index environment)
-              depth
-              module
-              (%make-rulebase-table-session rulebase)
-              cut-tag)
-             (%with-first-solution provable (state)
-               (declare (cl:ignore state))
-               t))))
-        nil))))
+  ;; PROLOG-SUCCEEDS-P calls this directly rather than going through
+  ;; %MAP-PROLOG-SOLUTIONS* (src/query.lisp), so it independently
+  ;; participates in the same top-level-call accounting that makes dead
+  ;; rulebase entries eligible for compaction -- see
+  ;; %WITH-PROLOG-TOP-LEVEL-CALL and *PROLOG-ACTIVE-TOP-LEVEL-CALLS* in
+  ;; data.lisp.
+  (%with-prolog-top-level-call (rulebase)
+    (let* ((*unification-scratch*
+             (or *unification-scratch* (%make-unification-scratch)))
+           (*tabled-search-active-p* nil)
+           (normalized-query (%normalize-query query))
+           (session (%make-rulebase-table-session rulebase))
+           (cacheable-p (and (null environment)
+                             (null depth)
+                             (= (length normalized-query) 1)))
+           (cache-key (and cacheable-p
+                           (multiple-value-bind (canonical cyclic-p)
+                               (%canonicalize-variant (first normalized-query))
+                             (list module
+                                   (if cyclic-p
+                                       (%variant-graph-key canonical)
+                                       canonical)))))
+           (successful-queries (%table-session-successful-queries session)))
+      (when (and cache-key (gethash cache-key successful-queries))
+        (return-from %provable-p t))
+      (%with-logic-variable-order
+        (block provable
+          (let ((cut-tag (%make-cut-tag)))
+            (cl:catch cut-tag
+              (%prove-goals/k
+               normalized-query
+               (%make-proof-state
+                rulebase
+                environment
+                (%make-environment-index environment)
+                depth
+                module
+                session
+                cut-tag)
+               (lambda (state)
+                 (declare (cl:ignore state))
+                 (when (and cache-key *tabled-search-active-p*)
+                   (setf (gethash cache-key successful-queries) t))
+                 (return-from provable t))))
+            nil))))))

@@ -1,44 +1,50 @@
 ;;;; Tabling (memoized resolution): left-recursion detection and the
 ;;;; declared-tabled-predicate answer cache built on top of core CPS
 ;;;; proof search.
-
 (in-package #:cl-prolog)
 
 (defun %replay-table-answers/k (goal state entry succeed)
-  "Unify each stored answer for ENTRY with GOAL and invoke SUCCEED."
+  "Unify each currently eligible answer for ENTRY with GOAL and invoke SUCCEED."
   (let ((parent-bindings (proof-state-bindings state))
-        (parent-index (proof-state-environment-index state)))
-    (loop repeat (%table-entry-answer-count entry)
-          for table-answer in (%table-entry-answers entry)
+        (parent-index (proof-state-environment-index state))
+        (answers
+        (if (%table-entry-delta-active-p entry) (%table-entry-delta-answers entry)
+          (%table-entry-answers entry)))
+        (answer-count
+        (if (%table-entry-delta-active-p entry) (%table-entry-delta-count entry)
+          (%table-entry-answer-count entry))))
+    (loop repeat answer-count
+          for table-answer in answers
           for answer = (%table-answer-term table-answer)
-          do (multiple-value-bind (extended ok extended-index)
-                 (%unify-indexed
-                  goal
-                  (if (%table-answer-contains-variables-p table-answer)
-                      (%instantiate-variant answer)
-                      answer)
-                  parent-bindings
-                  parent-index
-                  nil)
-               (when ok
-                 (funcall
-                  succeed
-                  (%state-with
-                   state
-                   :bindings extended
-                   :environment-index extended-index)))))))
+          do (multiple-value-bind (extended ok extended-index) (%unify-indexed
+          goal
+          (if (%table-answer-contains-variables-p table-answer) (%instantiate-variant answer (%table-answer-cyclic-p table-answer))
+            answer)
+          parent-bindings
+          parent-index
+          nil)
+        (when ok
+          (funcall
+            succeed
+            (%state-with state :bindings extended :environment-index extended-index)))))))
 
 (defun %predicate-key (goal)
   (when (%goal-form-p goal)
     (cons (first goal) (length (rest goal)))))
 
-(defparameter +tabling-transparent-control-strategies+
-  '(("NOT" . :unary) ("\\+" . :unary) ("ONCE" . :unary) ("IGNORE" . :unary)
-    ("CALL_NTH" . :unary) ("CALL_WITH_DEPTH_LIMIT" . :unary)
-    ("AND" . :sequence) ("SETUP_CALL_CLEANUP" . :sequence)
-    ("CALL_CLEANUP" . :sequence) ("FORALL" . :sequence)
+(defparameter +tabling-transparent-control-strategies+ '(("NOT" . :unary)
+    ("\\+" . :unary)
+    ("ONCE" . :unary)
+    ("IGNORE" . :unary)
+    ("CALL_NTH" . :unary)
+    ("CALL_WITH_DEPTH_LIMIT" . :unary)
+    ("AND" . :sequence)
+    ("SETUP_CALL_CLEANUP" . :sequence)
+    ("CALL_CLEANUP" . :sequence)
+    ("FORALL" . :sequence)
     ("OR" . :alternatives)
-    ("IF-THEN-ELSE" . :if-then-else) ("SOFT-IF-THEN-ELSE" . :if-then-else)
+    ("IF-THEN-ELSE" . :if-then-else)
+    ("SOFT-IF-THEN-ELSE" . :if-then-else)
     ("CATCH" . :catch))
   "How %FIRST-USER-PREDICATE-KEYS's left-recursion analysis sees through a
 control construct to the first-user-goal(s) beyond it, keyed by ISO functor
@@ -53,74 +59,53 @@ shape.")
   "Return possible first user-predicate indicators reached by CLAUSE."
   (labels ((static-call-goal (closure arguments)
              (cond
-               ((and (symbolp closure)
-                     (not (logic-var-p closure)))
-                (cons closure arguments))
-               ((and (consp closure) (%goal-form-p closure))
-                (append closure arguments))))
+          ((and (symbolp closure) (not (logic-var-p closure))) (cons closure arguments))
+          ((and (consp closure) (%goal-form-p closure)) (append closure arguments))))
            (analyze-alternatives (goals)
              (let ((keys '())
-                   (transparent-p nil))
-               (dolist (goal goals)
-                 (multiple-value-bind (goal-keys goal-transparent-p)
-                     (analyze-goal goal)
-                   (setf keys (nconc keys goal-keys)
-                         transparent-p
-                         (or transparent-p goal-transparent-p))))
-               (values (remove-duplicates keys :test #'equal)
-                       transparent-p)))
+              (transparent-p nil))
+          (dolist (goal goals)
+            (multiple-value-bind (goal-keys goal-transparent-p) (analyze-goal goal)
+              (setf keys (nconc keys goal-keys)
+                    transparent-p (or transparent-p goal-transparent-p))))
+          (values (remove-duplicates keys :test #'equal) transparent-p)))
            (analyze-sequence (goals)
-             (if (null goals)
-                 (values nil t)
-                 (multiple-value-bind (keys transparent-p)
-                     (analyze-goal (first goals))
-                   (if transparent-p
-                       (multiple-value-bind (later-keys later-transparent-p)
-                           (analyze-sequence (rest goals))
-                         (values (remove-duplicates
-                                  (nconc keys later-keys) :test #'equal)
-                                 later-transparent-p))
-                       (values keys nil)))))
+             (if (null goals) (values nil t)
+          (multiple-value-bind (keys transparent-p) (analyze-goal (first goals))
+            (if transparent-p (multiple-value-bind (later-keys later-transparent-p) (analyze-sequence (rest goals))
+                (values
+                  (remove-duplicates (nconc keys later-keys) :test #'equal)
+                  later-transparent-p))
+              (values keys nil)))))
            (analyze-conditional (condition branches)
-             (multiple-value-bind (keys transparent-p)
-                 (analyze-goal condition)
-               (if transparent-p
-                   (multiple-value-bind (branch-keys branch-transparent-p)
-                       (analyze-alternatives branches)
-                     (values (remove-duplicates
-                              (nconc keys branch-keys) :test #'equal)
-                             branch-transparent-p))
-                   (values keys nil))))
+             (multiple-value-bind (keys transparent-p) (analyze-goal condition)
+          (if transparent-p (multiple-value-bind (branch-keys branch-transparent-p) (analyze-alternatives branches)
+              (values
+                (remove-duplicates (nconc keys branch-keys) :test #'equal)
+                branch-transparent-p))
+            (values keys nil))))
            (analyze-goal (raw-goal)
              (let* ((goal (%ensure-goal-form raw-goal))
-                    (key (%predicate-key goal)))
-               (cond
-                 ((null key) (values nil t))
-                 ((and (not (%goal-solver (car key) (cdr key)))
-                       (not (%foreign-goal-solver (car key) (cdr key))))
-                  (values (list key) nil))
-                 ((%foreign-goal-solver (car key) (cdr key))
-                  (values nil t))
-                 (t
-                  (let ((name (string-upcase (symbol-name (first goal)))))
-                    (if (string= name "CALL")
-                        (let ((called (static-call-goal (second goal)
-                                                        (cddr goal))))
-                          (if called
-                              (analyze-goal called)
-                              (values nil t)))
-                        (case (cdr (assoc name
-                                          +tabling-transparent-control-strategies+
-                                          :test #'string=))
-                          (:unary (analyze-goal (second goal)))
-                          (:sequence (analyze-sequence (rest goal)))
-                          (:alternatives (analyze-alternatives (rest goal)))
-                          (:if-then-else
-                           (analyze-conditional (second goal) (cddr goal)))
-                          (:catch
-                           (analyze-conditional (second goal)
-                                                (list (fourth goal))))
-                          (otherwise (values nil t))))))))))
+               (key (%predicate-key goal)))
+          (cond
+            ((null key) (values nil t))
+            ((and
+                (not (%goal-solver (car key) (cdr key)))
+                (not (%foreign-goal-solver (car key) (cdr key))))
+              (values (list key) nil))
+            ((%foreign-goal-solver (car key) (cdr key)) (values nil t))
+            (t
+              (let ((name (string-upcase (symbol-name (first goal)))))
+                (if (string= name "CALL") (let ((called (static-call-goal (second goal) (cddr goal))))
+                    (if called (analyze-goal called)
+                      (values nil t)))
+                  (case (cdr (assoc name +tabling-transparent-control-strategies+ :test #'string=))
+                    (:unary (analyze-goal (second goal)))
+                    (:sequence (analyze-sequence (rest goal)))
+                    (:alternatives (analyze-alternatives (rest goal)))
+                    (:if-then-else (analyze-conditional (second goal) (cddr goal)))
+                    (:catch (analyze-conditional (second goal) (list (fourth goal))))
+                    (otherwise (values nil t))))))))))
     (nth-value 0 (analyze-sequence (clause-body clause)))))
 
 (defun %first-user-goal-adjacency (state)
@@ -130,13 +115,12 @@ STATE's rulebase forms among first-user-goal predicate keys."
         (reverse-adjacency (make-hash-table :test #'equal))
         (nodes '()))
     (labels ((ensure-node (key)
-               (multiple-value-bind (neighbors node-present-p)
-                   (gethash key adjacency)
-                 (declare (ignore neighbors))
-                 (unless node-present-p
-                   (setf (gethash key adjacency) '()
-                         (gethash key reverse-adjacency) '())
-                   (push key nodes)))))
+               (multiple-value-bind (neighbors node-present-p) (gethash key adjacency)
+            (declare (ignore neighbors))
+            (unless node-present-p
+              (setf (gethash key adjacency) '()
+                    (gethash key reverse-adjacency) '())
+              (push key nodes)))))
       (dolist (entry (%proof-module-entries state))
         (let* ((clause (%stored-clause-clause entry))
                (head-key (%predicate-key (clause-head clause)))
@@ -161,18 +145,16 @@ STATE's rulebase forms among first-user-goal predicate keys."
                 for frame = (pop stack)
                 for current = (car frame)
                 for expanded-p = (cdr frame)
-                do (if expanded-p
-                       (push current finish-order)
-                       (unless (gethash current visited)
-                         (setf (gethash current visited) t)
-                         (push (cons current t) stack)
-                         (dolist (next (gethash current adjacency))
-                           (unless (gethash next visited)
-                             (push (cons next nil) stack)))))))))
+                do (if expanded-p (push current finish-order)
+              (unless (gethash current visited)
+                (setf (gethash current visited) t)
+                (push (cons current t) stack)
+                (dolist (next (gethash current adjacency))
+                  (unless (gethash next visited)
+                    (push (cons next nil) stack)))))))))
     finish-order))
 
-(defun %strongly-connected-recursive-nodes
-    (finish-order adjacency reverse-adjacency)
+(defun %strongly-connected-recursive-nodes (finish-order adjacency reverse-adjacency)
   "Return a hash-table marking every node in FINISH-ORDER that belongs to a
 nontrivial strongly-connected component or has a self-loop, over ADJACENCY
 and its transpose REVERSE-ADJACENCY (Kosaraju's algorithm, second pass)."
@@ -185,56 +167,54 @@ and its transpose REVERSE-ADJACENCY (Kosaraju's algorithm, second pass)."
           (loop while stack
                 for current = (pop stack)
                 do (unless (gethash current assigned)
-                     (setf (gethash current assigned) t)
-                     (push current component)
-                     (dolist (previous (gethash current reverse-adjacency))
-                       (unless (gethash previous assigned)
-                         (push previous stack)))))
-          (when (or (rest component)
-                    (member (first component)
-                            (gethash (first component) adjacency)
-                            :test #'equal))
+              (setf (gethash current assigned) t)
+              (push current component)
+              (dolist (previous (gethash current reverse-adjacency))
+                (unless (gethash previous assigned)
+                  (push previous stack)))))
+          (when (or
+              (rest component)
+              (member (first component) (gethash (first component) adjacency) :test #'equal))
             (dolist (member component)
               (setf (gethash member recursive) t))))))
     recursive))
 
-(defstruct (%left-recursion-index (:copier nil)
-                                  (:constructor %make-left-recursion-index
-                                      (predicate-arities)))
-  "Allocation-free membership index for one left-recursion analysis scope."
-  (predicate-arities (make-hash-table :test #'eq)
-                     :type hash-table :read-only t))
+(defstruct (%left-recursion-index
+    (:copier nil)
+    (:constructor %make-left-recursion-index (predicate-arities))) "Allocation-free membership index for one left-recursion analysis scope."
+  (predicate-arities (make-hash-table :test #'eq) :type hash-table :read-only t))
 
 (defun %make-left-recursion-index-from-recursive-nodes (recursive-nodes)
   "Build a predicate/arity membership index from RECURSIVE-NODES."
   (let ((predicate-arities (make-hash-table :test #'eq)))
-    (maphash (lambda (key recursive-p)
-               (when recursive-p
-                 (let ((arities (or (gethash (car key) predicate-arities)
-                                     (setf (gethash (car key) predicate-arities)
-                                           (make-hash-table :test #'eql)))))
-                   (setf (gethash (cdr key) arities) t))))
-             recursive-nodes)
+    (maphash
+      (lambda (key recursive-p)
+        (when recursive-p
+          (let ((arities
+                (or
+                  (gethash (car key) predicate-arities)
+                  (setf (gethash (car key) predicate-arities) (make-hash-table :test #'eql)))))
+            (setf (gethash (cdr key) arities) t))))
+      recursive-nodes)
     (%make-left-recursion-index predicate-arities)))
 
 (defun %left-recursion-index-recursive-p (index predicate arity)
   "Return true when PREDICATE/ARITY belongs to INDEX."
-  (let ((arities (gethash predicate
-                          (%left-recursion-index-predicate-arities index))))
+  (let ((arities (gethash predicate (%left-recursion-index-predicate-arities index))))
     (and arities (gethash arity arities))))
 
 (defun %left-recursion-scope-index (cache revision module)
   "Return CACHE entry and presence flag for REVISION and MODULE."
   (let ((modules (gethash revision cache)))
-    (if modules
-        (gethash module modules)
-        (values nil nil))))
+    (if modules (gethash module modules)
+      (values nil nil))))
 
 (defun %cache-left-recursion-scope-index! (cache revision module index)
   "Store INDEX in CACHE under REVISION and MODULE."
-  (let ((modules (or (gethash revision cache)
-                     (setf (gethash revision cache)
-                           (make-hash-table :test (function eq))))))
+  (let ((modules
+        (or
+          (gethash revision cache)
+          (setf (gethash revision cache) (make-hash-table :test (function eq))))))
     (setf (gethash module modules) index)))
 
 (defun %left-recursive-p (goal state)
@@ -244,29 +224,27 @@ and its transpose REVERSE-ADJACENCY (Kosaraju's algorithm, second pass)."
            (revision (rulebase-revision rulebase))
            (module (proof-state-module state))
            (cache (rulebase-left-recursion-analysis rulebase)))
-      (multiple-value-bind (index present-p)
-          (%left-recursion-scope-index cache revision module)
+      (multiple-value-bind (index present-p) (%left-recursion-scope-index cache revision module)
         (unless present-p
-          (setf index
-                (multiple-value-bind (adjacency reverse-adjacency nodes)
-                    (%first-user-goal-adjacency state)
-                  (%make-left-recursion-index-from-recursive-nodes
-                   (%strongly-connected-recursive-nodes
-                    (%dfs-finish-order nodes adjacency)
-                    adjacency reverse-adjacency))))
+          (setf index (multiple-value-bind (adjacency reverse-adjacency nodes) (%first-user-goal-adjacency state)
+              (%make-left-recursion-index-from-recursive-nodes
+                (%strongly-connected-recursive-nodes
+                  (%dfs-finish-order nodes adjacency)
+                  adjacency
+                  reverse-adjacency))))
           (%cache-left-recursion-scope-index! cache revision module index))
-        (%left-recursion-index-recursive-p index
-                                           (first goal)
-                                           (length (rest goal)))))))
+        (%left-recursion-index-recursive-p index (first goal) (length (rest goal)))))))
 
 (defun %record-table-answer! (entry answer cyclic-p contains-variables-p)
   "Append ANSWER to ENTRY, returning true only when it was not already tabled."
   (let ((index (if cyclic-p
-                   (%table-entry-cyclic-answer-index entry)
+                   (or (%table-entry-cyclic-answer-index entry)
+                       (setf (%table-entry-cyclic-answer-index entry)
+                             (make-hash-table :test (function equal))))
                    (%table-entry-answer-index entry)))
         (answer-key (if cyclic-p (%variant-graph-key answer) answer)))
     (unless (nth-value 1 (gethash answer-key index))
-      (let ((cell (list (%make-table-answer answer contains-variables-p)))
+      (let ((cell (list (%make-table-answer answer contains-variables-p cyclic-p)))
             (tail (%table-entry-answers-tail entry)))
         (if tail
             (setf (cdr tail) cell)
@@ -279,59 +257,97 @@ and its transpose REVERSE-ADJACENCY (Kosaraju's algorithm, second pass)."
 (defun %table-key (state canonical-goal cyclic-goal-p)
   "Return the session table key identifying CANONICAL-GOAL variant."
   (let ((rulebase (proof-state-rulebase state)))
-    (list* rulebase
-           (rulebase-revision rulebase)
-           (proof-state-module state)
-           (if cyclic-goal-p
-               (list :cyclic (%variant-graph-key canonical-goal))
-               (list canonical-goal)))))
+    (list*
+      rulebase
+      (rulebase-revision rulebase)
+      (proof-state-module state)
+      (if cyclic-goal-p (list :cyclic (%variant-graph-key canonical-goal))
+        (list canonical-goal)))))
+
+(defun %linear-direct-left-recursive-p (goal state)
+  "True when relevant clauses contain at most one direct, leading recursive call."
+  (let ((goal-key (%predicate-key goal)))
+    (labels ((opaque-control-p (body-goal)
+               (and
+            (%goal-form-p body-goal)
+            (let ((name (symbol-name (first body-goal))))
+              (or
+                (string= name "CALL")
+                (assoc name +tabling-transparent-control-strategies+ :test (function string=)))))))
+      (every
+        (lambda (stored-clause)
+          (let ((recursive-count 0)
+                (recursive-position nil)
+                (opaque-p nil)
+                (body (clause-body (%stored-clause-clause stored-clause))))
+            (loop for body-goal in body
+                  for position from 0
+                  do (when (opaque-control-p body-goal)
+                (setf opaque-p t)) (when (%left-recursive-p body-goal state)
+                (incf recursive-count)
+                (setf recursive-position position)))
+            (and
+              (not opaque-p)
+              (or
+                (zerop recursive-count)
+                (and
+                  (= recursive-count 1)
+                  (zerop recursive-position)
+                  (equal goal-key (%predicate-key (first body))))))))
+        (%proof-predicate-entries goal state)))))
 
 (defun %prove-tabled/k (goal state key entries succeed)
-  "Build the answer table for GOAL at KEY by iterating to a fixpoint.
-A non-local exit before completion discards the partial table."
-  (let ((entry (%make-table-entry))
-        (completed-p nil))
-    (setf (gethash key entries) entry)
-    (unwind-protect
-         (progn
-           (loop
-             with changed-p
-             do (setf changed-p nil)
-                (%prove-raw-clauses/k
-                 goal state
-                 (lambda (answer-state)
-                   (multiple-value-bind
-                       (answer cyclic-answer-p contains-variables-p)
-                       (%canonicalize-variant
-                        goal
-                        (proof-state-environment-index answer-state))
-                     (when (%record-table-answer!
-                            entry answer cyclic-answer-p contains-variables-p)
-                       (setf changed-p t)
-                       (funcall succeed answer-state)))))
-             while changed-p)
-           (setf completed-p t))
-      (unless completed-p
-        (remhash key entries)))))
+  "Build the answer table for GOAL at KEY by iterating to a fixpoint. A non-local exit before completion discards the partial table."
+  (let ((*tabled-search-active-p* t))
+    (let ((entry (%make-table-entry))
+          (completed-p nil))
+      (setf (gethash key entries) entry)
+      (unwind-protect (progn
+          (loop with changed-p
+                with delta-p = (and (%left-recursive-p goal state) (%linear-direct-left-recursive-p goal state))
+                with boundary-count = 0
+                with boundary-tail = nil
+                do (let ((current-count (%table-entry-answer-count entry))
+                  (current-tail (%table-entry-answers-tail entry)))
+              (setf changed-p nil
+                    (%table-entry-delta-active-p entry) delta-p)
+              (when delta-p
+                (setf (%table-entry-delta-answers entry) (if boundary-tail (cdr boundary-tail)
+                    (%table-entry-answers entry))
+                      (%table-entry-delta-count entry) (- current-count boundary-count)
+                      boundary-count current-count
+                      boundary-tail current-tail))) (%prove-raw-clauses/k
+              goal
+              state
+              (lambda (answer-state)
+                (multiple-value-bind (answer cyclic-answer-p contains-variables-p) (%canonicalize-variant goal (proof-state-environment-index answer-state))
+                  (when (%record-table-answer! entry answer cyclic-answer-p contains-variables-p)
+                    (setf changed-p t)
+                    (funcall succeed answer-state)))))
+                while changed-p)
+          (setf completed-p t))
+        (setf (%table-entry-delta-active-p entry) nil
+              (%table-entry-delta-answers entry) (quote ())
+              (%table-entry-delta-count entry) 0)
+        (unless completed-p
+          (remhash key entries))))))
 
 (defun %prove-clauses/k (goal state succeed)
   "Prove GOAL, tabling declared predicates and detected left recursion."
-  (if (or *depth-limited-search-p*
-          (and *constraints-active-p-hook*
-               (funcall *constraints-active-p-hook*))
-          (not (or (%rulebase-tabled-p
-                    (proof-state-rulebase state) (first goal)
-                    (length (rest goal)) (proof-state-module state))
-                   (%left-recursive-p goal state))))
-      (%prove-raw-clauses/k goal state succeed)
-      (let ((entries
-              (%table-session-entries (proof-state-table-session state))))
-        (multiple-value-bind (canonical-goal cyclic-goal-p)
-            (%canonicalize-variant
-             goal
-             (proof-state-environment-index state))
-          (let* ((key (%table-key state canonical-goal cyclic-goal-p))
-                 (entry (gethash key entries)))
-            (if entry
-                (%replay-table-answers/k goal state entry succeed)
-                (%prove-tabled/k goal state key entries succeed)))))))
+  (if (or
+      *depth-limited-search-p*
+      (and *constraints-active-p-hook* (funcall *constraints-active-p-hook*))
+      (not
+        (or
+          (%rulebase-tabled-p
+            (proof-state-rulebase state)
+            (first goal)
+            (length (rest goal))
+            (proof-state-module state))
+          (%left-recursive-p goal state)))) (%prove-raw-clauses/k goal state succeed)
+    (let ((entries (%table-session-entries (proof-state-table-session state))))
+      (multiple-value-bind (canonical-goal cyclic-goal-p) (%canonicalize-variant goal (proof-state-environment-index state))
+        (let* ((key (%table-key state canonical-goal cyclic-goal-p))
+               (entry (gethash key entries)))
+          (if entry (%replay-table-answers/k goal state entry succeed)
+            (%prove-tabled/k goal state key entries succeed)))))))

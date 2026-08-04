@@ -38,7 +38,10 @@ dispatches like `cond` over queries (both are covered in the
   `map-prolog-solutions` with an accumulating callback.
 - **`query-prolog-first`** — first solution or `nil` (searches with `:limit 1`).
 - **`prolog-succeeds-p`** — boolean; stops at the first proof. Supports
-  `:max-depth`.
+  `:max-depth`. A single-goal call with no `:environment`/`:max-depth` that
+  resolves through a tabled or left-recursive predicate is memoized per
+  rulebase revision; a cache hit returns `t` without re-running the proof or
+  any side effects the goal would otherwise perform.
 - **`solution-binding`** — looks one variable up in a solution alist.
 
 ## Keyword options

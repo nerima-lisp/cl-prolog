@@ -746,7 +746,7 @@
         (cl-prolog::%proof-predicate-entries
          '(alias-index ?outer ?result) state))))))
 
-(deftest predicate-descriptor-distinguishes-symbol-identity-and-eql-atoms ()
+(deftest predicate-descriptor-canonicalizes-symbol-atoms-and-indexes-eql-atoms ()
   (let* ((package-a
            (make-package
             (symbol-name (gensym "DESCRIPTOR-PACKAGE-A-")) :use (quote ())))
@@ -754,36 +754,57 @@
            (make-package
             (symbol-name (gensym "DESCRIPTOR-PACKAGE-B-")) :use (quote ()))))
     (unwind-protect
-         (let* ((first (intern "SAME" package-a))
-                (second (intern "SAME" package-b))
+         (let* ((package-atom-a (intern "SAME" package-a))
+                (package-atom-b (intern "SAME" package-b))
+                (interned-verbatim-atom (prolog-atom "SAME"))
+                (uninterned-verbatim-atom (make-symbol "SAME"))
                 (rulebase
                   (make-rulebase
                    :clauses
                    (list
-                    (make-clause (list (quote identity-key) first (quote first)))
                     (make-clause
-                     (quote (identity-key ?value wildcard)))
+                     (list (quote atom-key) package-atom-a (quote package-a)))
+                    (make-clause (quote (atom-key ?value wildcard)))
                     (make-clause
-                     (list (quote identity-key) second (quote second))))))
+                     (list (quote atom-key) package-atom-b (quote package-b)))
+                    (make-clause
+                     (list
+                      (quote atom-key)
+                      interned-verbatim-atom
+                      (quote interned)))
+                    (make-clause
+                     (list
+                      (quote atom-key)
+                      uninterned-verbatim-atom
+                      (quote uninterned))))))
                 (descriptor
                   (cl-prolog::%rulebase-predicate-descriptor
                    rulebase cl-prolog::+default-prolog-module+
-                   (quote identity-key) 2)))
-           (is (not (eq first second)))
+                   (quote atom-key) 2)))
+           (is (not (eq package-atom-a package-atom-b)))
+           (is (not (eq interned-verbatim-atom uninterned-verbatim-atom)))
            (is-equal
             (list
-             (list (quote identity-key) first (quote first))
-             (quote (identity-key ?value wildcard)))
+             (list (quote atom-key) package-atom-a (quote package-a))
+             (quote (atom-key ?value wildcard))
+             (list (quote atom-key) package-atom-b (quote package-b)))
             (stored-clause-heads
              (cl-prolog::%predicate-descriptor-first-argument-entries
-              descriptor first)))
+              descriptor package-atom-b)))
            (is-equal
             (list
-             (quote (identity-key ?value wildcard))
-             (list (quote identity-key) second (quote second)))
+             (quote (atom-key ?value wildcard))
+             (list
+              (quote atom-key)
+              interned-verbatim-atom
+              (quote interned))
+             (list
+              (quote atom-key)
+              uninterned-verbatim-atom
+              (quote uninterned)))
             (stored-clause-heads
              (cl-prolog::%predicate-descriptor-first-argument-entries
-              descriptor second))))
+              descriptor uninterned-verbatim-atom))))
       (delete-package package-a)
       (delete-package package-b)))
   (let* ((rulebase

@@ -173,7 +173,8 @@ the intended transparency of control constructs.
 
 Depth decreases when proof enters a user rule, not for every builtin or
 unification step. `nil` means unbounded search. Declared tabled predicates and
-detected left recursion can use a per-query table session; depth-limited or
+detected left recursion share one table session per rulebase revision, reused
+across every query until the next mutation invalidates it; depth-limited or
 active finite-domain searches bypass that tabling path where required.
 
 ### Guards
@@ -201,6 +202,14 @@ Born/died revisions preserve logical-update behavior: a running predicate
 invocation continues over its snapshot even when a dynamic goal changes the
 database. Later invocations observe the newer revision. Callers that require
 isolation can use `copy-rulebase` before mutation.
+
+Retracted entries are marked dead, not removed, so an in-flight invocation's
+snapshot stays valid. Once a rulebase's dead-entry backlog passes an internal
+threshold, the next top-level engine call (`map-prolog-solutions`,
+`query-prolog`, `query-prolog-first`, `prolog-succeeds-p`) to return while no
+other top-level call is active anywhere on the stack compacts them away. Any
+new top-level entry point into the engine must join that same call-tracking or
+compaction becomes unsafe.
 
 ## Transactional Source Loading
 

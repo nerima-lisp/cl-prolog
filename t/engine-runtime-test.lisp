@@ -84,6 +84,24 @@
      (loop for target from 1 to edge-count
            collect (list (cons (quote ?who) target)))
      solutions)))
+(deftest tabled-provability-cache-is-revision-scoped ()
+  (let ((rulebase
+          (prolog
+            ((reachable ?x ?y) (reachable ?x ?z) (edge ?z ?y))
+            ((reachable ?x ?y) (edge ?x ?y))
+            ((edge a b)))))
+    (is (prolog-succeeds-p rulebase (quote (reachable a b))))
+    (let ((session (cl-prolog::%make-rulebase-table-session rulebase)))
+      (is-equal 1
+                (hash-table-count
+                 (cl-prolog::%table-session-successful-queries session))))
+    (is (prolog-succeeds-p rulebase (quote (reachable a b))))
+    (let ((entry (first (nth-value 1 (cl-prolog::%rulebase-predicate-entries rulebase cl-prolog::+default-prolog-module+ 'edge 2))))) (rulebase-insert-clause! rulebase (make-clause '(edge a c))) (cl-prolog::%rulebase-retract-entry! rulebase entry))
+    (is (not (prolog-succeeds-p rulebase (quote (reachable a b)))))
+    (is-equal 0
+              (hash-table-count
+               (cl-prolog::%table-session-successful-queries
+                (cl-prolog::%make-rulebase-table-session rulebase))))))
 
 (deftest-queries variant-tabling-deduplicates-answers
     ((prolog
@@ -103,6 +121,12 @@
       ((odd-node ?x) (even-node ?x))
       ((odd-node one))))
   ((even-node ?x) :ordered (((?x . one)) ((?x . zero)))))
+(deftest-queries variant-tabling-preserves-nonlinear-left-recursion
+  ((prolog
+    ((joined ?x ?y) (joined ?x ?z) (joined ?z ?y))
+    ((joined a b))
+    ((joined b c))))
+  ((joined a ?who) :ordered (((?who . b)) ((?who . c)))))
 
 (deftest-queries variant-tabling-terminates-three-node-left-recursion
     ((prolog
@@ -113,24 +137,39 @@
       ((cycle-c c))))
   ((cycle-a ?x) :ordered (((?x . c)) ((?x . a)))))
 
-(deftest tabled-predicate-preserves-and-deduplicates-cyclic-answer (:timeout 2)
-  (let* ((cycle-a (cons 'loop nil))
-         (cycle-b (cons 'loop nil))
-         (rulebase (make-rulebase)))
-    (setf (cdr cycle-a) cycle-a
-          (cdr cycle-b) cycle-b)
-    (rulebase-insert-clause!
-     rulebase (make-clause (list 'cyclic-answer cycle-a)))
-    (rulebase-insert-clause!
-     rulebase (make-clause (list 'cyclic-answer cycle-b)))
-    (cl-prolog::%add-rulebase-table-declaration!
-     rulebase 'cyclic-answer 1 :test)
-    (let* ((solutions (query-prolog rulebase '(cyclic-answer ?answer)))
-           (answer (solution-binding '?answer (first solutions))))
-      (is-equal 1 (length solutions))
-      (is (consp answer))
-      (is (eq answer (cdr answer)))
-      (is-equal 'loop (car answer)))))
+(progn
+  (deftest tabled-predicate-preserves-and-deduplicates-cyclic-answer (:timeout 2)
+    (let* ((cycle-a (cons (quote loop) nil))
+           (cycle-b (cons (quote loop) nil))
+           (rulebase (make-rulebase)))
+      (setf (cdr cycle-a) cycle-a
+            (cdr cycle-b) cycle-b)
+      (rulebase-insert-clause!
+       rulebase (make-clause (list (quote cyclic-answer) cycle-a)))
+      (rulebase-insert-clause!
+       rulebase (make-clause (list (quote cyclic-answer) cycle-b)))
+      (cl-prolog::%add-rulebase-table-declaration!
+       rulebase (quote cyclic-answer) 1 :test)
+      (let* ((solutions (query-prolog rulebase (quote (cyclic-answer ?answer))))
+             (answer (solution-binding (quote ?answer) (first solutions))))
+        (is-equal 1 (length solutions))
+        (is (consp answer))
+        (is (eq answer (cdr answer)))
+        (is-equal (quote loop) (car answer)))))
+
+  (deftest cyclic-answer-index-is-created-lazily ()
+    (let ((entry (cl-prolog::%make-table-entry))
+          (cycle-a (cons (quote loop) nil))
+          (cycle-b (cons (quote loop) nil)))
+      (setf (cdr cycle-a) cycle-a
+            (cdr cycle-b) cycle-b)
+      (is (null (cl-prolog::%table-entry-cyclic-answer-index entry)))
+      (is (cl-prolog::%record-table-answer! entry (quote plain) nil nil))
+      (is (null (cl-prolog::%table-entry-cyclic-answer-index entry)))
+      (is (cl-prolog::%record-table-answer! entry cycle-a t nil))
+      (is (hash-table-p (cl-prolog::%table-entry-cyclic-answer-index entry)))
+      (is (not (cl-prolog::%record-table-answer! entry cycle-b t nil)))
+      (is-equal 2 (cl-prolog::%table-entry-answer-count entry)))))
 
 (deftest table-declaration-and-clause-retraction-guard-repeat-updates ()
   (let ((rulebase (make-rulebase)))
@@ -354,6 +393,48 @@ produces the normal proof-search result."
     (is (null (query-prolog rulebase (quote (fast-same a b)))))
     (is-equal (quote (((?answer . a))))
               (query-prolog rulebase (quote (fast-paired ?answer))))))
+(deftest rule-program-lazily-materializes-shared-variables ()
+  (let ((rulebase
+          (prolog
+            ((lazy-value a))
+            ((lazy-value b))
+            ((lazy-edge a linked))
+            ((lazy-edge b blocked))
+            ((lazy-accept linked))
+            ((lazy-head-alias ?head) (lazy-value ?head))
+            ((lazy-body-share ?head)
+             (lazy-edge ?head ?body)
+             (lazy-accept ?body))
+            ((lazy-head-mismatch ?same ?same)
+             (lazy-body-only ?body ?unused)))))
+    (is-equal (quote (((?answer . a)) ((?answer . b))))
+              (query-prolog rulebase
+                            (quote (lazy-head-alias ?answer))))
+    (is-equal (quote (((?answer . a))))
+              (query-prolog rulebase
+                            (quote (lazy-body-share ?answer))))
+    (let ((original
+            (symbol-function
+             (quote cl-prolog::%unify-rule-program-head)))
+          (observed-variables nil))
+      (unwind-protect
+           (progn
+             (setf (symbol-function
+                    (quote cl-prolog::%unify-rule-program-head))
+                   (lambda (goal program variables environment parent-index)
+                     (setf observed-variables variables)
+                     (funcall original goal program variables
+                              environment parent-index)))
+             (is (null
+                  (query-prolog rulebase
+                                (quote (lazy-head-mismatch left right)))))
+             (is-equal 3 (length observed-variables))
+             (is (svref observed-variables 0))
+             (is (null (svref observed-variables 1)))
+             (is (null (svref observed-variables 2))))
+        (setf (symbol-function
+               (quote cl-prolog::%unify-rule-program-head))
+              original)))))
 
 (defun %make-rule-program-equivalence-rulebases ()
   (let* ((fast-variable (fresh-logic-variable))
@@ -403,29 +484,163 @@ produces the normal proof-search result."
         (make-clause (list (quote cyclic-candidate) variable)
                      cyclic-body)))))))
 
-(deftest rule-program-body-materializes-each-instruction-once-despite-backtracking ()
-  (with-rule-program-equivalence-rulebases (fast-rulebase generic-rulebase generic-template)
+(deftest clause-materialization-context-is-lazy-and-preserves-graph-identity () (let* ((variable (fresh-logic-variable)) (shared (list (quote shared) variable)) (cycle (cons (quote cycle) nil)) (head (cons (quote lazy-graph) (cons variable (quote dotted-tail))))) (setf (cdr cycle) cycle) (let* ((template (cl-prolog::%compile-clause-template (make-clause head (list shared shared cycle)))) (context (cl-prolog::%make-clause-template-materialization-context template)) (materialized-head (cl-prolog::%materialize-clause-template-head template context)) (conses (cl-prolog::%clause-materialization-context-conses context))) (is (some (function null) conses)) (is (eq (quote dotted-tail) (cddr materialized-head))) (let ((materialized-body (cl-prolog::%materialize-clause-template-body template context))) (is (eq (first materialized-body) (second materialized-body))) (is (eq (cadr materialized-head) (cadr (first materialized-body)))) (is (eq (third materialized-body) (cdr (third materialized-body)))) (is (every (function identity) conses))) (let* ((other-context (cl-prolog::%make-clause-template-materialization-context template)) (other-head (cl-prolog::%materialize-clause-template-head template other-context))) (is (not (eq (cadr materialized-head) (cadr other-head))))))))
+
+(deftest rule-program-body-avoids-materialization-only-for-safe-direct-calls ()
+  (with-rule-program-equivalence-rulebases
+      (fast-rulebase generic-rulebase generic-template)
     (declare (ignore generic-rulebase generic-template))
-    (let ((original
-            (symbol-function
-             (quote cl-prolog::%materialize-rule-program-goal)))
-          (materialization-count 0))
-      (unwind-protect
-           (progn
-             (setf (symbol-function
-                    (quote cl-prolog::%materialize-rule-program-goal))
-                   (lambda (&rest arguments)
-                     (incf materialization-count)
-                     (apply original arguments)))
-             (is-equal
-              (quote (((?answer . a)) ((?answer . b))))
-              (query-prolog
-               fast-rulebase
-               (quote (descriptor-candidate ?answer))))
-             (is-equal 2 materialization-count))
-        (setf (symbol-function
-               (quote cl-prolog::%materialize-rule-program-goal))
-              original)))))
+    (let ((cl-prolog::*rule-program-goal-materialization-count* 0))
+      (is-equal
+       (quote (((?answer . a)) ((?answer . b))))
+       (query-prolog
+        fast-rulebase
+        (quote (descriptor-candidate ?answer))))
+      (is-equal 0 cl-prolog::*rule-program-goal-materialization-count*)))
+  (let ((rulebase
+          (prolog
+            ((materialized-builtin) (true)))))
+    (let ((cl-prolog::*rule-program-goal-materialization-count* 0))
+      (is-equal (quote (nil))
+                (query-prolog rulebase (quote (materialized-builtin))))
+      (is-equal 1 cl-prolog::*rule-program-goal-materialization-count*))))
+
+
+
+(deftest-queries instruction-head-fast-path-preserves-unification-semantics
+    ((prolog
+      ((same-through-body ?value) (pair ?value ?value))
+      ((literal-through-body) (pair alpha alpha))
+      ((nested-through-body ?value) (wrapped (box ?value)))
+      ((pair alpha alpha))
+      ((pair alpha beta))
+      ((wrapped (box nested)))))
+  ((same-through-body ?answer) :ordered (((?answer . alpha))))
+  ((literal-through-body) :ordered (nil))
+  ((nested-through-body ?answer) :ordered (((?answer . nested)))))
+
+(deftest instruction-head-fast-path-rolls-back-partial-direct-bindings ()
+  (let* ((caller-variable (fresh-logic-variable))
+         (callee-variable (fresh-logic-variable))
+         (parent-variable (fresh-logic-variable))
+         (caller-program
+           (cl-prolog::%clause-template-rule-program
+            (cl-prolog::%compile-clause-template
+             (make-clause
+              (list (quote caller) caller-variable)
+              (list (list (quote pair) caller-variable (quote actual)))))))
+         (callee-program
+           (cl-prolog::%clause-template-rule-program
+            (cl-prolog::%compile-clause-template
+             (make-clause
+              (list (quote pair) callee-variable (quote expected))))))
+         (instruction (svref (cl-prolog::%rule-program-body caller-program) 0))
+         (caller-variables
+           (make-array (cl-prolog::%rule-program-variable-count caller-program)
+                       :initial-element nil))
+         (callee-variables
+           (make-array (cl-prolog::%rule-program-variable-count callee-program)
+                       :initial-element nil))
+         (environment (list (cons parent-variable (quote stable))))
+         (parent-index (cl-prolog::%make-environment-index environment)))
+    (multiple-value-bind (result-environment ok result-index)
+        (cl-prolog::%unify-rule-program-instruction-head
+         instruction caller-variables callee-program callee-variables
+         environment parent-index)
+      (is (null ok))
+      (is (eq environment result-environment))
+      (is (eq parent-index result-index))
+      (is (nth-value 1
+            (cl-prolog::%environment-index-binding parent-variable parent-index)))
+      (is (null
+           (nth-value 1
+             (cl-prolog::%environment-index-binding
+              (svref caller-variables 0) parent-index))))
+      (is (null
+           (nth-value 1
+             (cl-prolog::%environment-index-binding
+              (svref callee-variables 0) parent-index)))))))
+(deftest instruction-head-fast-path-reuses-only-inactive-scratch ()
+  (labels ((invoke (second-callee)
+             (let* ((caller-left (fresh-logic-variable))
+                    (caller-right (fresh-logic-variable))
+                    (callee-left (fresh-logic-variable))
+                    (callee-right (fresh-logic-variable))
+                    (caller-program
+                      (cl-prolog::%clause-template-rule-program
+                       (cl-prolog::%compile-clause-template
+                        (make-clause
+                         (quote (caller))
+                         (list (list (quote pair)
+                                     caller-left
+                                     caller-right))))))
+                    (callee-program
+                      (cl-prolog::%clause-template-rule-program
+                       (cl-prolog::%compile-clause-template
+                        (make-clause
+                         (list (quote pair) callee-left callee-right)))))
+                    (instruction
+                      (svref (cl-prolog::%rule-program-body caller-program) 0))
+                    (caller-variables
+                      (make-array
+                       (cl-prolog::%rule-program-variable-count caller-program)
+                       :initial-element nil))
+                    (callee-variables
+                      (make-array
+                       (cl-prolog::%rule-program-variable-count callee-program)
+                       :initial-element nil))
+                    (caller-operands
+                      (cl-prolog::%rule-instruction-operands instruction))
+                    (callee-operands
+                      (cl-prolog::%rule-program-head-operands callee-program))
+                    (environment
+                      (list
+                       (cons (cl-prolog::%rule-program-operand-value
+                              (svref caller-operands 0) caller-variables)
+                             (quote (box alpha)))
+                       (cons (cl-prolog::%rule-program-operand-value
+                              (svref caller-operands 1) caller-variables)
+                             (quote (box beta)))
+                       (cons (cl-prolog::%rule-program-operand-value
+                              (svref callee-operands 0) callee-variables)
+                             (quote (box alpha)))
+                       (cons (cl-prolog::%rule-program-operand-value
+                              (svref callee-operands 1) callee-variables)
+                             second-callee)))
+                    (parent-index
+                      (cl-prolog::%make-environment-index environment)))
+               (cl-prolog::%unify-rule-program-instruction-head
+                instruction caller-variables callee-program callee-variables
+                environment parent-index))))
+    (let ((scratch (cl-prolog::%make-unification-scratch))
+          (marker-left (list (quote marker-left)))
+          (marker-right (list (quote marker-right))))
+      (is (not (cl-prolog::%unification-scratch-remember-pair
+                scratch marker-left marker-right)))
+      (let ((cl-prolog::*unification-scratch* scratch))
+        (is (nth-value 1 (invoke (quote (box beta))))))
+      (is (not (cl-prolog::%unification-scratch-active-p scratch)))
+      (is (let ((index (cl-prolog::%unification-scratch-first-index scratch)))
+            (or (null index) (zerop (hash-table-count index)))))
+      (let ((cl-prolog::*unification-scratch* scratch))
+        (is (null (nth-value 1 (invoke (quote (box mismatch)))))))
+      (is (not (cl-prolog::%unification-scratch-active-p scratch)))
+      (is (let ((index (cl-prolog::%unification-scratch-first-index scratch)))
+            (or (null index) (zerop (hash-table-count index))))))
+    (let ((scratch (cl-prolog::%make-unification-scratch))
+          (marker-left (list (quote active-marker-left)))
+          (marker-right (list (quote active-marker-right))))
+      (is (not (cl-prolog::%unification-scratch-remember-pair
+                scratch marker-left marker-right)))
+      (setf (cl-prolog::%unification-scratch-active-p scratch) t)
+      (let ((cl-prolog::*unification-scratch* scratch))
+        (is (nth-value 1 (invoke (quote (box beta))))))
+      (is (cl-prolog::%unification-scratch-active-p scratch))
+      (is (cl-prolog::%unification-scratch-remember-pair
+           scratch marker-left marker-right))
+      (setf (cl-prolog::%unification-scratch-active-p scratch) nil)
+      (cl-prolog::%reset-unification-scratch scratch))))
+
 
 (deftest constraint-hook-continuation-reentry-matches-generic-fallback ()
   (with-rule-program-equivalence-rulebases (fast-rulebase generic-rulebase generic-template)
@@ -610,32 +825,164 @@ produces the normal proof-search result."
             (= ?left left)
             (flat-any ?right)
             (= ?right right)))))))
-(deftest flat-fact-rule-program-preserves-hook-and-snapshot-semantics ()
-  (let ((hook-count 0)
-        (rulebase (prolog ((flat-hook value)))))
-    (let ((cl-prolog::*constraint-post-unify-hook*
-            (lambda (environment continuation)
-              (incf hook-count)
-              (funcall continuation environment)
-              (funcall continuation environment))))
-      (is-equal (quote (((?answer . value)) ((?answer . value))))
-                (query-prolog rulebase (quote (flat-hook ?answer))))
-      (is-equal 1 hook-count)))
-  (let ((rulebase (prolog ((flat-update first)) ((flat-update second))))
-        (current (quote ()))
-        (inserted-p nil))
-    (map-prolog-solutions
-     (lambda (solution)
-       (push (solution-binding (quote ?answer) solution) current)
-       (unless inserted-p
-         (setf inserted-p t)
-         (rulebase-insert-clause!
-          rulebase
-          (make-clause (quote (flat-update third))))))
-     rulebase
-     (quote (flat-update ?answer)))
-    (is-equal (quote (first second)) (nreverse current))
-    (is-equal (quote (((?answer . first))
-                       ((?answer . second))
-                       ((?answer . third))))
-              (query-prolog rulebase (quote (flat-update ?answer))))))
+(deftest generic-rule-materializes-body-only-after-head-success () (let* ((variable (fresh-logic-variable)) (shared-goal (list (quote true))) (clause (make-clause (list (quote delayed-body) (quote expected) variable) (list shared-goal shared-goal))) (template (cl-prolog::%compile-clause-template clause)) (rulebase (make-rulebase)) (calls 0) (original (symbol-function (quote cl-prolog::%materialize-clause-template-body)))) (is (null (cl-prolog::%clause-template-rule-program template))) (rulebase-insert-clause! rulebase clause) (unwind-protect (progn (setf (symbol-function (quote cl-prolog::%materialize-clause-template-body)) (lambda (template context) (incf calls) (funcall original template context))) (is (null (query-prolog rulebase (quote (delayed-body mismatch ?answer))))) (is-equal 0 calls) (let* ((results (query-prolog rulebase (quote (delayed-body expected ?answer)))) (answer (and results (cdr (assoc (quote ?answer) (first results)))))) (is results) (is (logic-var-p answer))) (is-equal 1 calls)) (setf (symbol-function (quote cl-prolog::%materialize-clause-template-body)) original))))
+(deftest rule-program-head-uses-only-semantically-safe-operand-fast-paths ()
+  (labels ((program-for (head)
+             (cl-prolog::%clause-template-rule-program
+              (cl-prolog::%compile-clause-template (make-clause head))))
+           (generic-head (goal program variables environment parent-index)
+             (let ((arguments (cdr goal))
+                   (operands (cl-prolog::%rule-program-head-operands program))
+                   (extended environment)
+                   (index parent-index))
+               (dotimes (operand-index (length operands)
+                         (values extended t index))
+                 (multiple-value-bind (next-extended ok next-index)
+                     (cl-prolog::%unify-indexed
+                      (car arguments)
+                      (cl-prolog::%rule-program-operand-value
+                       (svref operands operand-index) variables)
+                      extended index (not (eq index parent-index)))
+                   (unless ok
+                     (return-from generic-head
+                       (values environment nil parent-index)))
+                   (setf extended next-extended
+                         index next-index
+                         arguments (cdr arguments))))))
+           (run-parity (goal head &optional (environment (quote ())))
+             (let* ((program (program-for head))
+                    (variable-count
+                      (cl-prolog::%rule-program-variable-count program))
+                    (fast-variables
+                      (make-array variable-count :initial-element nil))
+                    (generic-variables
+                      (make-array variable-count :initial-element nil))
+                    (parent-index
+                      (cl-prolog::%make-environment-index environment)))
+               (multiple-value-bind
+                     (fast-environment fast-ok fast-index)
+                   (cl-prolog::%unify-rule-program-head
+                    goal program fast-variables environment parent-index)
+                 (multiple-value-bind
+                       (generic-environment generic-ok generic-index)
+                     (generic-head
+                      goal program generic-variables environment parent-index)
+                   (is (eq (not (null fast-ok))
+                           (not (null generic-ok))))
+                   (values fast-environment fast-ok fast-index
+                           generic-environment generic-ok generic-index
+                           parent-index))))))
+    (multiple-value-bind
+          (fast-environment fast-ok fast-index
+           generic-environment generic-ok generic-index parent-index)
+        (run-parity (quote (head literal)) (quote (head literal)))
+      (is fast-ok)
+      (is (null fast-environment))
+      (is (null generic-environment))
+      (is (eq fast-index parent-index))
+      (is (eq generic-index parent-index)))
+    (let ((query-variable (fresh-logic-variable)))
+      (multiple-value-bind
+            (fast-environment fast-ok fast-index
+             generic-environment generic-ok generic-index parent-index)
+          (run-parity
+           (list (quote head) query-variable)
+           (list (quote head) (fresh-logic-variable)))
+        (declare (ignore fast-environment generic-environment parent-index))
+        (is fast-ok)
+        (let ((fast-result
+                (cl-prolog::%logic-substitute-indexed
+                 (list (quote head) query-variable) fast-index))
+              (generic-result
+                (cl-prolog::%logic-substitute-indexed
+                 (list (quote head) query-variable) generic-index)))
+          (is (eq (car fast-result) (quote head)))
+          (is (eq (car generic-result) (quote head)))
+          (is (logic-var-p (cadr fast-result)))
+          (is (logic-var-p (cadr generic-result)))
+          (is (null
+               (nth-value 1
+                 (cl-prolog::%environment-index-binding
+                  (cadr fast-result) fast-index))))
+          (is (null
+               (nth-value 1
+                 (cl-prolog::%environment-index-binding
+                  (cadr generic-result) generic-index)))))))
+    (let ((query-variable (fresh-logic-variable)))
+      (multiple-value-bind
+            (fast-environment fast-ok fast-index
+             generic-environment generic-ok generic-index parent-index)
+          (run-parity
+           (list (quote head) query-variable query-variable)
+           (list (quote head)
+                 (fresh-logic-variable)
+                 (fresh-logic-variable)))
+        (declare (ignore fast-environment generic-environment parent-index))
+        (is fast-ok)
+        (let ((fast-result
+                (cl-prolog::%logic-substitute-indexed
+                 (list (quote head) query-variable query-variable)
+                 fast-index))
+              (generic-result
+                (cl-prolog::%logic-substitute-indexed
+                 (list (quote head) query-variable query-variable)
+                 generic-index)))
+          (is (logic-var-p (cadr fast-result)))
+          (is (logic-var-p (cadr generic-result)))
+          (is (eq (cadr fast-result) (caddr fast-result)))
+          (is (eq (cadr generic-result) (caddr generic-result))))))
+    (let ((goal-atom (make-symbol "SAME-NAME"))
+          (head-atom (make-symbol "SAME-NAME")))
+      (is (not (eq goal-atom head-atom)))
+      (multiple-value-bind
+            (fast-environment fast-ok fast-index
+             generic-environment generic-ok generic-index parent-index)
+          (run-parity
+           (list (quote head) goal-atom)
+           (list (quote head) head-atom))
+        (is fast-ok)
+        (is (null fast-environment))
+        (is (null generic-environment))
+        (is (eq fast-index parent-index))
+        (is (eq generic-index parent-index))))
+    (let ((query-variable (fresh-logic-variable)))
+      (multiple-value-bind
+            (fast-environment fast-ok fast-index
+             generic-environment generic-ok generic-index parent-index)
+          (run-parity
+           (list (quote head) query-variable (quote wrong))
+           (quote (head literal expected)))
+        (is (null fast-ok))
+        (is (null generic-ok))
+        (is (null fast-environment))
+        (is (null generic-environment))
+        (is (eq fast-index parent-index))
+        (is (eq generic-index parent-index))
+        (is (null
+             (nth-value 1
+               (cl-prolog::%environment-index-binding
+                query-variable parent-index))))))
+    (dolist (case
+              (list
+               (list (quote (head value))
+                     (list (quote head) (fresh-logic-variable)))
+               (let ((variable (fresh-logic-variable)))
+                 (list (quote (head same same))
+                       (list (quote head) variable variable)))
+               (list (quote (head (compound value)))
+                     (list (quote head) (fresh-logic-variable)))))
+      (destructuring-bind (goal head) case
+        (multiple-value-bind
+              (fast-environment fast-ok fast-index
+               generic-environment generic-ok generic-index parent-index)
+            (run-parity goal head)
+          (declare (ignore parent-index))
+          (is fast-ok)
+          (is (equal
+               (cl-prolog::%logic-substitute-indexed goal fast-index)
+               (cl-prolog::%logic-substitute-indexed goal generic-index)))
+          (is (equal
+               (cl-prolog::%logic-substitute-indexed
+                fast-environment fast-index)
+               (cl-prolog::%logic-substitute-indexed
+                generic-environment generic-index))))))))

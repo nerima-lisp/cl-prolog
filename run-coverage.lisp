@@ -7,10 +7,11 @@
 ;;;; checks.coverage invokes exactly this script so the local command and the
 ;;;; CI gate cannot drift apart.
 ;;;;
-;;;; Only :cl-prolog and the project-owned :cl-prolog/weave are compiled with
-;;;; SB-COVER's instrumentation on. cl-weave is loaded before coverage is
-;;;; enabled, while :cl-prolog/test loads after it is disabled, so neither
-;;;; external test-harness code nor the test system can enter the report.
+;;;; The project-owned :cl-prolog, :cl-prolog/weave, and
+;;;; :cl-prolog/callgraph systems are compiled with SB-COVER's instrumentation
+;;;; on. cl-weave is loaded before coverage is enabled, while both test systems
+;;;; load after it is disabled, so neither external harness code nor tests enter
+;;;; the report.
 ;;;;
 ;;;; cl-weave must be reachable through CL_SOURCE_REGISTRY, exactly as
 ;;;; run-tests.lisp requires.
@@ -26,14 +27,18 @@
   (asdf:load-system "cl-weave")
   (declaim (optimize sb-cover:store-coverage-data))
   (asdf:load-system "cl-prolog" :force t)
-  (asdf:load-system "cl-prolog/weave"))
+  (asdf:load-system "cl-prolog/weave" :force t)
+  (asdf:load-system "cl-prolog/callgraph" :force t))
 
 (declaim (optimize (sb-cover:store-coverage-data 0)))
 
-;; asdf:test-system's :perform method is what raises on a failing suite, so
-;; reusing it here (rather than calling CL-WEAVE:RUN-ALL directly) is what
-;; makes this script refuse to report coverage for a red suite for free.
-(asdf:test-system "cl-prolog/test")
+;; Both systems register tests globally in cl-weave, so load them before the
+;; single aggregate run and reject a red suite before writing the report.
+(progn
+  (asdf:load-system "cl-prolog/test")
+  (asdf:load-system "cl-prolog/callgraph/test")
+  (unless (uiop:symbol-call "CL-WEAVE" "RUN-ALL" :reporter :spec)
+    (error "cl-prolog cl-weave test suites failed.")))
 
 (let* ((argument (second sb-ext:*posix-argv*))
        (report-directory

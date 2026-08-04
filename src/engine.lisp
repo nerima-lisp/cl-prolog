@@ -365,8 +365,10 @@ BODY must call EMIT with one extended environment per solution."
                                     &body body)
   "Define the authoritative foreign solver for the exact predicate NAME/ARITY.
 
-BODY must call EMIT with one extended environment per solution.  Calling EMIT
-zero times fails; calling it repeatedly produces multiple solutions."
+BODY must call EMIT synchronously with one extended environment per solution.
+Calling EMIT zero times fails; calling it repeatedly produces multiple solutions.
+EMIT is dynamically scoped: do not retain it, call it from another thread, or
+call it after BODY returns."
   (when (find-if (lambda (parameter)
                    (member parameter lambda-list-keywords))
                  argument-list)

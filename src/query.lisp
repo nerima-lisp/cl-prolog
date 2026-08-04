@@ -71,37 +71,44 @@
   (unless (typep limit (quote (or null (integer 1))))
     (error "MAP-PROLOG-SOLUTIONS: :LIMIT must be NIL or a positive integer, got ~S."
            limit))
-  (let ((*unification-scratch* (%make-unification-scratch)))
-    (%with-logic-variable-order
-      (%collect-variables query)
-      (let ((query-variables
-              (and project (%collect-query-variables query)))
-            (remaining limit)
-            (cut-tag (%make-cut-tag)))
-        (block search
-          (cl:catch cut-tag
-            (%prove-goals/k
-             (%normalize-query query)
-             (%make-proof-state
-              rulebase
-              environment
-              (%make-environment-index environment)
-              max-depth
-              +default-prolog-module+
-              (%make-rulebase-table-session rulebase)
-              cut-tag)
-             (lambda (state)
-               (let ((bindings (proof-state-bindings state))
-                     (environment-index
-                       (proof-state-environment-index state)))
-                 (funcall function
-                          (if project
-                              (%project-query-variables-indexed
-                               query-variables environment-index)
-                              bindings)))
-               (when (and remaining (zerop (decf remaining)))
-                 (return-from search))))))
-        nil))))
+  ;; This is the primitive every top-level query entry point (MAP-PROLOG-
+  ;; SOLUTIONS, QUERY-PROLOG, QUERY-PROLOG-FIRST) funnels through, so it is
+  ;; where dead rulebase entries become eligible for compaction once the
+  ;; call (and any call nested inside it) has fully returned -- see
+  ;; %WITH-PROLOG-TOP-LEVEL-CALL and *PROLOG-ACTIVE-TOP-LEVEL-CALLS* in
+  ;; data.lisp.
+  (%with-prolog-top-level-call (rulebase)
+    (let ((*unification-scratch* (%make-unification-scratch)))
+      (%with-logic-variable-order
+        (%collect-variables query)
+        (let ((query-variables
+                (and project (%collect-query-variables query)))
+              (remaining limit)
+              (cut-tag (%make-cut-tag)))
+          (block search
+            (cl:catch cut-tag
+              (%prove-goals/k
+               (%normalize-query query)
+               (%make-proof-state
+                rulebase
+                environment
+                (%make-environment-index environment)
+                max-depth
+                +default-prolog-module+
+                (%make-rulebase-table-session rulebase)
+                cut-tag)
+               (lambda (state)
+                 (let ((bindings (proof-state-bindings state))
+                       (environment-index
+                         (proof-state-environment-index state)))
+                   (funcall function
+                            (if project
+                                (%project-query-variables-indexed
+                                 query-variables environment-index)
+                                bindings)))
+                 (when (and remaining (zerop (decf remaining)))
+                   (return-from search))))))
+          nil)))))
 
 (defun map-prolog-solutions (function rulebase query &rest options)
   "Prove QUERY against RULEBASE, calling FUNCTION once per solution.
