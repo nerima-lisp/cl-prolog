@@ -76,9 +76,10 @@ nix flake check      # tests + formatting + docs, the same gate CI uses
 nix fmt              # format Nix sources (treefmt)
 ```
 
-Tests live in `t/` and run under [cl-weave](https://github.com/nerima-lisp/cl-weave),
-the org's test framework. Without Nix, `sbcl --script run-tests.lisp` runs the
-same suite, provided cl-weave is on `CL_SOURCE_REGISTRY`.
+Tests live in `t/` and `callgraph/test/` and run under
+[cl-weave](https://github.com/nerima-lisp/cl-weave), the org's test framework.
+Without Nix, `sbcl --script run-tests.lisp` runs both suites, provided cl-weave
+is on `CL_SOURCE_REGISTRY`.
 
 ## Contributing
 

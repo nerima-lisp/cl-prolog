@@ -70,19 +70,27 @@ sub-query) keep the ordinals of variables created by their caller."
               private-ordinal
               (error "Unregistered logic variable ~S." variable))))))
 
+(declaim (inline logic-var-p))
 (defun logic-var-p (term)
   "Return true when TERM is a logic variable rather than a dedicated Prolog atom.
 
-A `?'-prefixed name interned in either atom package -- USER-ATOMS for `'?x'',
-VERBATIM-ATOMS for `'?X'' -- is an atom the source quoted deliberately, not a
+A `?'-prefixed name interned in either atom package -- USER-ATOMS for `'?x',
+VERBATIM-ATOMS for `'?X' -- is an atom the source quoted deliberately, not a
 variable."
   (and
     (symbolp term)
-    (not (keywordp term))
-    (not (eq (symbol-package term) *user-atom-package*))
-    (not (eq (symbol-package term) *verbatim-atom-package*))
-    (plusp (length (symbol-name term)))
-    (char= (char (symbol-name term) 0) #\?)))
+    (let ((package (symbol-package term))
+          (name (symbol-name term)))
+      (and
+        (or
+          (null package)
+          (and
+            (not (keywordp term))
+            (not (eq package *user-atom-package*))
+            (not (eq package *verbatim-atom-package*))))
+        (plusp (length name))
+        (char= (char name 0) #\?)))))
+
 
 (defun fresh-logic-variable (&optional (prefix "?VAR"))
   "Return a fresh, never-before-seen logic variable."

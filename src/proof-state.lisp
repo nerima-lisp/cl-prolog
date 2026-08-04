@@ -8,6 +8,8 @@
 (defvar *current-prolog-module* +default-prolog-module+)
 (defvar *current-table-session* nil
   "Table session inherited by proof searches nested through builtins.")
+(defvar *tabled-search-active-p* nil
+  "True while the current proof has entered a tabled or left-recursive call.")
 (defvar *call-depth-limit-token* nil)
 (defvar *call-depth-limit-remaining* nil)
 (defvar *call-depth-limit-used* 0)

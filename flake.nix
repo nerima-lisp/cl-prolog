@@ -14,13 +14,13 @@
     # `github:nerima-lisp/cl-nix-forge` follows that repository's default
     # branch and would change this build without warning.
     #
-    # v0.4.0 builds the generated dev shell from the check-enabled
+    # v0.5.0 builds the generated dev shell from the check-enabled
     # derivation, so `lispCheckDependencies` land on its CL_SOURCE_REGISTRY.
     # That is what lets `devShellPackages` below carry only the interactive
     # extras: under v0.3.0 this file had to replace `devShells.default`
     # outright to get cl-weave into `nix develop`.
     cl-nix-forge = {
-      url = "github:nerima-lisp/cl-nix-forge/v0.4.0";
+      url = "github:nerima-lisp/cl-nix-forge/v0.5.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -105,7 +105,7 @@
             runtimeInputs = [ clWeaveCli ];
             text = ''
               export CL_SOURCE_REGISTRY="${clWeaveCli}/share/common-lisp/source//:${ctx.src}//:''${CL_SOURCE_REGISTRY:-}"
-              exec cl-weave run cl-prolog/test "$@"
+              exec cl-weave run cl-prolog/test --system cl-prolog/callgraph/test "$@"
             '';
           };
         in
@@ -133,11 +133,9 @@
       # back empty.
       #
       # `systems` is spelled out rather than left to default to the
-      # derivation's own `[ "cl-prolog" ]`, because the hand-written runner
-      # instrumented `cl-prolog/weave` too and narrowing the report silently
-      # would be a coverage change disguised as a refactor. The second declaim
-      # is restored before run-tests.lisp is loaded, so `cl-prolog/test` stays
-      # out of the numbers either way.
+      # derivation's own `[ "cl-prolog" ]`. The second declaim is restored
+      # before run-tests.lisp is loaded, so both test systems stay out of the
+      # numbers while exercising the engine, weave helpers, and callgraph API.
       #
       # This does NOT gate on a coverage percentage: the report exists to make
       # the number visible and trending, not to block merges on a threshold
@@ -152,6 +150,7 @@
           systems = [
             "cl-prolog"
             "cl-prolog/weave"
+            "cl-prolog/callgraph"
           ];
           timeoutSeconds = 600;
           killAfterSeconds = 30;
@@ -167,7 +166,7 @@
 
       # Single source of truth for the project version: the `:version` form in
       # cl-prolog.asd, so the flake can never drift from the ASDF system
-      # definition (the package once pinned a stale 0.6.0). All four systems
+      # definition (the package once pinned a stale 0.6.0). All five systems
       # in that file declare the same version; `fromAsdSystem` accepts that
       # unanimity and refuses to pick a winner if they ever disagree.
       asd = ./cl-prolog.asd;
@@ -269,12 +268,16 @@
       # run` works by hand. `self.formatter` is the preset's own treefmt
       # wrapper -- the SAME evaluation `checks.formatting` uses, not a second
       # one -- so formatting in the shell cannot disagree with the gate.
-      devShellPackages = ctx: [
-        self.formatter.${ctx.system}
-        ctx.pkgs.python3Packages.mkdocs-material
-        cl-weave.packages.${ctx.system}.default
-        paredit-cli.packages.${ctx.system}.default
-      ];
+      devShellPackages =
+        ctx:
+        [
+          self.formatter.${ctx.system}
+          ctx.pkgs.python3Packages.mkdocs-material
+          cl-weave.packages.${ctx.system}.default
+        ]
+        ++
+          ctx.pkgs.lib.optional (builtins.hasAttr ctx.system paredit-cli.packages)
+            paredit-cli.packages.${ctx.system}.default;
 
       overrideOutputs = ctx: {
         # See `testApp` above: cl-prolog's test app is deliberately a
@@ -290,70 +293,72 @@
       extraOutputs = ctx: {
         packages.coverage = coverageReport ctx;
 
-        checks = {
-          # Structural parse gate over every Lisp source in the filtered
-          # tree: fails if any .lisp/.asd file is not a balanced S-expression
-          # document.
-          paredit-lint = paredit-cli.lib.${ctx.system}.mkLintCheck {
-            inherit (ctx) src;
-            name = "cl-prolog-paredit-lint";
-          };
+        checks =
+          ctx.pkgs.lib.optionalAttrs (builtins.hasAttr ctx.system paredit-cli.lib) {
+            # Structural parse gate over every Lisp source in the filtered
+            # tree: fails if any .lisp/.asd file is not a balanced S-expression
+            # document.
+            paredit-lint = paredit-cli.lib.${ctx.system}.mkLintCheck {
+              inherit (ctx) src;
+              name = "cl-prolog-paredit-lint";
+            };
+          }
+          // {
+            # Ensure every shipped example loads from the same clean source
+            # used by the package and the other checks. A plain load-system has
+            # no backtracking search to run away, so it gets a much smaller
+            # time budget than the full suite.
+            examples = ctx.cl.mkScriptCheck {
+              drv = ctx.package;
+              name = "cl-prolog-examples";
+              entryPointText = ''
+                (require "asdf")
+                (asdf:load-system "cl-prolog/examples")
+              '';
+              timeoutSeconds = 120;
+              killAfterSeconds = 30;
+            };
 
-          # Ensure every shipped example loads from the same clean source
-          # used by the package and the other checks. A plain load-system has
-          # no backtracking search to run away, so it gets a much smaller
-          # time budget than the full suite.
-          examples = ctx.cl.mkScriptCheck {
-            drv = ctx.package;
-            name = "cl-prolog-examples";
-            entryPointText = ''
-              (require "asdf")
-              (asdf:load-system "cl-prolog/examples")
+            # The same derivation as `packages.coverage`. It runs the full suite
+            # under sb-cover and fails when nothing was instrumented, so a
+            # regression that stops it reporting fails here rather than silently
+            # shipping a stale or empty report.
+            coverage = coverageReport ctx;
+
+            # `nix flake check` only EVALUATES `packages` and `apps`, it does
+            # not realise their derivations, and the preset's generated checks
+            # are all `enableCheck.overrideAttrs` variants -- distinct
+            # derivations from `packages.default`. Without this, the package a
+            # downstream flake actually consumes is never built in CI. Mirrors
+            # the `package = self.packages.${system}.default;` convention
+            # paredit-cli's own flake uses.
+            package = ctx.package;
+
+            # `checks.default` runs the suite through run-tests.lisp under a
+            # plain SBCL with the compiled-in default dynamic space. This runs
+            # the SAME suite through `apps.test`, i.e. through cl-weave's own
+            # CLI, which sets a 4096 MB dynamic space -- a genuinely different
+            # code path, so a heap-pressure-sensitive test can no longer pass
+            # one way and fail the other with no CI signal either way. It is
+            # also the only gate that realises `apps.test`, and therefore
+            # README's headline `nix run github:nerima-lisp/cl-prolog`.
+            #
+            # A plain `runCommand` rather than `mkCommandCheck`: the app carries
+            # its own CL_SOURCE_REGISTRY pointing at store paths, and
+            # `mkCommandCheck` would run it inside a `lispDerivation` build
+            # whose ASDF_OUTPUT_TRANSLATIONS is the identity mapping -- ASDF
+            # would then try to write fasls into the read-only store. Here
+            # ASDF's default translations put them under $HOME/.cache, which is
+            # kept inside the build's own TMPDIR so nothing touches a real user
+            # profile.
+            app-test = ctx.pkgs.runCommand "cl-prolog-app-test" { } ''
+              export HOME="$TMPDIR/home"
+              export XDG_CACHE_HOME="$TMPDIR/cache"
+              mkdir -p "$HOME" "$XDG_CACHE_HOME"
+              timeout -k 30 600 ${(testApp ctx).program}
+              touch "$out"
             '';
-            timeoutSeconds = 120;
-            killAfterSeconds = 30;
           };
-
-          # The same derivation as `packages.coverage`. It runs the full suite
-          # under sb-cover and fails when nothing was instrumented, so a
-          # regression that stops it reporting fails here rather than silently
-          # shipping a stale or empty report.
-          coverage = coverageReport ctx;
-
-          # `nix flake check` only EVALUATES `packages` and `apps`, it does
-          # not realise their derivations, and the preset's generated checks
-          # are all `enableCheck.overrideAttrs` variants -- distinct
-          # derivations from `packages.default`. Without this, the package a
-          # downstream flake actually consumes is never built in CI. Mirrors
-          # the `package = self.packages.${system}.default;` convention
-          # paredit-cli's own flake uses.
-          package = ctx.package;
-
-          # `checks.default` runs the suite through run-tests.lisp under a
-          # plain SBCL with the compiled-in default dynamic space. This runs
-          # the SAME suite through `apps.test`, i.e. through cl-weave's own
-          # CLI, which sets a 4096 MB dynamic space -- a genuinely different
-          # code path, so a heap-pressure-sensitive test can no longer pass
-          # one way and fail the other with no CI signal either way. It is
-          # also the only gate that realises `apps.test`, and therefore
-          # README's headline `nix run github:nerima-lisp/cl-prolog`.
-          #
-          # A plain `runCommand` rather than `mkCommandCheck`: the app carries
-          # its own CL_SOURCE_REGISTRY pointing at store paths, and
-          # `mkCommandCheck` would run it inside a `lispDerivation` build
-          # whose ASDF_OUTPUT_TRANSLATIONS is the identity mapping -- ASDF
-          # would then try to write fasls into the read-only store. Here
-          # ASDF's default translations put them under $HOME/.cache, which is
-          # kept inside the build's own TMPDIR so nothing touches a real user
-          # profile.
-          app-test = ctx.pkgs.runCommand "cl-prolog-app-test" { } ''
-            export HOME="$TMPDIR/home"
-            export XDG_CACHE_HOME="$TMPDIR/cache"
-            mkdir -p "$HOME" "$XDG_CACHE_HOME"
-            timeout -k 30 600 ${(testApp ctx).program}
-            touch "$out"
-          '';
-        };
       };
     };
 }

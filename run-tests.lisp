@@ -14,14 +14,17 @@
 ;;;; --script implies --disable-debugger, so an unhandled error — including the
 ;;;; one cl-prolog/test's test-op signals on a failing suite — exits non-zero
 ;;;; with a backtrace rather than dropping into the REPL.
-
 (require :asdf)
 
 ;;; Resolved from *LOAD-TRUENAME* rather than *DEFAULT-PATHNAME-DEFAULTS* so
 ;;; the script works both from the repository root and from the Nix store path
 ;;; that checks.default passes as an absolute argument.
-(let ((root (make-pathname :name nil :type nil :version nil
-                           :defaults *load-truename*)))
+(let ((root
+      (make-pathname :name nil :type nil :version nil :defaults *load-truename*)))
   (asdf:load-asd (merge-pathnames "cl-prolog.asd" root)))
 
-(asdf:test-system "cl-prolog/test")
+(progn
+  (asdf:load-system "cl-prolog/test")
+  (asdf:load-system "cl-prolog/callgraph/test")
+  (unless (uiop:symbol-call "CL-WEAVE" "RUN-ALL" :reporter :spec)
+    (error "cl-prolog cl-weave test suites failed.")))

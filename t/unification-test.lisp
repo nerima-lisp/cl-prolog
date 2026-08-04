@@ -89,13 +89,7 @@
     (is (not (cl-prolog::%term-has-variables-p ground-cycle)))
     (is (cl-prolog::%term-has-variables-p variable-cycle))
     (is-equal '(?x) (cl-prolog::%collect-query-variables query-cycle))))
-  (deftest
-    question-prefixed-atoms-do-not-unify-as-variables
-    ()
-    (let ((atom (read-prolog-term "'?x'.")))
-      (is (not (logic-var-p atom)))
-      (is (not (nth-value 1 (unify atom 'cl-prolog::a))))
-      (is (nth-value 1 (unify atom atom)))))
+  (progn (deftest unify-identical-object-fast-path-preserves-environment () (let* ((variable (fresh-logic-variable "?IDENTICAL")) (binding (cons (fresh-logic-variable "?BOUND") :value)) (environment (list binding))) (dolist (occurs-check (list nil t)) (multiple-value-bind (extended ok) (unify variable variable environment occurs-check) (is ok) (is (eq environment extended)) (is (eq binding (car extended))))))) (deftest unify-distinct-equal-objects-use-general-path () (let* ((left (copy-seq "same")) (right (copy-seq "same")) (environment (list (cons (fresh-logic-variable "?EXISTING") :value)))) (is (not (eq left right))) (dolist (occurs-check (list nil t)) (multiple-value-bind (extended ok) (unify left right environment occurs-check) (is ok) (is (eq environment extended)))))) (deftest question-prefixed-atoms-do-not-unify-as-variables () (let ((atom (read-prolog-term "'?x'."))) (is (not (logic-var-p atom))) (is (not (nth-value 1 (unify atom (quote cl-prolog::a))))) (is (nth-value 1 (unify atom atom))))))
   (deftest
     indexed-alias-chain-terminates-with-linear-lookup
     (:timeout 3)
@@ -357,40 +351,70 @@
           (declare (ignore entry))
           (is (not present-p))))))
   (deftest environment-index-compaction-preserves-ranks-and-cycle-choice ()
-    (let* ((x (fresh-logic-variable "?COMPACT-X"))
-           (y (fresh-logic-variable "?COMPACT-Y"))
-           (z (fresh-logic-variable "?COMPACT-Z"))
-           (fillers
-             (loop repeat 5
-                   collect (fresh-logic-variable "?COMPACT-FILLER")))
-           (bindings
-             (append
-               (list (cons x y) (cons y z) (cons z x))
-               (loop for filler in fillers
-                     collect (cons filler :filler))))
-           (base-index (cl-prolog::%make-environment-index nil))
-           (compacted
-             (cl-prolog::%extend-environment-index
-               base-index
-               bindings)))
-      (is (= 8 (length bindings)))
-      (is
-        (= 0
-           (cl-prolog::%environment-index-overlay-length compacted)))
-      (is
-        (not
-          (eq (cl-prolog::%environment-index-table base-index)
-              (cl-prolog::%environment-index-table compacted))))
-      (is
-        (= -1
-           (cdr (%test-environment-index-entry x compacted))))
-      (is
-        (= -2
-           (cdr (%test-environment-index-entry y compacted))))
-      (is
-        (= -3
-           (cdr (%test-environment-index-entry z compacted))))
-      (is (eq z (cl-prolog::%walk-term-indexed x compacted)))))
+  (let* ((x (fresh-logic-variable "?COMPACT-X"))
+         (y (fresh-logic-variable "?COMPACT-Y"))
+         (z (fresh-logic-variable "?COMPACT-Z"))
+         (fillers
+           (loop repeat 4
+                 collect (fresh-logic-variable "?COMPACT-FILLER")))
+         (oldest-to-newest
+           (append
+             (list (cons x y) (cons y z) (cons z x))
+             (loop for filler in fillers
+                   collect (cons filler :filler))))
+         (newest-binding (cons (car fillers) :newest))
+         (base-index (cl-prolog::%make-environment-index nil))
+         (before-compaction
+           (cl-prolog::%extend-environment-index
+             base-index
+             oldest-to-newest))
+         (compacted
+           (cl-prolog::%extend-environment-index
+             before-compaction
+             (list newest-binding))))
+    (is (= 7 (length oldest-to-newest)))
+    (is
+      (= 7
+         (cl-prolog::%environment-index-overlay-length before-compaction)))
+    (is
+      (equal (reverse oldest-to-newest)
+             (cl-prolog::%environment-index-overlay before-compaction)))
+    (is
+      (= -1
+         (cdr (%test-environment-index-entry x before-compaction))))
+    (is
+      (= -2
+         (cdr (%test-environment-index-entry y before-compaction))))
+    (is
+      (= -3
+         (cdr (%test-environment-index-entry z before-compaction))))
+    (is
+      (= 0
+         (cl-prolog::%environment-index-overlay-length compacted)))
+    (is
+      (and (eq (cl-prolog::%environment-index-table base-index) (cl-prolog::%environment-index-table compacted)) (= 1 (length (cl-prolog::%environment-index-chunks compacted)))))
+    (is
+      (eq :newest
+          (car
+            (%test-environment-index-entry
+              (car fillers)
+              compacted))))
+    (is
+      (= -8
+         (cdr
+           (%test-environment-index-entry
+             (car fillers)
+             compacted))))
+    (is
+      (= -1
+         (cdr (%test-environment-index-entry x compacted))))
+    (is
+      (= -2
+         (cdr (%test-environment-index-entry y compacted))))
+    (is
+      (= -3
+         (cdr (%test-environment-index-entry z compacted))))
+    (is (eq z (cl-prolog::%walk-term-indexed x compacted)))))
   (deftest environment-index-after-bindings-distinguishes-prefix-and-rebuild ()
     (let* ((variable (fresh-logic-variable "?PREFIX"))
            (parent-environment (list (cons variable :base)))
@@ -474,7 +498,7 @@
                (is
                  (< (cl-prolog::%environment-index-overlay-length index)
                     cl-prolog::+environment-index-overlay-threshold+)))
-      (is (= 7 maximum-overlay-length))
+      (progn (is (= 7 maximum-overlay-length)) (let ((chunk-sizes (mapcar (function cl-prolog::%environment-index-chunk-size) (cl-prolog::%environment-index-chunks index)))) (is (= (length chunk-sizes) (length (remove-duplicates chunk-sizes)))) (is (<= (length chunk-sizes) (integer-length 17)))))
       (is
         (eq :resolved
             (cl-prolog::%walk-term-indexed (car variables) index)))))))
@@ -637,108 +661,11 @@
       (is (not (eq (third first-head) (third second-head)))))) )
 
 (progn (progn
-  (deftest
-    unification-scratch-keeps-directed-pairs
-    ()
-    (let* ((scratch (cl-prolog::%make-unification-scratch))
-           (left (cons :left nil))
-           (right (cons :right nil)))
-      (is (not (cl-prolog::%unification-scratch-remember-pair scratch left right)))
-      (is (cl-prolog::%unification-scratch-remember-pair scratch left right))
-      (is (not (cl-prolog::%unification-scratch-remember-pair scratch right left)))
-      (is (= 2 (cl-prolog::%unification-scratch-pair-count scratch)))
-      (cl-prolog::%reset-unification-scratch scratch)))
-  (deftest
-    unification-scratch-migrates-and-resets
-    ()
-  (let* ((scratch (cl-prolog::%make-unification-scratch))
-         (left (cons :left nil))
-         (rhs-count 64)
-         (rights (loop repeat rhs-count collect (cons :right nil))))
-    (loop for right in rights
-          for expected-count from 1
-          do (is
-               (not
-                 (cl-prolog::%unification-scratch-remember-pair
-                   scratch left right)))
-             (is
-               (= expected-count
-                  (cl-prolog::%unification-scratch-pair-count scratch))))
-    (is (cl-prolog::%unification-scratch-hash-mode-p scratch))
-    (is (= rhs-count (cl-prolog::%unification-scratch-pair-count scratch)))
-    (let* ((table (cl-prolog::%unification-scratch-pair-table scratch))
-           (right-table (gethash left table)))
-      (is (hash-table-p right-table))
-      (is (= rhs-count (hash-table-count right-table))))
-    (loop for right in rights
-          do (is
-               (cl-prolog::%unification-scratch-remember-pair
-                 scratch left right)))
-    (is (= rhs-count (cl-prolog::%unification-scratch-pair-count scratch)))
-    (is
-      (not
-        (cl-prolog::%unification-scratch-remember-pair
-          scratch left (cons :new-right nil))))
-    (is (= (1+ rhs-count) (cl-prolog::%unification-scratch-pair-count scratch)))
-    (let ((pairs (cl-prolog::%unification-scratch-pairs scratch))
-          (table (cl-prolog::%unification-scratch-pair-table scratch)))
-      (cl-prolog::%reset-unification-scratch scratch)
-      (is (zerop (cl-prolog::%unification-scratch-pair-count scratch)))
-      (is (not (cl-prolog::%unification-scratch-hash-mode-p scratch)))
-      (is (not (cl-prolog::%unification-scratch-active-p scratch)))
-      (is (notany (function identity) pairs))
-      (is (zerop (hash-table-count table)))
-      (is
-        (not
-          (cl-prolog::%unification-scratch-remember-pair
-            scratch (cons :fresh nil) (cons :fresh nil))))
-      (is (= 1 (cl-prolog::%unification-scratch-pair-count scratch)))
-      (is (not (cl-prolog::%unification-scratch-hash-mode-p scratch)))
-      (cl-prolog::%reset-unification-scratch scratch))))
-  (deftest
-    unification-scratch-hash-mode-uses-eq-for-both-pair-components
-    ()
-    (let* ((scratch (cl-prolog::%make-unification-scratch))
-           (seed-left (cons :seed-left nil))
-           (seed-rights (loop repeat 32 collect (cons :seed-right nil)))
-           (left-a (list :same))
-           (left-b (list :same))
-           (right-a (list :same))
-           (right-b (list :same)))
-      (loop for right in seed-rights
-            do (is
-                 (not
-                   (cl-prolog::%unification-scratch-remember-pair
-                     scratch seed-left right))))
-      (is (equal left-a left-b))
-      (is (not (eq left-a left-b)))
-      (is (equal right-a right-b))
-      (is (not (eq right-a right-b)))
-      (is
-        (not
-          (cl-prolog::%unification-scratch-remember-pair
-            scratch left-a right-a)))
-      (is (cl-prolog::%unification-scratch-hash-mode-p scratch))
-      (is
-        (cl-prolog::%unification-scratch-remember-pair
-          scratch left-a right-a))
-      (is
-        (not
-          (cl-prolog::%unification-scratch-remember-pair
-            scratch left-b right-b)))
-      (is
-        (cl-prolog::%unification-scratch-remember-pair
-          scratch left-b right-b))
-      (is (= 34 (cl-prolog::%unification-scratch-pair-count scratch)))
-      (let* ((table (cl-prolog::%unification-scratch-pair-table scratch))
-             (right-table-a (gethash left-a table))
-             (right-table-b (gethash left-b table)))
-        (is (eq (hash-table-test table) (quote eq)))
-        (is (hash-table-p right-table-a))
-        (is (hash-table-p right-table-b))
-        (is (eq (hash-table-test right-table-a) (quote eq)))
-        (is (eq (hash-table-test right-table-b) (quote eq))))
-      (cl-prolog::%reset-unification-scratch scratch)))
+
+  (deftest unification-scratch-promotes-at-linear-threshold () (let* ((primary-threshold cl-prolog::+unification-pair-primary-threshold+) (threshold cl-prolog::+unification-pair-linear-threshold+) (scratch (cl-prolog::%make-unification-scratch)) (pairs (loop for index to threshold collect (cons (list :left index) (list :right index))))) (is (= 8 primary-threshold)) (is (= 16 threshold)) (is (null (cl-prolog::%unification-scratch-pair-seen scratch))) (is (null (cl-prolog::%unification-scratch-pair-seen-secondary scratch))) (loop for pair in (subseq pairs 0 primary-threshold) do (is (not (cl-prolog::%unification-scratch-remember-pair scratch (car pair) (cdr pair))))) (is (= primary-threshold (cl-prolog::%unification-scratch-pair-count scratch))) (is (null (cl-prolog::%unification-scratch-pair-seen-secondary scratch))) (is (cl-prolog::%unification-scratch-remember-pair scratch (caar pairs) (cdar pairs))) (let ((ninth (nth primary-threshold pairs))) (is (not (cl-prolog::%unification-scratch-remember-pair scratch (car ninth) (cdr ninth))))) (is (= (1+ primary-threshold) (cl-prolog::%unification-scratch-pair-count scratch))) (is (simple-vector-p (cl-prolog::%unification-scratch-pair-seen-secondary scratch))) (is (cl-prolog::%unification-scratch-remember-pair scratch (caar pairs) (cdar pairs))) (let ((ninth (nth primary-threshold pairs))) (is (cl-prolog::%unification-scratch-remember-pair scratch (car ninth) (cdr ninth)))) (loop for pair in (subseq pairs (1+ primary-threshold) threshold) do (is (not (cl-prolog::%unification-scratch-remember-pair scratch (car pair) (cdr pair))))) (is (= threshold (cl-prolog::%unification-scratch-pair-count scratch))) (is (not (cl-prolog::%unification-scratch-pair-hash-mode-p scratch))) (let ((seventeenth (nth threshold pairs))) (is (not (cl-prolog::%unification-scratch-remember-pair scratch (car seventeenth) (cdr seventeenth))))) (is (= threshold (cl-prolog::%unification-scratch-pair-count scratch))) (is (cl-prolog::%unification-scratch-pair-hash-mode-p scratch)) (is (hash-table-p (cl-prolog::%unification-scratch-first-index scratch))) (is (loop for pair in pairs always (cl-prolog::%unification-scratch-remember-pair scratch (car pair) (cdr pair)))) (let ((primary (cl-prolog::%unification-scratch-pair-seen scratch)) (secondary (cl-prolog::%unification-scratch-pair-seen-secondary scratch))) (cl-prolog::%reset-unification-scratch scratch) (is (zerop (cl-prolog::%unification-scratch-pair-count scratch))) (is (not (cl-prolog::%unification-scratch-pair-hash-mode-p scratch))) (is (loop for value across primary always (null value))) (is (loop for value across secondary always (null value))) (is (zerop (hash-table-count (cl-prolog::%unification-scratch-first-index scratch)))) (loop for pair in (subseq pairs 0 (1+ primary-threshold)) do (is (not (cl-prolog::%unification-scratch-remember-pair scratch (car pair) (cdr pair))))) (is (eq secondary (cl-prolog::%unification-scratch-pair-seen-secondary scratch))) (is (not (cl-prolog::%unification-scratch-pair-hash-mode-p scratch))) (cl-prolog::%reset-unification-scratch scratch) (is (loop for value across primary always (null value))) (is (loop for value across secondary always (null value))))))
+  (deftest unification-scratch-keeps-same-left-distinct-rights () (let ((scratch (cl-prolog::%make-unification-scratch)) (left (list :left)) (rights (loop repeat 17 collect (list :right)))) (loop for right in rights do (is (not (cl-prolog::%unification-scratch-remember-pair scratch left right)))) (is (loop for right in rights always (cl-prolog::%unification-scratch-remember-pair scratch left right))) (is (cl-prolog::%unification-scratch-pair-hash-mode-p scratch)) (is (= cl-prolog::+unification-pair-linear-threshold+ (cl-prolog::%unification-scratch-pair-count scratch))) (cl-prolog::%reset-unification-scratch scratch)))
+  (deftest unification-scratch-keeps-directed-pairs () (let* ((scratch (cl-prolog::%make-unification-scratch)) (left (cons :left nil)) (right (cons :right nil))) (is (not (cl-prolog::%unification-scratch-remember-pair scratch left right))) (is (cl-prolog::%unification-scratch-remember-pair scratch left right)) (is (not (cl-prolog::%unification-scratch-remember-pair scratch right left))) (is (cl-prolog::%unification-scratch-remember-pair scratch right left)) (cl-prolog::%reset-unification-scratch scratch)))
+
   (deftest
     cyclic-unification-scratch-success-and-failure
     ()
@@ -761,148 +688,155 @@
            (different (list different-leaf different-leaf)))
       (is (nth-value 1 (unify left right)))
       (is (not (nth-value 1 (unify left different))))))
-  (deftest
-    unification-scratch-cleans-up-after-condition-and-nonlocal-exit
-    ()
-    (let* ((scratch (cl-prolog::%make-unification-scratch))
-           (variable (fresh-logic-variable "?SCRATCH-EXIT")))
-      (let ((cl-prolog::*unification-scratch* scratch))
-        (is
-          (eq
-            :escaped
-            (cl:catch (quote scratch-exit)
-              (handler-bind ((type-error
-                    (lambda (condition)
-                      (declare (ignore condition))
-                      (cl:throw (quote scratch-exit) :escaped))))
-                (cl-prolog::%unify-indexed (list variable) (list :value) nil nil))
-              :missed))))
+  (progn
+  (defun make-nested-term (depth)
+    (loop with term = :leaf
+          repeat depth
+          do (setf term (list term))
+          finally (return term)))
+
+  (deftest unification-scratch-cleans-up-after-condition-and-nonlocal-exit ()
+    (let ((scratch (cl-prolog::%make-unification-scratch)))
+      (handler-case
+          (cl-prolog::%call-with-unification-scratch
+            scratch
+            (lambda ()
+              (is (cl-prolog::%unification-scratch-active-p scratch))
+              (dotimes (index 9)
+                (is (not (cl-prolog::%unification-scratch-remember-pair
+                           scratch (list :left index) (list :right index)))))
+              (is (simple-vector-p
+                    (cl-prolog::%unification-scratch-pair-seen-secondary scratch)))
+              (error "forced exit")))
+        (error () nil))
       (is (not (cl-prolog::%unification-scratch-active-p scratch)))
       (is (zerop (cl-prolog::%unification-scratch-pair-count scratch)))
-      (is
-        (notany
-          (function identity)
-          (subseq (cl-prolog::%unification-scratch-pairs scratch) 0 2)))))
-  (deftest
-    nested-query-roots-use-independent-unification-scratches
-    ()
-    (let ((outer-scratch nil)
-          (inner-scratch nil))
-      (map-prolog-solutions
-        (lambda (outer-solution)
-          (declare (ignore outer-solution))
-          (setf outer-scratch cl-prolog::*unification-scratch*)
-          (map-prolog-solutions
-            (lambda (inner-solution)
-              (declare (ignore inner-solution))
-              (setf inner-scratch cl-prolog::*unification-scratch*)
-              (is (not (eq outer-scratch inner-scratch))))
-            (make-rulebase)
-            (quote (true)))
-          (is (eq outer-scratch cl-prolog::*unification-scratch*)))
+      (is (not (cl-prolog::%unification-scratch-pair-hash-mode-p scratch)))
+      (let ((primary (cl-prolog::%unification-scratch-pair-seen scratch))
+            (secondary (cl-prolog::%unification-scratch-pair-seen-secondary scratch))
+            (index (cl-prolog::%unification-scratch-first-index scratch)))
+        (is (loop for value across primary always (null value)))
+        (is (loop for value across secondary always (null value)))
+        (is (or (null index) (zerop (hash-table-count index)))))
+      (is (not (cl-prolog::%unification-scratch-remember-pair
+                 scratch (list :marker-left) (list :marker-right)))))))
+  (deftest nested-query-roots-use-independent-unification-scratches ()
+  (let ((outer-scratch nil)
+        (inner-scratch nil))
+    (map-prolog-solutions
+     (lambda (outer-solution)
+       (declare (ignore outer-solution))
+       (setf outer-scratch cl-prolog::*unification-scratch*)
+       (map-prolog-solutions
+        (lambda (inner-solution)
+          (declare (ignore inner-solution))
+          (setf inner-scratch cl-prolog::*unification-scratch*)
+          (is (not (eq outer-scratch inner-scratch))))
         (make-rulebase)
-        (quote (true)))
-      (is outer-scratch)
-      (is inner-scratch)
-      (is (not (eq outer-scratch inner-scratch)))
-      (is (not (cl-prolog::%unification-scratch-active-p outer-scratch)))
-      (is (not (cl-prolog::%unification-scratch-active-p inner-scratch)))
-      (is (zerop (cl-prolog::%unification-scratch-pair-count outer-scratch)))
-      (is (zerop (cl-prolog::%unification-scratch-pair-count inner-scratch)))))
-  (deftest
-    active-unification-scratch-uses-temporary-reentrant-scratch
-    ()
-    (let* ((scratch (cl-prolog::%make-unification-scratch))
-           (marker-left (cons :marker-left nil))
-           (marker-right (cons :marker-right nil))
-           (left (cons :node nil))
-           (right (cons :node nil)))
-      (setf (cdr left) left
-            (cdr right) right)
-      (cl-prolog::%unification-scratch-remember-pair scratch marker-left marker-right)
-      (setf (cl-prolog::%unification-scratch-active-p scratch) t)
-      (let ((cl-prolog::*unification-scratch* scratch))
-        (is
-          (nth-value
-            1
-            (cl-prolog::%unify-indexed
-              left
-              right
-              nil
-              (cl-prolog::%make-environment-index nil)))))
-      (is (cl-prolog::%unification-scratch-active-p scratch))
-      (is (= 1 (cl-prolog::%unification-scratch-pair-count scratch)))
-      (is (eq marker-left (svref (cl-prolog::%unification-scratch-pairs scratch) 0)))
-      (is (eq marker-right (svref (cl-prolog::%unification-scratch-pairs scratch) 1)))
-      (setf (cl-prolog::%unification-scratch-active-p scratch) nil)
-      (cl-prolog::%reset-unification-scratch scratch)))
-  (deftest
-    active-hash-mode-unification-scratch-preserves-parent-state
-    ()
-    (let* ((scratch (cl-prolog::%make-unification-scratch))
-           (pairs
-          (loop for index below 33
-                collect (cons (cons :left index) (cons :right index)))))
-      (dolist (pair pairs)
-        (cl-prolog::%unification-scratch-remember-pair scratch (car pair) (cdr pair)))
-      (let ((pair-vector (cl-prolog::%unification-scratch-pairs scratch))
-            (pair-table (cl-prolog::%unification-scratch-pair-table scratch))
-            (left (cons :node nil))
-            (right (cons :node nil)))
-        (setf (cdr left) left
-              (cdr right) right
-              (cl-prolog::%unification-scratch-active-p scratch) t)
-        (let ((cl-prolog::*unification-scratch* scratch))
-          (is
-            (nth-value
-              1
-              (cl-prolog::%unify-indexed
-                left
-                right
-                nil
-                (cl-prolog::%make-environment-index nil)))))
-        (is (cl-prolog::%unification-scratch-active-p scratch))
-        (is (cl-prolog::%unification-scratch-hash-mode-p scratch))
-        (is (= 33 (cl-prolog::%unification-scratch-pair-count scratch)))
-        (is (eq pair-vector (cl-prolog::%unification-scratch-pairs scratch)))
-        (is (eq pair-table (cl-prolog::%unification-scratch-pair-table scratch)))
-        (dolist (pair pairs)
-          (is
-            (cl-prolog::%unification-scratch-remember-pair scratch (car pair) (cdr pair))))
-        (is (= 33 (cl-prolog::%unification-scratch-pair-count scratch)))
-        (setf (cl-prolog::%unification-scratch-active-p scratch) nil)
-        (cl-prolog::%reset-unification-scratch scratch))))
+        (list (quote true)))
+       (is (eq outer-scratch cl-prolog::*unification-scratch*)))
+     (make-rulebase)
+     (list (quote true)))
+    (is outer-scratch)
+    (is inner-scratch)
+    (is (not (eq outer-scratch inner-scratch)))
+    (dolist (scratch (list outer-scratch inner-scratch))
+      (is (not (cl-prolog::%unification-scratch-active-p scratch)))
+      (let ((index (cl-prolog::%unification-scratch-first-index scratch)))
+        (is (or (null index) (zerop (hash-table-count index))))))))
+  (deftest active-unification-scratch-uses-temporary-reentrant-scratch ()
+  (let ((scratch (cl-prolog::%make-unification-scratch))
+        (marker-left (quote (marker-left)))
+        (marker-right (quote (marker-right))))
+    (is (not (cl-prolog::%unification-scratch-remember-pair
+               scratch marker-left marker-right)))
+    (setf (cl-prolog::%unification-scratch-active-p scratch) t)
+    (let ((cl-prolog::*unification-scratch* scratch))
+      (multiple-value-bind (bindings unified-p index)
+          (cl-prolog::%unify-indexed
+            (list (make-nested-term 24))
+            (list (make-nested-term 24))
+            nil
+            (cl-prolog::%make-environment-index nil))
+        (declare (ignore index))
+        (is unified-p)
+        (is (null bindings))))
+    (is (cl-prolog::%unification-scratch-active-p scratch))
+    (is (cl-prolog::%unification-scratch-remember-pair
+          scratch marker-left marker-right))
+    (setf (cl-prolog::%unification-scratch-active-p scratch) nil)
+    (cl-prolog::%reset-unification-scratch scratch)
+    (is (not (cl-prolog::%unification-scratch-remember-pair
+               scratch marker-left marker-right)))))
+  (deftest active-grown-unification-scratch-preserves-parent-state ()
+  (let ((scratch (cl-prolog::%make-unification-scratch))
+        (lefts (loop repeat 33 collect (list (quote left))))
+        (rights (loop repeat 33 collect (list (quote right)))))
+    (loop for left in lefts
+          for right in rights
+          do (is (not (cl-prolog::%unification-scratch-remember-pair
+                        scratch left right))))
+    (setf (cl-prolog::%unification-scratch-active-p scratch) t)
+    (let ((cl-prolog::*unification-scratch* scratch))
+      (multiple-value-bind (bindings unified-p index)
+          (cl-prolog::%unify-indexed
+            (list (make-nested-term 24))
+            (list (make-nested-term 24))
+            nil
+            (cl-prolog::%make-environment-index nil))
+        (declare (ignore index))
+        (is unified-p)
+        (is (null bindings))))
+    (is (cl-prolog::%unification-scratch-active-p scratch))
+    (loop for left in lefts
+          for right in rights
+          do (is (cl-prolog::%unification-scratch-remember-pair
+                   scratch left right)))
+    (setf (cl-prolog::%unification-scratch-active-p scratch) nil)
+    (cl-prolog::%reset-unification-scratch scratch)))
   #+sb-thread
-  (deftest concurrent-query-roots-use-thread-local-unification-scratches ()
-    (let* ((thread-count 4)
-           (ready (sb-thread:make-semaphore :count 0))
-           (release (sb-thread:make-semaphore :count 0))
-           (results (make-array thread-count :initial-element nil))
-           (threads
-             (loop for index below thread-count collect
-                   (let ((slot index))
-                     (sb-thread:make-thread
-                       (lambda ()
-                         (let ((observed nil) (consistent-p t))
-                           (map-prolog-solutions
-                             (lambda (solution)
-                               (declare (ignore solution))
-                               (setf observed cl-prolog::*unification-scratch*)
-                               (sb-thread:signal-semaphore ready)
-                               (sb-thread:wait-on-semaphore release)
-                               (setf consistent-p (eq observed cl-prolog::*unification-scratch*)))
-                             (make-rulebase) (quote (true)))
-                           (setf (aref results slot)
-                                 (list observed consistent-p
-                                       (not (cl-prolog::%unification-scratch-active-p observed))
-                                       (zerop (cl-prolog::%unification-scratch-pair-count observed)))))))))))
-      (is (sb-thread:wait-on-semaphore ready :n thread-count :timeout 5))
-      (sb-thread:signal-semaphore release thread-count)
-      (dolist (thread threads) (sb-thread:join-thread thread))
-      (let ((scratches (loop for result across results collect (first result))))
-        (is (every (function identity) scratches))
-        (is (= thread-count (length (remove-duplicates scratches :test (function eq)))))
-        (loop for result across results do (is (second result)) (is (third result)) (is (fourth result))))))
+(deftest concurrent-query-roots-use-thread-local-unification-scratches ()
+  (let* ((thread-count 4)
+         (ready (sb-thread:make-semaphore :count 0))
+         (release (sb-thread:make-semaphore :count 0))
+         (results (make-array thread-count :initial-element nil))
+         (threads
+           (loop for index below thread-count collect
+                 (let ((slot index))
+                   (sb-thread:make-thread
+                    (lambda ()
+                      (let ((observed nil)
+                            (consistent-p t))
+                        (map-prolog-solutions
+                         (lambda (solution)
+                           (declare (ignore solution))
+                           (setf observed cl-prolog::*unification-scratch*)
+                           (sb-thread:signal-semaphore ready)
+                           (sb-thread:wait-on-semaphore release)
+                           (setf consistent-p
+                                 (eq observed cl-prolog::*unification-scratch*)))
+                         (make-rulebase)
+                         '(true))
+                        (setf (aref results slot)
+                              (list observed
+                                    consistent-p
+                                    (not
+                                     (cl-prolog::%unification-scratch-active-p
+                                      observed))
+                                    (let ((index (cl-prolog::%unification-scratch-first-index observed))) (or (null index) (zerop (hash-table-count index)))))))))))))
+    (is (sb-thread:wait-on-semaphore ready :n thread-count :timeout 5))
+    (sb-thread:signal-semaphore release thread-count)
+    (dolist (thread threads)
+      (sb-thread:join-thread thread))
+    (let ((scratches
+            (loop for result across results collect (first result))))
+      (is (every #'identity scratches))
+      (is (= thread-count
+             (length (remove-duplicates scratches :test #'eq))))
+      (loop for result across results
+            do (is (second result))
+               (is (third result))
+               (is (fourth result))))))
   #-sb-thread
   (deftest concurrent-query-roots-are-skipped-without-sb-thread ()
     (is (not (member :sb-thread *features*))))
@@ -924,3 +858,67 @@
             (different (make-cycle 39)))
         (is (nth-value 1 (unify left matching)))
         (is (not (nth-value 1 (unify left different)))))))) (deftest compiled-clause-template-preserves-alias-dag-cycle-and-improper-terms () (let* ((variable (fresh-logic-variable)) (shared (cons variable nil)) (root (cons shared shared)) (dotted (cons variable :tail)) (clause (make-clause (list (quote template-graph) variable variable root dotted) (list (list (quote template-body) variable root))))) (setf (cdr shared) shared) (let* ((template (cl-prolog::%compile-clause-template clause)) (first (cl-prolog::%materialize-clause-template template)) (second (cl-prolog::%materialize-clause-template template)) (first-head (clause-head first)) (second-head (clause-head second)) (first-root (fourth first-head)) (second-root (fourth second-head)) (first-shared (car first-root)) (second-shared (car second-root)) (first-body-goal (first (clause-body first))) (second-body-goal (first (clause-body second)))) (is (eq (second first-head) (third first-head))) (is (eq (second first-head) (car first-shared))) (is (eq (car first-root) (cdr first-root))) (is (eq first-shared (cdr first-shared))) (is (eq (second first-head) (car (fifth first-head)))) (is (eq :tail (cdr (fifth first-head)))) (is (eq (second first-head) (second first-body-goal))) (is (eq first-root (third first-body-goal))) (is (eq (second second-head) (third second-head))) (is (eq (second second-head) (car second-shared))) (is (eq (car second-root) (cdr second-root))) (is (eq second-shared (cdr second-shared))) (is (eq (second second-head) (second second-body-goal))) (is (eq second-root (third second-body-goal))) (is (not (eq (second first-head) (second second-head)))) (is (not (eq first-root second-root))) (is (not (eq first-shared second-shared))) (is (not (eq (fifth first-head) (fifth second-head))))))) (deftest stored-clause-template-isolates-input-public-views-and-proof-iterations () (let* ((payload (list :original)) (input (make-clause (list (quote stored-template) payload))) (rulebase (make-rulebase :clauses (list input)))) (setf (car payload) :input-mutated) (let* ((first-view (first (rulebase-visible-clauses rulebase))) (view-payload (second (clause-head first-view)))) (setf (car view-payload) :view-mutated)) (is (= 1 (length (query-prolog rulebase (quote (stored-template (:original))))))) (is (= 1 (length (query-prolog rulebase (quote (stored-template (:original))))))) (is (null (query-prolog rulebase (quote (stored-template (:input-mutated)))))) (is (null (query-prolog rulebase (quote (stored-template (:view-mutated)))))) (let* ((first-view (first (rulebase-visible-clauses rulebase))) (second-view (first (rulebase-visible-clauses rulebase))) (first-head (clause-head first-view)) (second-head (clause-head second-view))) (is (not (eq first-view second-view))) (is (not (eq first-head second-head))) (is (not (eq (second first-head) (second second-head)))) (is-equal (quote (:original)) (second first-head)) (is-equal (quote (:original)) (second second-head)))) (let* ((variable (fresh-logic-variable)) (alias-rulebase (make-rulebase :clauses (list (make-clause (list (quote template-alias) variable variable)))))) (is (= 1 (length (query-prolog alias-rulebase (quote (template-alias alpha alpha)))))) (is (null (query-prolog alias-rulebase (quote (template-alias alpha beta))))) (is (= 1 (length (query-prolog alias-rulebase (quote (template-alias beta beta)))))))))
+(progn
+  (deftest occurs-scratch-promotes-after-inline-threshold ()
+  (let* ((scratch (cl-prolog::%make-unification-scratch))
+         (nodes (loop repeat 9 collect (cons :node nil))))
+    (is (null (cl-prolog::%unification-scratch-occurs-seen scratch)))
+    (cl-prolog::%clear-occurs-scratch scratch)
+    (is (null (cl-prolog::%unification-scratch-occurs-seen scratch)))
+    (loop for node in (subseq nodes 0 8)
+          do (is (not (cl-prolog::%occurs-scratch-remember-p scratch node))))
+    (is (simple-vector-p
+          (cl-prolog::%unification-scratch-occurs-seen scratch)))
+    (is (null (cl-prolog::%unification-scratch-occurs-index scratch)))
+    (is (not (cl-prolog::%occurs-scratch-remember-p scratch (ninth nodes))))
+    (is (hash-table-p
+          (cl-prolog::%unification-scratch-occurs-index scratch)))
+    (is (cl-prolog::%occurs-scratch-remember-p scratch (first nodes)))
+    (cl-prolog::%clear-occurs-scratch scratch)
+    (is (zerop (cl-prolog::%unification-scratch-occurs-count scratch)))
+    (let ((seen (cl-prolog::%unification-scratch-occurs-seen scratch)))
+      (is (or (null seen) (every (function null) seen))))
+    (is (zerop
+          (hash-table-count
+            (cl-prolog::%unification-scratch-occurs-index scratch))))))
+  (deftest occurs-scratch-traversal-semantics-and-cleanup ()
+  (let ((scratch (cl-prolog::%make-unification-scratch))
+        (index (cl-prolog::%make-environment-index nil))
+        (variable (fresh-logic-variable "?OCCURS-SCRATCH")))
+    (labels ((clean-p ()
+               (let ((seen
+                       (cl-prolog::%unification-scratch-occurs-seen scratch))
+                     (seen-index
+                       (cl-prolog::%unification-scratch-occurs-index scratch)))
+                 (and
+                   (zerop
+                     (cl-prolog::%unification-scratch-occurs-count scratch))
+                   (or (null seen) (every (function null) seen))
+                   (or (null seen-index)
+                       (zerop (hash-table-count seen-index)))))))
+      (is (not (cl-prolog::%occurs-p-indexed variable :atomic index scratch)))
+      (is (null (cl-prolog::%unification-scratch-occurs-seen scratch)))
+      (is (clean-p))
+      (let ((cl-prolog::*unification-scratch* scratch))
+        (is (nth-value 1 (unify variable (list variable) nil nil))))
+      (is (null (cl-prolog::%unification-scratch-occurs-seen scratch)))
+      (is (clean-p))
+      (is (not (cl-prolog::%occurs-p-indexed
+                 variable (list :small :term) index scratch)))
+      (is (clean-p))
+      (is (not (cl-prolog::%occurs-p-indexed
+                 variable (loop repeat 20 collect :large) index scratch)))
+      (is (hash-table-p
+            (cl-prolog::%unification-scratch-occurs-index scratch)))
+      (is (clean-p))
+      (let* ((shared (list :shared :leaf))
+             (dag (list shared shared)))
+        (is (not (cl-prolog::%occurs-p-indexed variable dag index scratch)))
+        (is (clean-p)))
+      (let ((cycle (cons :cycle nil)))
+        (setf (cdr cycle) cycle)
+        (is (not (cl-prolog::%occurs-p-indexed variable cycle index scratch)))
+        (is (clean-p)))
+      (is (cl-prolog::%occurs-p-indexed
+            variable (list :contains variable) index scratch))
+      (is (clean-p))))))

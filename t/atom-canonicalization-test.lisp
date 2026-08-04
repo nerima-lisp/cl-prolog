@@ -167,11 +167,9 @@ a quoted atom that starts with `?' must stay an atom in both encodings."
       (is-equal text (prolog-atom-text atom)))))
 
 (deftest uninterned-atoms-keep-their-text ()
-  "The engine represents untrusted text -- a missing source's pathname, say --
-as an uninterned symbol so the text is never interned.  Its text must still be
-the text, or the culprit in a raised error would not match the term the program
-passed in."
+  "The engine represents untrusted text -- a missing source's pathname, say -- as an uninterned symbol so the text is never interned.  Its text must still be the text, or the culprit in a raised error would not match the term the program passed in."
   (let ((culprit (make-symbol "/Users/Someone/Data.pl")))
+    (is (not (logic-var-p culprit)))
     (is-equal "/Users/Someone/Data.pl" (prolog-atom-text culprit))
     (is (cl-prolog::%same-atom-text-p
          culprit (prolog-atom "/Users/Someone/Data.pl")))))

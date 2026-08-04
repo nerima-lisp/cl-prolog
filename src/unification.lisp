@@ -8,128 +8,112 @@
 
 (in-package #:cl-prolog)
 
-(defun %occurs-p-indexed (var term index)
-    (let ((seen nil))
-      (labels ((occurs-p (node)
-                 (let ((resolved (%walk-term-indexed node index)))
-              (cond
-                ((eq var resolved) t)
-                ((not (consp resolved)) nil)
-                ((and seen (gethash resolved seen)) nil)
-                (t
-                  (unless seen
-                    (setf seen (make-hash-table :test (function eq))))
-                  (setf (gethash resolved seen) t)
-                  (or (occurs-p (car resolved)) (occurs-p (cdr resolved))))))))
-        (occurs-p term))))
-  (defun %occurs-p (var term env)
-    (%occurs-p-indexed var term (%make-environment-index env)))
+(defconstant +occurs-linear-threshold+ 8)
+(defconstant +unification-pair-primary-threshold+ 8)
+(defconstant +unification-pair-linear-threshold+ 16)
 
-(defconstant +unification-scratch-inline-pair-capacity+ 32)
-  (defstruct
-      (%unification-scratch
-        (:constructor %make-unification-scratch ()))
-    (pairs nil :type (or null simple-vector))
-    (pair-count 0 :type fixnum)
-    (pair-table nil :type (or null hash-table))
-    (hash-mode-p nil :type boolean)
-    (active-p nil :type boolean))
-  (defvar *unification-scratch* nil)
+  (defstruct (%unification-scratch (:constructor %make-unification-scratch ())) (pair-seen nil :type (or null simple-vector)) (pair-seen-secondary nil :type (or null simple-vector)) (pair-count 0 :type fixnum) (pair-hash-mode-p nil :type boolean) (first-index nil :type (or null hash-table)) (collision-index nil :type (or null hash-table)) (occurs-seen nil :type (or null simple-vector)) (occurs-count 0 :type fixnum) (occurs-index nil :type (or null hash-table)) (active-p nil :type boolean))
   (declaim
     (inline
-      %unification-scratch-remember-pair
-      %reset-unification-scratch))
-  (defun %unification-scratch-remember-pair (scratch left right)
-  "Return true for a remembered directed EQ pair; otherwise remember it."
-  (declare (type %unification-scratch scratch)
-           (optimize (speed 3) (safety 1)))
-  (if (%unification-scratch-hash-mode-p scratch)
-      (let* ((table
-               (the hash-table
-                 (%unification-scratch-pair-table scratch)))
-             (rights
-               (or (gethash left table)
-                   (setf (gethash left table)
-                         (make-hash-table :test (function eq))))))
-        (multiple-value-bind (value presentp) (gethash right rights)
-          (declare (ignore value))
-          (if presentp
-              t
-              (progn
-                (setf (gethash right rights) t)
-                (incf (%unification-scratch-pair-count scratch))
-                nil))))
-      (let ((pairs (%unification-scratch-pairs scratch))
-            (count (%unification-scratch-pair-count scratch)))
-        (declare (type (or null simple-vector) pairs)
-                 (type fixnum count))
-        (when pairs
-          (dotimes (pair-index count)
-            (let ((offset (* 2 pair-index)))
-              (when
-                  (and
-                    (eq left (svref (the simple-vector pairs) offset))
-                    (eq right
-                        (svref (the simple-vector pairs) (1+ offset))))
-                (return-from %unification-scratch-remember-pair t)))))
-        (if (< count +unification-scratch-inline-pair-capacity+)
-            (let* ((pairs
-                     (or pairs
-                         (setf (%unification-scratch-pairs scratch)
-                               (make-array
-                                 (* 2
-                                    +unification-scratch-inline-pair-capacity+)))))
-                   (offset (* 2 count)))
-              (setf (svref pairs offset) left
-                    (svref pairs (1+ offset)) right
-                    (%unification-scratch-pair-count scratch) (1+ count))
-              nil)
-            (let ((table
-                    (or (%unification-scratch-pair-table scratch)
-                        (setf
-                          (%unification-scratch-pair-table scratch)
-                          (make-hash-table
-                            :test
-                            (function eq)
-                            :size
-                            +unification-scratch-inline-pair-capacity+)))))
-              (dotimes (pair-index count)
-                (let* ((offset (* 2 pair-index))
-                       (stored-left (svref (the simple-vector pairs) offset))
-                       (stored-right
-                         (svref (the simple-vector pairs) (1+ offset)))
-                       (rights
-                         (or (gethash stored-left table)
-                             (setf (gethash stored-left table)
-                                   (make-hash-table :test (function eq))))))
-                  (setf (gethash stored-right rights) t)))
-              (let ((rights
-                      (or (gethash left table)
-                          (setf (gethash left table)
-                                (make-hash-table :test (function eq))))))
-                (setf (gethash right rights) t))
-              (setf (%unification-scratch-hash-mode-p scratch) t
-                    (%unification-scratch-pair-count scratch) (1+ count))
-              nil)))))
-  (defun %reset-unification-scratch (scratch)
-  "Release references retained by SCRATCH and make it reusable."
-  (declare (type %unification-scratch scratch)
-           (optimize (speed 3) (safety 1)))
-  (let ((pairs (%unification-scratch-pairs scratch))
-        (count (%unification-scratch-pair-count scratch))
-        (table (%unification-scratch-pair-table scratch)))
-    (when pairs
-      (fill
-        pairs nil
-        :end
-        (* 2
-           (min count +unification-scratch-inline-pair-capacity+))))
-    (when table
-      (clrhash table))
-    (setf (%unification-scratch-pair-count scratch) 0
-          (%unification-scratch-hash-mode-p scratch) nil
-          (%unification-scratch-active-p scratch) nil))
+      %clear-occurs-scratch
+      %occurs-scratch-remember-p))
+
+
+(defun %clear-occurs-scratch (scratch)
+  (let ((seen (%unification-scratch-occurs-seen scratch))
+        (count (%unification-scratch-occurs-count scratch))
+        (index (%unification-scratch-occurs-index scratch)))
+    (when seen
+      (dotimes (position count)
+        (setf (svref seen position) nil)))
+    (when index
+      (clrhash index))
+    (setf (%unification-scratch-occurs-count scratch) 0))
   nil)
+(defun %occurs-scratch-remember-p (scratch node)
+  (let ((index (%unification-scratch-occurs-index scratch)))
+    (if index
+        (if (gethash node index)
+            t
+            (progn
+              (setf (gethash node index) t)
+              nil))
+        (let* ((seen
+                 (or (%unification-scratch-occurs-seen scratch)
+                     (setf (%unification-scratch-occurs-seen scratch)
+                           (make-array +occurs-linear-threshold+
+                                       :initial-element nil))))
+               (count (%unification-scratch-occurs-count scratch)))
+          (cond
+            ((loop for position below count
+                   thereis (eq node (svref seen position)))
+             t)
+            ((< count +occurs-linear-threshold+)
+             (setf (svref seen count) node
+                   (%unification-scratch-occurs-count scratch) (1+ count))
+             nil)
+            (t
+             (let ((new-index (make-hash-table :test (function eq))))
+               (dotimes (position count)
+                 (setf (gethash (svref seen position) new-index) t))
+               (setf (gethash node new-index) t
+                     (%unification-scratch-occurs-index scratch) new-index)
+               nil)))))))
+(defun %occurs-p-indexed (var term index &optional (scratch (%make-unification-scratch)) term-resolved-p)
+  (%clear-occurs-scratch scratch)
+  (unwind-protect
+      (labels ((occurs-p (node &optional resolved-p)
+                 (let ((resolved (if resolved-p
+                                     node
+                                     (%walk-term-indexed node index))))
+                   (cond
+                     ((eq var resolved) t)
+                     ((not (consp resolved)) nil)
+                     ((%occurs-scratch-remember-p scratch resolved) nil)
+                     (t (or (occurs-p (car resolved))
+                            (occurs-p (cdr resolved))))))))
+        (occurs-p term term-resolved-p))
+    (%clear-occurs-scratch scratch)))
+(defun %occurs-p (var term env)
+  (%occurs-p-indexed var term (%make-environment-index env)))
+
+  (defvar *unification-scratch* nil)
+  (declaim (inline %reset-unification-scratch))
+  (defun %unification-scratch-remember-pair-hashed (scratch left right) (let ((first-index (or (%unification-scratch-first-index scratch) (setf (%unification-scratch-first-index scratch) (make-hash-table :test (function eq)))))) (declare (type hash-table first-index)) (multiple-value-bind (first-right present-p) (gethash left first-index) (cond ((not present-p) (setf (gethash left first-index) right) nil) ((eq right first-right) t) (t (let ((collision-index (%unification-scratch-collision-index scratch))) (unless collision-index (setf collision-index (make-hash-table :test (function eq)) (%unification-scratch-collision-index scratch) collision-index)) (let ((extras (gethash left collision-index))) (cond ((hash-table-p extras) (if (gethash right extras) t (progn (setf (gethash right extras) t) nil))) ((member right extras :test (function eq)) t) ((>= (length extras) 4) (let ((right-index (make-hash-table :test (function eq)))) (setf (gethash first-right right-index) t) (dolist (extra extras) (setf (gethash extra right-index) t)) (setf (gethash right right-index) t (gethash left collision-index) right-index) nil)) (t (setf (gethash left collision-index) (cons right extras)) nil)))))))))
+  (defun %unification-scratch-promote-pairs (scratch primary secondary count left right) (setf (%unification-scratch-pair-hash-mode-p scratch) t) (dotimes (position count) (let* ((secondary-p (>= position +unification-pair-primary-threshold+)) (segment (if secondary-p secondary primary)) (segment-position (if secondary-p (- position +unification-pair-primary-threshold+) position)) (offset (* 2 segment-position))) (%unification-scratch-remember-pair-hashed scratch (svref segment offset) (svref segment (1+ offset))))) (%unification-scratch-remember-pair-hashed scratch left right))
+  (defun %unification-scratch-remember-pair (scratch left right) "Return true for a remembered directed EQ pair; otherwise remember it." (declare (type %unification-scratch scratch) (optimize (speed 3) (safety 1))) (if (%unification-scratch-pair-hash-mode-p scratch) (%unification-scratch-remember-pair-hashed scratch left right) (let* ((primary (or (%unification-scratch-pair-seen scratch) (setf (%unification-scratch-pair-seen scratch) (make-array (* 2 +unification-pair-primary-threshold+) :initial-element nil)))) (secondary (%unification-scratch-pair-seen-secondary scratch)) (count (%unification-scratch-pair-count scratch)) (primary-count (min count +unification-pair-primary-threshold+)) (secondary-count (- count primary-count))) (cond ((or (loop for position below primary-count for offset = (* 2 position) thereis (and (eq left (svref primary offset)) (eq right (svref primary (1+ offset))))) (and secondary (loop for position below secondary-count for offset = (* 2 position) thereis (and (eq left (svref secondary offset)) (eq right (svref secondary (1+ offset))))))) t) ((< count +unification-pair-linear-threshold+) (if (< count +unification-pair-primary-threshold+) (let ((offset (* 2 count))) (setf (svref primary offset) left (svref primary (1+ offset)) right)) (let* ((secondary (or secondary (setf (%unification-scratch-pair-seen-secondary scratch) (make-array (* 2 +unification-pair-primary-threshold+) :initial-element nil)))) (offset (* 2 (- count +unification-pair-primary-threshold+)))) (setf (svref secondary offset) left (svref secondary (1+ offset)) right))) (setf (%unification-scratch-pair-count scratch) (1+ count)) nil) (t (%unification-scratch-promote-pairs scratch primary secondary count left right))))))
+  (progn
+  (defun %reset-unification-scratch (scratch)
+    "Release references retained by SCRATCH and make it reusable."
+    (declare (type %unification-scratch scratch)
+             (optimize (speed 3) (safety 1)))
+    (let* ((primary (%unification-scratch-pair-seen scratch))
+           (secondary (%unification-scratch-pair-seen-secondary scratch))
+           (count (%unification-scratch-pair-count scratch))
+           (primary-count (min count +unification-pair-primary-threshold+))
+           (secondary-count (max 0 (- count +unification-pair-primary-threshold+)))
+           (first-index (%unification-scratch-first-index scratch))
+           (collision-index (%unification-scratch-collision-index scratch)))
+      (when primary
+        (dotimes (position (* 2 primary-count))
+          (setf (svref primary position) nil)))
+      (when secondary
+        (dotimes (position (* 2 secondary-count))
+          (setf (svref secondary position) nil)))
+      (when first-index (clrhash first-index))
+      (when collision-index (clrhash collision-index)))
+    (%clear-occurs-scratch scratch)
+    (setf (%unification-scratch-pair-count scratch) 0
+          (%unification-scratch-pair-hash-mode-p scratch) nil
+          (%unification-scratch-active-p scratch) nil)
+    nil)
+
+  (defun %call-with-unification-scratch (scratch thunk)
+    (let ((*unification-scratch* scratch))
+      (setf (%unification-scratch-active-p scratch) t)
+      (unwind-protect
+          (funcall thunk)
+        (%reset-unification-scratch scratch)))))
 
 (defun %unify-indexed (left right env base-index
                        &optional index-owned-p (occurs-check t))
@@ -143,84 +127,63 @@ a term containing it (producing a rational/cyclic term)."
                     (not (%unification-scratch-active-p candidate)))
                candidate
                (%make-unification-scratch))))
-    (let ((*unification-scratch* scratch))
-      (setf (%unification-scratch-active-p scratch) t)
-      (unwind-protect
-          (let ((index base-index)
-                (copied-p index-owned-p))
-            (labels ((ensure-writable-index ()
-                       (unless copied-p
-                         (setf index (%copy-environment-index index)
-                               copied-p t)))
-                     (extend-environment (variable term environment)
-                       (ensure-writable-index)
-                       (let ((binding (cons variable term)))
-                         (push
-                           (cons binding
-                                 (%environment-index-next-binding-rank index))
-                           (%environment-index-overlay index))
-                         (incf (%environment-index-overlay-length index))
-                         (decf (%environment-index-next-binding-rank index))
-                         (when (= (%environment-index-overlay-length index)
-                                  +environment-index-overlay-threshold+)
-                           (setf index (%compact-environment-index index)))
-                         (cons binding environment)))
-                     (unify-terms (left right environment)
-                       (setf left (%walk-term-indexed left index)
-                             right (%walk-term-indexed right index))
-                       (cond
-                         ((eq left right) (values environment t))
-                         ((logic-var-p left)
-                          (if (and occurs-check
-                                   (%occurs-p-indexed left right index))
-                              (values nil nil)
-                              (values
-                                (extend-environment left right environment)
-                                t)))
-                         ((logic-var-p right)
-                          (unify-terms right left environment))
-                         ((and (consp left) (consp right))
-                          (if (%unification-scratch-remember-pair
-                                scratch left right)
-                              (values environment t)
-                              (multiple-value-bind (extended ok)
+    (%call-with-unification-scratch
+      scratch
+      (lambda ()
+        (let ((index base-index)
+              (copied-p index-owned-p))
+          (labels ((ensure-writable-index ()
+                     (unless copied-p
+                       (setf index (%copy-environment-index index)
+                             copied-p t)))
+                   (extend-environment (variable term environment)
+                     (ensure-writable-index)
+                     (let ((binding (cons variable term)))
+                       (%push-environment-index-binding binding index)
+                       (cons binding environment)))
+                   (unify-terms (left right environment)
+                     (setf left (%walk-term-indexed left index)
+                           right (%walk-term-indexed right index))
+                     (cond
+                       ((eq left right) (values environment t))
+                       ((logic-var-p left)
+                        (if (and occurs-check
+                                 (%occurs-p-indexed left right index scratch t))
+                            (values nil nil)
+                            (values
+                              (extend-environment left right environment)
+                              t)))
+                       ((logic-var-p right)
+                        (unify-terms right left environment))
+                       ((and (consp left) (consp right))
+                        (if (%unification-scratch-remember-pair
+                              scratch left right)
+                            (values environment t)
+                            (multiple-value-bind (extended ok)
+                                (unify-terms
+                                  (car left)
+                                  (car right)
+                                  environment)
+                              (if ok
                                   (unify-terms
-                                    (car left)
-                                    (car right)
-                                    environment)
-                                (if ok
-                                    (unify-terms
-                                      (cdr left)
-                                      (cdr right)
-                                      extended)
-                                    (values nil nil)))))
-                         ((and
-                            (symbolp left)
-                            (symbolp right)
-                            (%same-atom-text-p left right))
-                          (values environment t))
-                         ((equal left right) (values environment t))
-                         (t (values nil nil)))))
-              (multiple-value-bind (extended ok)
-                  (unify-terms left right env)
-                (if ok
-                    (values extended t index)
-                    (values nil nil base-index)))))
-        (%reset-unification-scratch scratch)))))
+                                    (cdr left)
+                                    (cdr right)
+                                    extended)
+                                  (values nil nil)))))
+                       ((and
+                          (symbolp left)
+                          (symbolp right)
+                          (%same-atom-text-p left right))
+                        (values environment t))
+                       ((equal left right) (values environment t))
+                       (t (values nil nil)))))
+            (multiple-value-bind (extended ok)
+                (unify-terms left right env)
+              (if ok
+                  (values extended t index)
+                  (values nil nil base-index)))))))))
 
-(defun unify (left right &optional (env (quote ())) (occurs-check t))
-  "Unify LEFT and RIGHT against ENV.
-
-Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure.
-OCCURS-CHECK defaults to T; pass NIL to allow cyclic bindings (see the
-`occurs_check' Prolog flag).  Kept positional (not &key) so the hot
-clause-resolution path pays no keyword-dispatch cost."
-  (let ((*unification-scratch* (%make-unification-scratch)))
-    (multiple-value-bind (extended ok index)
-        (%unify-indexed
-          left right env (%make-environment-index env 1) t occurs-check)
-      (declare (ignore index))
-      (values extended ok))))
+(defun unify (left right &optional (env (quote ())) (occurs-check t)) "Unify LEFT and RIGHT against ENV.\n\nReturns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure.\nOCCURS-CHECK defaults to T; pass NIL to allow cyclic bindings (see the\n`occurs_check\x27 Prolog flag).  Kept positional (not &key) so the hot\nclause-resolution path pays no keyword-dispatch cost." (if (eq left right) (values env t) (let ((*unification-scratch* (%make-unification-scratch))) (multiple-value-bind (extended ok index) (%unify-indexed left right env (%make-environment-index env 1) t occurs-check) (declare (ignore index)) (values extended ok)))))
 
 (defun %logic-substitute-indexed (template index)
   "Apply INDEX to TEMPLATE while preserving dotted and cyclic structure."

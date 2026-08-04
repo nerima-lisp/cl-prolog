@@ -5,94 +5,119 @@
 (in-package #:cl-prolog)
 
 (defconstant +environment-index-overlay-threshold+ 8)
+(progn
+(defstruct (%environment-index-chunk
+    (:constructor %make-environment-index-chunk (table bindings newest-rank size)))
+  (table (make-hash-table :test (function eq)) :type hash-table)
+  (bindings nil :type list)
+  (newest-rank 0 :type integer)
+  (size 0 :type (integer 0 *)))
 (defstruct (%environment-index
     (:constructor %make-environment-index-object
-      (table overlay overlay-length next-binding-rank bindings base-rank-offset)))
+      (table chunks overlay overlay-length next-binding-rank bindings base-rank-offset)))
   (table (make-hash-table :test (function eq)) :type hash-table)
+  (chunks nil :type list)
   (overlay nil :type list)
   (overlay-length 0 :type (integer 0 *))
   (next-binding-rank -1 :type integer)
   (bindings nil :type list)
-  (base-rank-offset 0 :type integer))
+  (base-rank-offset 0 :type integer)))
 (defun %environment-index-binding (variable index)
   "Return the newest source binding for VARIABLE from INDEX."
-  (dolist (entry (%environment-index-overlay index)
-           (gethash variable (%environment-index-table index)))
-    (when (eq variable (caar entry))
-      (return (values (car entry) t)))))
+  (dolist (binding (%environment-index-overlay index))
+    (when (eq variable (car binding))
+      (return-from %environment-index-binding (values binding t))))
+  (dolist (chunk (%environment-index-chunks index))
+    (multiple-value-bind (binding present-p)
+        (gethash variable (%environment-index-chunk-table chunk))
+      (when present-p
+        (return-from %environment-index-binding (values binding t)))))
+  (gethash variable (%environment-index-table index)))
 
 (defun %environment-index-rank (variable index)
-  "Return VARIABLE rank; base ranks are computed only for alias cycles."
-  (dolist (entry (%environment-index-overlay index))
-    (when (eq variable (caar entry))
-      (return-from %environment-index-rank (cdr entry))))
+  "Return VARIABLE rank; ranks preserve source binding order."
+  (loop for binding in (%environment-index-overlay index) for rank from (1+ (%environment-index-next-binding-rank index)) when (eq variable (car binding)) do (return-from %environment-index-rank rank))
+  (dolist (chunk (%environment-index-chunks index))
+    (loop for binding in (%environment-index-chunk-bindings chunk)
+          for rank from (%environment-index-chunk-newest-rank chunk)
+          when (eq variable (car binding))
+            do (return-from %environment-index-rank rank)))
   (loop for binding in (%environment-index-bindings index)
         for rank from (%environment-index-base-rank-offset index)
-        when (eq variable (car binding))
-          return rank))
+        when (eq variable (car binding)) return rank))
 
 (defun %make-environment-index (environment &optional (additional-capacity 0))
   "Index ENVIRONMENT by variable identity while preserving first-binding wins."
   (check-type additional-capacity (integer 0 *))
-  (let ((table
-          (make-hash-table
-            :test (function eq)
-            :size (+ (length environment) additional-capacity))))
+  (let ((table (make-hash-table :test (function eq)
+                                :size (+ (length environment) additional-capacity))))
     (dolist (binding environment)
-      (multiple-value-bind (present-binding present-p)
-          (gethash (car binding) table)
+      (multiple-value-bind (present-binding present-p) (gethash (car binding) table)
         (declare (ignore present-binding))
-        (unless present-p
-          (setf (gethash (car binding) table) binding))))
-    (%make-environment-index-object table nil 0 -1 environment 0)))
+        (unless present-p (setf (gethash (car binding) table) binding))))
+    (%make-environment-index-object table nil nil 0 -1 environment 0)))
 (defun %copy-environment-index (index)
   "Return a writable index object sharing the immutable contents of INDEX."
   (%make-environment-index-object
     (%environment-index-table index)
+    (%environment-index-chunks index)
     (%environment-index-overlay index)
     (%environment-index-overlay-length index)
     (%environment-index-next-binding-rank index)
     (%environment-index-bindings index)
     (%environment-index-base-rank-offset index)))
+(progn
+(defun %make-environment-index-chunk-from-bindings (bindings newest-rank)
+  (let ((table (make-hash-table :test (function eq) :size (length bindings))))
+    (dolist (binding bindings)
+      (multiple-value-bind (present-binding present-p)
+          (gethash (car binding) table)
+        (declare (ignore present-binding))
+        (unless present-p
+          (setf (gethash (car binding) table) binding))))
+    (%make-environment-index-chunk table bindings newest-rank (length bindings))))
+(defun %merge-environment-index-chunks (newer older)
+  (%make-environment-index-chunk-from-bindings
+    (append (%environment-index-chunk-bindings newer)
+            (%environment-index-chunk-bindings older))
+    (%environment-index-chunk-newest-rank newer)))
 (defun %compact-environment-index (index)
-  "Merge the bounded overlay into a new immutable base table."
+  "Freeze the overlay and merge equal-sized immutable chunks like a binary counter."
   (if (zerop (%environment-index-overlay-length index))
       index
-      (let ((table
-              (make-hash-table
-                :test (function eq)
-                :size (+ (hash-table-count (%environment-index-table index))
-                         (%environment-index-overlay-length index)))))
-        (maphash
-          (lambda (variable binding)
-            (setf (gethash variable table) binding))
-          (%environment-index-table index))
-        (labels ((install-oldest-first (overlay)
-                   (when overlay
-                     (install-oldest-first (cdr overlay))
-                     (let ((binding (caar overlay)))
-                       (setf (gethash (car binding) table) binding)))))
-          (install-oldest-first (%environment-index-overlay index)))
+      (let ((carry (%make-environment-index-chunk-from-bindings
+                     (%environment-index-overlay index)
+                     (1+ (%environment-index-next-binding-rank index))))
+            (chunks (%environment-index-chunks index)))
+        (loop while (and chunks
+                         (= (%environment-index-chunk-size carry)
+                            (%environment-index-chunk-size (car chunks))))
+              do (setf carry (%merge-environment-index-chunks carry (car chunks))
+                       chunks (cdr chunks)))
         (%make-environment-index-object
-          table
+          (%environment-index-table index)
+          (cons carry chunks)
           nil
           0
           (%environment-index-next-binding-rank index)
-          (append (mapcar (function car) (%environment-index-overlay index))
-                  (%environment-index-bindings index))
-          (1+ (%environment-index-next-binding-rank index))))))
+          (%environment-index-bindings index)
+          (%environment-index-base-rank-offset index)))))
+)
+(progn
+(defmacro %push-environment-index-binding (binding index-place)
+  `(progn
+     (push ,binding (%environment-index-overlay ,index-place))
+     (incf (%environment-index-overlay-length ,index-place))
+     (decf (%environment-index-next-binding-rank ,index-place))
+     (when (= (%environment-index-overlay-length ,index-place)
+              +environment-index-overlay-threshold+)
+       (setf ,index-place (%compact-environment-index ,index-place)))))
 (defun %extend-environment-index (index bindings)
   "Return INDEX extended by BINDINGS ordered oldest to newest."
   (let ((extended (%copy-environment-index index)))
     (dolist (binding bindings extended)
-      (push
-        (cons binding (%environment-index-next-binding-rank extended))
-        (%environment-index-overlay extended))
-      (incf (%environment-index-overlay-length extended))
-      (decf (%environment-index-next-binding-rank extended))
-      (when (= (%environment-index-overlay-length extended)
-               +environment-index-overlay-threshold+)
-        (setf extended (%compact-environment-index extended))))))
+      (%push-environment-index-binding binding extended))))
+)
 (defun %environment-index-after-bindings
     (bindings parent-bindings parent-index)
   "Reuse PARENT-INDEX for an unchanged environment or extend a prepended prefix."

@@ -152,37 +152,16 @@
                                (coerce cons-cars (quote simple-vector))
                                (coerce cons-cdrs (quote simple-vector))
                                head body rule-program)))))
-(declaim (inline %materialize-clause-template-reference))
-(defun %materialize-clause-template-reference (reference variables conses)
-  (ecase (%clause-template-reference-kind reference)
-    (:literal (%clause-template-reference-value reference))
-    (:variable (svref variables (%clause-template-reference-value reference)))
-    (:cons (svref conses (%clause-template-reference-value reference)))))
-(defun %materialize-clause-template (template)
-  "Instantiate TEMPLATE with fresh variables and preallocated cons shells."
-  (let* ((variable-count (%clause-template-variable-count template))
-         (cons-cars (%clause-template-cons-cars template))
-         (cons-cdrs (%clause-template-cons-cdrs template))
-         (cons-count (length cons-cars))
-         (variables (make-array variable-count))
-         (conses (make-array cons-count)))
-    (dotimes (index variable-count)
-      (setf (svref variables index) (fresh-logic-variable)))
-    (dotimes (index cons-count)
-      (setf (svref conses index) (cons nil nil)))
-    (dotimes (index cons-count)
-      (let ((cell (svref conses index)))
-        (setf (car cell)
-              (%materialize-clause-template-reference
-               (svref cons-cars index) variables conses)
-              (cdr cell)
-              (%materialize-clause-template-reference
-               (svref cons-cdrs index) variables conses))))
-    (make-clause
-     (%materialize-clause-template-reference
-      (%clause-template-head template) variables conses)
-     (%materialize-clause-template-reference
-      (%clause-template-body template) variables conses))))
+(defstruct (%clause-materialization-context (:constructor %make-clause-materialization-context (template variables conses))) template variables conses)
+
+(defun %make-clause-template-materialization-context (template) (let* ((variable-count (%clause-template-variable-count template)) (variables (make-array variable-count)) (conses (make-array (length (%clause-template-cons-cars template)) :initial-element nil))) (dotimes (index variable-count) (setf (svref variables index) (fresh-logic-variable))) (%make-clause-materialization-context template variables conses)))
+
+(defun %materialize-clause-template-reference (reference context) (ecase (%clause-template-reference-kind reference) (:literal (%clause-template-reference-value reference)) (:variable (svref (%clause-materialization-context-variables context) (%clause-template-reference-value reference))) (:cons (let* ((index (%clause-template-reference-value reference)) (conses (%clause-materialization-context-conses context)) (existing (svref conses index))) (or existing (let* ((template (%clause-materialization-context-template context)) (cell (cons nil nil))) (setf (svref conses index) cell (car cell) (%materialize-clause-template-reference (svref (%clause-template-cons-cars template) index) context) (cdr cell) (%materialize-clause-template-reference (svref (%clause-template-cons-cdrs template) index) context)) cell))))))
+
+(defun %materialize-clause-template-head (template context) (%materialize-clause-template-reference (%clause-template-head template) context))
+
+(defun %materialize-clause-template-body (template context) (%materialize-clause-template-reference (%clause-template-body template) context))
+(defun %materialize-clause-template (template) "Instantiate TEMPLATE with fresh variables and lazily allocated cons shells." (let ((context (%make-clause-template-materialization-context template))) (make-clause (%materialize-clause-template-head template context) (%materialize-clause-template-body template context))))
 
 (defun %copy-clause (clause)
   "Copy CLAUSE's cons graph while preserving atoms, sharing, and cycles."

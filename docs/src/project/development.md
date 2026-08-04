@@ -38,9 +38,11 @@ walkthrough.
 
 ## Testing
 
-cl-prolog's regression suite is the `cl-prolog/test` ASDF system. It depends on
-[cl-weave](https://github.com/nerima-lisp/cl-weave) and covers isolated table
-cases, per-query cases, fixtures, and generated relational properties.
+cl-prolog's regression suites are the `cl-prolog/test` and
+`cl-prolog/callgraph/test` ASDF systems. They depend on
+[cl-weave](https://github.com/nerima-lisp/cl-weave) and cover isolated table
+cases, per-query cases, fixtures, generated relational properties, and the
+callgraph analysis API.
 
 The Nix runner is self-contained and is the authoritative path on supported
 systems (`x86_64-linux`, `aarch64-darwin`):
@@ -66,7 +68,7 @@ nix run . -- --reporter json --output cl-prolog-weave-results.json
 
 ## What `nix flake check` runs
 
-- **`checks.default`** — the cl-weave regression suite, run through
+- **`checks.default`** — both cl-weave regression suites, run through
   `run-tests.lisp` under a plain SBCL with the compiled-in default dynamic
   space.
 - **`checks.paredit-lint`** — a structural parse gate over every tracked
@@ -87,10 +89,11 @@ nix run . -- --reporter json --output cl-prolog-weave-results.json
 
 ## Coverage
 
-`packages.coverage` runs the regression suite under `sb-cover`, instrumenting
-only `cl-prolog` and `cl-prolog/weave` (not the `cl-weave` harness driving
-them), and writes an HTML report. Its runner is embedded in `flake.nix` with
-`pkgs.writeText`, so it does not read the source-tree `run-coverage.lisp`:
+`packages.coverage` runs both regression suites under `sb-cover`, instrumenting
+`cl-prolog`, `cl-prolog/weave`, and `cl-prolog/callgraph` (not the `cl-weave`
+harness driving them), and writes an HTML report. The report helper generates
+its runner from `flake.nix`, so it does not read the source-tree
+`run-coverage.lisp`:
 
 ```sh
 nix build .#coverage

@@ -9,20 +9,14 @@
     (:constructor
       %make-predicate-descriptor
       (entries symbol-first-argument-index atom-first-argument-index variable-entries))) "Immutable current-state lookup data for one predicate."
-  (entries '() :type list :read-only t)
+  (entries (quote ()) :type list :read-only t)
   (symbol-first-argument-index
-    (make-hash-table :test #'eq)
-    :type
-    hash-table
-    :read-only
-    t)
+    (make-hash-table :test (function equal))
+    :type hash-table :read-only t)
   (atom-first-argument-index
-    (make-hash-table :test #'eql)
-    :type
-    hash-table
-    :read-only
-    t)
-  (variable-entries '() :type list :read-only t))
+    (make-hash-table :test (function eql))
+    :type hash-table :read-only t)
+  (variable-entries (quote ()) :type list :read-only t))
 
 (defun %stored-clause-predicate-key (entry)
   "Return ENTRY's (module predicate arity) key, or NIL for a malformed head."
@@ -89,9 +83,9 @@
 (defun %build-predicate-descriptor (entries)
   "Build detached current-state lookup lists for ENTRIES."
   (let ((owned-entries (copy-list entries))
-        (symbol-candidates (make-hash-table :test #'eq))
-        (atom-candidates (make-hash-table :test #'eql))
-        (variable-entries '())
+        (symbol-candidates (make-hash-table :test (function equal)))
+        (atom-candidates (make-hash-table :test (function eql)))
+        (variable-entries (quote ()))
         (position 0))
     (dolist (entry owned-entries)
       (let ((candidate (cons position entry))
@@ -100,7 +94,7 @@
         (cond
           ((logic-var-p first-argument) (push candidate variable-entries))
           ((symbolp first-argument)
-            (push candidate (gethash first-argument symbol-candidates)))
+            (push candidate (gethash (%atom-text first-argument) symbol-candidates)))
           ((or (numberp first-argument) (characterp first-argument))
             (push candidate (gethash first-argument atom-candidates))))))
     (setf variable-entries (nreverse variable-entries))
@@ -113,32 +107,32 @@
                 else
                   collect (cdr (pop variable))))
              (finish-index (index)
-               (maphash
-            (lambda (key exact-candidates)
-              (setf (gethash key index) (merge-candidates exact-candidates)))
-            index)
+               (loop
+                 for key being the hash-keys of index
+                   using (hash-value exact-candidates)
+                 do (setf (gethash key index)
+                          (merge-candidates exact-candidates)))
                index))
       (%make-predicate-descriptor
         owned-entries
         (finish-index symbol-candidates)
         (finish-index atom-candidates)
-        (mapcar #'cdr variable-entries)))))
+        (mapcar (function cdr) variable-entries)))))
 
 (defun %make-rulebase-predicate-descriptors (predicate-index revision)
   "Build the nested current-state descriptor index at REVISION."
   (let ((descriptors (make-hash-table :test #'eq)))
-    (maphash
-      (lambda (key entries)
-        (destructuring-bind (module predicate arity) key
-          (let ((visible-entries (%visible-stored-clauses entries revision)))
-            (when visible-entries
-              (%set-rulebase-predicate-descriptor!
-                descriptors
-                module
-                predicate
-                arity
-                (%build-predicate-descriptor visible-entries))))))
-      predicate-index)
+    (loop
+      for key being the hash-keys of predicate-index
+        using (hash-value entries)
+      do
+         (destructuring-bind (module predicate arity) key
+           (let ((visible-entries
+                   (%visible-stored-clauses entries revision)))
+             (when visible-entries
+               (%set-rulebase-predicate-descriptor!
+                 descriptors module predicate arity
+                 (%build-predicate-descriptor visible-entries))))))
     descriptors))
 
 (defun %predicate-descriptor-first-argument-entries (descriptor first-argument)
@@ -148,7 +142,7 @@
     ((symbolp first-argument)
       (or
         (gethash
-          first-argument
+          (%atom-text first-argument)
           (%predicate-descriptor-symbol-first-argument-index descriptor))
         (%predicate-descriptor-variable-entries descriptor)))
     ((or (numberp first-argument) (characterp first-argument))

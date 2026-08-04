@@ -20,7 +20,10 @@ is deliberately *not* exported — foreign predicates are the public surface.
 - `rulebase`, `environment`, and `depth` expose the current solver context.
 - `emit` is the continuation. Call it **once per solution**, passing the
   environment that represents that solution. Call it zero times to fail. Never
-  collect results into a list — stream them through `emit`.
+  collect results into a list — stream them through `emit`. It is a synchronous,
+  dynamically scoped multi-shot continuation: call it only before the foreign
+  predicate returns. Do not retain it, invoke it from another thread, or invoke
+  it after returning.
 
 ## A worked example: `twice/2`
 
