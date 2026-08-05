@@ -48,7 +48,7 @@ as a flake input:
 ```nix
 # flake.nix
 inputs.cl-prolog = {
-  url = "github:nerima-lisp/cl-prolog/v1.0.1";
+  url = "github:nerima-lisp/cl-prolog/v1.4.2";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
@@ -62,10 +62,10 @@ warning.
 Full documentation is published at <https://nerima-lisp.github.io/cl-prolog/>.
 The source for that site lives in [docs/src/](docs/src/).
 
-- [Installation](https://nerima-lisp.github.io/cl-prolog/installation/)
-- [Quick Start](https://nerima-lisp.github.io/cl-prolog/quick-start/)
-- [API Reference](https://nerima-lisp.github.io/cl-prolog/api-reference/)
-- [Architecture](https://nerima-lisp.github.io/cl-prolog/architecture/)
+- [Getting Started](https://nerima-lisp.github.io/cl-prolog/getting-started/)
+- [Your First Program](https://nerima-lisp.github.io/cl-prolog/guide/first-program/)
+- [API Reference](https://nerima-lisp.github.io/cl-prolog/reference/api/)
+- [Architecture](https://nerima-lisp.github.io/cl-prolog/reference/architecture/)
 
 ## Development
 
