@@ -4,6 +4,34 @@
 
 (in-package #:cl-prolog)
 
+(defun %current-token (parser)
+  (aref (%parser-tokens parser) (%parser-position parser)))
+
+(defun %peek-token (parser &optional (offset 1))
+  "Return the token OFFSET positions past the current one.
+
+Reading past the end yields the terminating :EOF token, which every token
+vector carries, so a caller never has to bounds-check its lookahead."
+  (let ((tokens (%parser-tokens parser)))
+    (aref tokens (min (+ (%parser-position parser) offset) (1- (length tokens))))))
+
+(defun %accept-token (parser kind &optional value)
+  (let ((token (%current-token parser)))
+    (when (and
+        (eq kind (%token-kind token))
+        (or (null value) (equal value (%token-value token))))
+      (incf (%parser-position parser))
+      token)))
+
+(defun %expect-token (parser kind &optional value)
+  (or
+    (%accept-token parser kind value)
+    (%parse-error
+      "Expected Prolog token ~S~@[ ~S~], got ~S."
+      kind
+      value
+      (%current-token parser))))
+
 (defun %prolog-symbol (name &key (position 0) track-resource-p)
   "Intern NAME as an engine-internal CL-PROLOG symbol (an operator or control
 functor), which is always the upcased spelling."

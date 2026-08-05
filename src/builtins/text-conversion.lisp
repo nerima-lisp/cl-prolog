@@ -143,9 +143,7 @@
   (unless (and (<= 0 code) (< code char-code-limit))
     (%raise-representation-error "CHARACTER_CODE" environment operation
                                  "integer is not a character code"))
-  (or (code-char code)
-      (%raise-representation-error "CHARACTER_CODE" environment operation
-                                   "integer is not a character code")))
+  (code-char code))
 
 (defun %code-list-text
     (codes environment operation
@@ -277,7 +275,6 @@ number_string, term_string, ...), format/1,2,3 and the case-folding builtins."
       ((%term-atom-p value) (%atom-text value))
       ((and numbers (or (integerp value) (floatp value)))
        (%number-text value environment operation))
-      ((and lists (null value)) "")
       ((and lists (consp value))
        (if (every #'integerp value)
            (%code-list-text value environment operation)

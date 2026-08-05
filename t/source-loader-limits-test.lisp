@@ -18,8 +18,6 @@
      "fact(one)"
      "'kwoted'(two)")))
 
-(progn
-(progn
 (deftest source-loader-include-splices-terms-into-the-including-unit ()
   (with-temporary-prolog-files ((included "included(fact)."))
       (let ((rulebase
@@ -102,7 +100,7 @@
                              (prolog-exception-term condition)))))
               (is (null (symbol-package culprit)))
               (is-equal description (symbol-name culprit)))))))
-    (is-equal before (package-owned-symbol-count '#:cl-prolog)))))
+    (is-equal before (package-owned-symbol-count '#:cl-prolog))))
 
 (deftest source-loader-preserves-parser-resource-errors-for-direct-api ()
   (with-temporary-prolog-files ((source "toolong."))
@@ -124,7 +122,7 @@
               "catch(consult(~A), error(resource_error(identifier_length), _), true)."
               (%prolog-path-atom source))))
       (let ((*max-prolog-identifier-length* 1))
-        (is (prolog-succeeds-p rulebase query)))))))
+        (is (prolog-succeeds-p rulebase query))))))
 
 (deftest source-loader-rejects-cyclic-source-lists ()
   (let ((sources (list (prolog-atom "cycle.pl"))))

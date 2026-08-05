@@ -7,54 +7,6 @@
 
 (define-builtin ((fail false)) (rulebase environment depth emit))
 
-(defun %occurs-check-flag (rulebase)
-  "The rulebase's occurs_check flag value (\"TRUE\", \"FALSE\", or \"ERROR\")."
-  (%prolog-flag-value rulebase (%find-prolog-flag "OCCURS_CHECK")))
-
-(defun %flagged-unify (left right environment rulebase operation)
-  "Unify LEFT and RIGHT honoring the occurs_check flag.  Returns (VALUES
-EXTENDED OK): TRUE checks (fails on a cycle), FALSE allows a cyclic binding,
-ERROR raises when a cycle would form.  Shared by =/2 and \\=/2."
-  (let ((mode (%occurs-check-flag rulebase)))
-    (cond
-      ((string= mode "FALSE") (unify left right environment nil))
-      ((string= mode "ERROR")
-       (multiple-value-bind (extended ok) (unify left right environment t)
-         (if ok
-             (values extended t)
-             (progn
-               (when (nth-value 1 (unify left right environment nil))
-                 (%raise-evaluation-error
-                  "OCCURS_CHECK" environment operation
-                  "unification would create a cyclic term"))
-               (values nil nil)))))
-      (t (unify left right environment t)))))
-
-(define-builtin (= left right) (rulebase environment depth emit)
-  ;; =/2 honors the occurs_check flag: TRUE (default) checks and fails on a
-  ;; cycle, FALSE allows a cyclic binding, ERROR raises when a cycle would form.
-  (let ((mode (%occurs-check-flag rulebase)))
-    (if (string= mode "TRUE")
-        ;; Fast, common path: single occurs-checked unify + constraint hook.
-        (%constraint-unify-emit left right environment emit :occurs-check t)
-        (multiple-value-bind (extended ok)
-            (%flagged-unify left right environment rulebase (%iso-atom "="))
-          (when ok
-            (if *constraint-post-unify-hook*
-                (funcall *constraint-post-unify-hook* extended emit)
-                (funcall emit extended)))))))
-
-(define-builtin (unify_with_occurs_check left right)
-    (rulebase environment depth emit)
-  ;; UNIFY always performs the occurs check regardless of the occurs_check flag.
-  (%unify-emit left right environment emit))
-
-(define-builtin (|\\=| left right) (rulebase environment depth emit)
-  ;; \=/2 is \+ (X = Y); it honors occurs_check like =/2 (ERROR still raises).
-  (unless (nth-value 1 (%flagged-unify left right environment rulebase
-                                       (%iso-atom "\\=")))
-    (funcall emit environment)))
-
 (defun %resolve-callable-goal (goal environment operation)
   "Resolve GOAL in ENVIRONMENT and validate it as an ISO callable term."
   (%ensure-callable (logic-substitute goal environment)
@@ -150,13 +102,9 @@ that make up a body and stops at anything else, which is an ordinary goal."
                  (funcall emit extended)
                  (return-from requested-proof nil)))))))))
 
-(define-builtin (call_with_depth_limit goal limit result)
-    (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "CALL_WITH_DEPTH_LIMIT"))
-         (resolved-goal
-           (%extend-callable-goal (logic-substitute goal environment)
-                                  '() environment operation))
-         (resolved-limit (logic-substitute limit environment)))
+(define-iso-builtin (call_with_depth_limit goal limit (result :raw)) "CALL_WITH_DEPTH_LIMIT"
+  (let ((resolved-goal
+          (%extend-callable-goal resolved-goal '() environment operation)))
     (%require-bounded-integer resolved-limit environment operation
                               "call_with_depth_limit/3 depth limit")
     (if (zerop resolved-limit)

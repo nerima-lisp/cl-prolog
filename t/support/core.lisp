@@ -160,6 +160,9 @@ speculative identifier, to assert it was never interned as a side effect."
        `(is-same-set ,@arguments))
       (:signals
        `(signals-error ,@arguments))
+      (:signals-condition
+       (destructuring-bind (condition-class form &optional message) arguments
+         `(signals-prolog-condition ,condition-class ,form ,@(when message (list message)))))
       (:exported
        (destructuring-bind (name package-name) arguments
          (%symbol-export-assertion name package-name t)))
@@ -207,6 +210,7 @@ Supported spec forms:
   (:equal EXPECTED FORM [MESSAGE])
   (:same-set EXPECTED FORM [MESSAGE])
   (:signals FORM [MESSAGE])
+  (:signals-condition CONDITION-CLASS FORM [MESSAGE])
   (:exported NAME PACKAGE-NAME)
   (:not-exported NAME PACKAGE-NAME)"
   `(%deftest-table-from-specs ,name ,specs %table-spec-assertion))
@@ -223,6 +227,21 @@ inside a fresh WITH-IO-RULEBASE setup."
                    `(with-io-rulebase (,rulebase ,input ,output) ,input-text
                       ,@body)))
                cases)))
+
+(defmacro deftest-io-queries (name () &body specs)
+  "Define NAME as a group of independent IO query cases.
+
+Each SPEC is (LABEL INPUT-TEXT QUERY KIND &rest ARGUMENTS): QUERY, KIND and
+ARGUMENTS go to ASSERT-QUERY inside a WITH-IO-RULEBASE whose input stream holds
+INPUT-TEXT.  Every case gets its own fixture and its own CL-WEAVE:IT named
+LABEL, so one failing query names itself instead of taking the group down."
+  `(cl-weave:describe-sequential ,(string-downcase (symbol-name name))
+     ,@(loop for spec in specs
+             collect (destructuring-bind (label input-text query kind &rest arguments) spec
+                       `(cl-weave:it ,label
+                          (cl-weave:expect-has-assertions)
+                          (with-io-rulebase (rulebase input output) ,input-text
+                            (assert-query rulebase ,query ,kind ,@arguments)))))))
 
 (defmacro deftest-unification (name &body specs)
   "Define NAME as a test composed from unification table SPECS.

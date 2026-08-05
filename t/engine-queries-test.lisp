@@ -202,7 +202,7 @@
 
 (deftest cleanup-runs-when-goal-is-not-callable ()
   (let ((rulebase (make-rulebase)))
-    (signals-condition prolog-type-error
+    (signals-prolog-condition prolog-type-error
       (query-prolog
        rulebase
        '(setup_call_cleanup true 42 (assertz invalid-goal-cleanup))))
@@ -240,7 +240,7 @@
      rulebase
      '(call_cleanup (choice ?value) fail))
     (is-equal 2 failure-notifications)
-    (signals-condition prolog-exception
+    (signals-prolog-condition prolog-exception
       (map-prolog-solutions
        (lambda (solution)
          (declare (cl:ignore solution))

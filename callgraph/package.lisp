@@ -23,7 +23,6 @@
   (:export
     ;; call-graph.lisp
     #:call-graph
-    #:call-graph-p
     #:call-graph-rulebase
     #:call-graph-defined
     #:call-graph-entry-points

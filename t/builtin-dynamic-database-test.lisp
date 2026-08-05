@@ -123,11 +123,13 @@ happily as the ISO error and would not have caught the defect."
     (assert-query rulebase (assertz (:- (ok a) 42))
                   :signals cl-prolog:prolog-type-error)))
 
-(deftest predicate-property-validates-arguments ()
-  (let ((rulebase (make-rulebase)))
-    (assert-query rulebase (predicate_property ?head ?property) :signals)
-    (assert-query rulebase (predicate_property 42 ?property) :signals)
-    (assert-query rulebase (predicate_property (missing ?value) 42) :signals)))
+(deftest-queries predicate-property-validates-arguments ((make-rulebase))
+  ("an unbound head is rejected"
+   (predicate_property ?head ?property) :signals)
+  ("a non-callable head is rejected"
+   (predicate_property 42 ?property) :signals)
+  ("a non-callable property is rejected"
+   (predicate_property (missing ?value) 42) :signals))
 
 (deftest dynamic-database-accepts-zero-arity-atoms ()
   (let ((rulebase (make-rulebase)))
@@ -243,13 +245,15 @@ happily as the ISO error and would not have caught the defect."
                     (mapcar #'symbol-name (subseq formal 0 3)))
           (is-equal '(/ fixed 1) (fourth formal)))))))
 
-(deftest abolish-validates-predicate-indicators ()
-  (let ((rulebase (make-rulebase)))
-    (assert-query rulebase (abolish ?indicator) :signals)
-    (dolist (goal '((abolish fixed)
-                    (abolish (/ fixed one))))
-      (assert-query rulebase goal :signals))
-    (assert-query rulebase (abolish (/ fixed -1)) :signals)))
+(deftest-queries abolish-validates-predicate-indicators ((make-rulebase))
+  ("an unbound indicator is rejected"
+   (abolish ?indicator) :signals)
+  ("a bare atom is not a predicate indicator"
+   (abolish fixed) :signals)
+  ("a non-integer arity is rejected"
+   (abolish (/ fixed one)) :signals)
+  ("a negative arity is rejected"
+   (abolish (/ fixed -1)) :signals))
 
 (deftest proper-list-p-rejects-circular-lists ()
   (let ((circular (list 'value)))

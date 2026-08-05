@@ -137,8 +137,7 @@
       ((cycle-c c))))
   ((cycle-a ?x) :ordered (((?x . c)) ((?x . a)))))
 
-(progn
-  (deftest tabled-predicate-preserves-and-deduplicates-cyclic-answer (:timeout 2)
+(deftest tabled-predicate-preserves-and-deduplicates-cyclic-answer (:timeout 2)
     (let* ((cycle-a (cons (quote loop) nil))
            (cycle-b (cons (quote loop) nil))
            (rulebase (make-rulebase)))
@@ -169,7 +168,7 @@
       (is (cl-prolog::%record-table-answer! entry cycle-a t nil))
       (is (hash-table-p (cl-prolog::%table-entry-cyclic-answer-index entry)))
       (is (not (cl-prolog::%record-table-answer! entry cycle-b t nil)))
-      (is-equal 2 (cl-prolog::%table-entry-answer-count entry)))))
+      (is-equal 2 (cl-prolog::%table-entry-answer-count entry))))
 
 (deftest table-declaration-and-clause-retraction-guard-repeat-updates ()
   (let ((rulebase (make-rulebase)))
@@ -376,6 +375,19 @@ produces the normal proof-search result."
     (is (cl-prolog::%clause-template-rule-program eligible))
     (is (null (cl-prolog::%clause-template-rule-program cut-template)))
     (is (null (cl-prolog::%clause-template-rule-program nested-template))))
+  ;; An improper goal list or an improper goal is not something the rule
+  ;; program can encode, so compilation declines and the clause keeps the
+  ;; general dispatch path instead of getting a truncated program.
+  (let ((improper-body
+          (cl-prolog::%compile-clause-template
+           (make-clause (quote (fast-improper-body))
+                        (list* (quote (true)) (quote junk)))))
+        (improper-goal
+          (cl-prolog::%compile-clause-template
+           (make-clause (quote (fast-improper-goal))
+                        (list (list* (quote choice) (quote junk)))))))
+    (is (null (cl-prolog::%clause-template-rule-program improper-body)))
+    (is (null (cl-prolog::%clause-template-rule-program improper-goal))))
   (let ((rulebase
           (prolog
             ((choice a))
@@ -705,11 +717,11 @@ produces the normal proof-search result."
                           :max-depth 1)))
       (is-equal (quote (((?answer . a)) ((?answer . b)))) fast-solutions)
       (is-equal fast-solutions generic-solutions))
-    (signals-condition prolog-depth-limit-exceeded
+    (signals-prolog-condition prolog-depth-limit-exceeded
       (query-prolog fast-rulebase
                     (quote (descriptor-candidate ?answer))
                     :max-depth 0))
-    (signals-condition prolog-depth-limit-exceeded
+    (signals-prolog-condition prolog-depth-limit-exceeded
       (query-prolog generic-rulebase
                     (quote (descriptor-candidate ?answer))
                     :max-depth 0))))
@@ -776,7 +788,6 @@ produces the normal proof-search result."
       (is (cl-prolog::%clause-template-rule-program template))
       (is (prolog-succeeds-p rulebase (cons (quote wide) ground-atoms)))))
 
-  (progn
   (deftest rule-program-private-variable-registration-preserves-ordinal ()
     (cl-prolog::%with-logic-variable-order
       (let ((rule-variable (cl-prolog::%fresh-rule-program-variable)))
@@ -797,7 +808,7 @@ produces the normal proof-search result."
      (cl-prolog::%register-logic-variable (gensym "?UNREGISTERED")))
     (cl-prolog::%with-logic-variable-order
       (signals-error
-       (cl-prolog::%logic-variable-ordinal (gensym "?UNREGISTERED"))))))
+       (cl-prolog::%logic-variable-ordinal (gensym "?UNREGISTERED")))))
 (deftest flat-fact-rule-program-preserves-runtime-semantics ()
   (let ((rulebase
           (prolog

@@ -27,7 +27,7 @@
     # cl-weave is the testing library used by the cl-prolog/test ASDF system.
     # It follows this flake's nixpkgs so both share a single SBCL.
     cl-weave = {
-      url = "github:nerima-lisp/cl-weave/v1.1.4";
+      url = "github:nerima-lisp/cl-weave/v1.2.0";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.paredit-cli.follows = "paredit-cli";
     };

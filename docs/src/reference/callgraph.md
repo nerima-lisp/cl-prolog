@@ -114,7 +114,7 @@ you need tokenizing or well-formedness checking without full extraction.
 
 ## API summary
 
-- `call-graph`, `call-graph-p`, `call-graph-rulebase`, `call-graph-defined`,
+- `call-graph`, `call-graph-rulebase`, `call-graph-defined`,
   `call-graph-entry-points`
 - `build-call-graph-from-edges`
 - `reachable-p`, `reachable-from`, `direct-callees`

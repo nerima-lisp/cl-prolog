@@ -149,18 +149,16 @@
     (assert-query rulebase (cl-prolog::get_char ?again)
                   :ordered (((?again . cl-prolog::a))))))
 
-(deftest io-stream-position-validates-property-and-position ()
-  (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase
-                  (cl-prolog::stream_property
-                   cl-prolog::user_input (cl-prolog::unknown value))
-                  :signals)
-    (assert-query rulebase
-                  (cl-prolog::set_stream_position cl-prolog::user_input atom)
-                  :signals)
-    (assert-query rulebase
-                  (cl-prolog::set_stream_position cl-prolog::user_input -1)
-                  :signals)))
+(deftest-io-queries io-stream-position-validates-property-and-position ()
+  ("stream_property rejects an unknown property"
+   "" (cl-prolog::stream_property cl-prolog::user_input (cl-prolog::unknown value))
+   :signals)
+  ("set_stream_position rejects a non-integer position"
+   "" (cl-prolog::set_stream_position cl-prolog::user_input atom)
+   :signals)
+  ("set_stream_position rejects a negative position"
+   "" (cl-prolog::set_stream_position cl-prolog::user_input -1)
+   :signals))
 
 (deftest-io-variants io-character-lookahead-supports-current-and-explicit-streams
     ((rulebase input output) "ab")
@@ -351,20 +349,18 @@
                   (cl-prolog::at_end_of_stream cl-prolog::user_input)
                   :fails)))
 
-(deftest io-stream-property-rejects-malformed-property-shapes ()
-  (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase
-                  (cl-prolog::stream_property
-                   cl-prolog::user_input cl-prolog::not_a_property_list)
-                  :signals)
-    (assert-query rulebase
-                  (cl-prolog::stream_property
-                   cl-prolog::user_input (cl-prolog::mode extra argument))
-                  :signals)
-    (assert-query rulebase
-                  (cl-prolog::stream_property
-                   cl-prolog::user_input (123 cl-prolog::value))
-                  :signals)))
+(deftest-io-queries io-stream-property-rejects-malformed-property-shapes ()
+  ("a non-list property argument is rejected"
+   "" (cl-prolog::stream_property
+       cl-prolog::user_input cl-prolog::not_a_property_list)
+   :signals)
+  ("a property with an extra argument is rejected"
+   "" (cl-prolog::stream_property
+       cl-prolog::user_input (cl-prolog::mode extra argument))
+   :signals)
+  ("a property with a non-atom name is rejected"
+   "" (cl-prolog::stream_property cl-prolog::user_input (123 cl-prolog::value))
+   :signals))
 
 (deftest io-stream-property-enumeration-skips-closed-streams ()
   (with-io-rulebase (rulebase input output) ""

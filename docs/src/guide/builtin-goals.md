@@ -38,7 +38,10 @@ Lisp package symbols.
   `(reverse ?a ?b)`, `(length ?l ?n)`, `(select ?x ?list ?rest)`,
   `(nth0 ?i ?list ?x)`, `(nth1 ?i ?list ?x)`, `(last ?list ?x)`, and
   `(is_list ?l)` define relations over proper and partially instantiated
-  lists. `memberchk/2` commits to the first match.
+  lists. `memberchk/2` commits to the first match. Unlike the list-library
+  goals below, none of these is exported as a `cl-prolog` symbol; they are
+  source/query-goal vocabulary only (see
+  [Prolog-Source and Query Goals](../reference/api.md#prolog-source-and-query-goals)).
 - **List library (`library(lists)`):** `(sum_list ?l ?sum)` (alias
   `sumlist`), `(max_list ?l ?m)`, `(min_list ?l ?m)`, `(numlist ?lo ?hi ?l)`,
   `(list_to_set ?l ?set)` (deduplicates under `==`, preserving first

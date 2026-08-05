@@ -173,11 +173,6 @@
     (is (prolog-succeeds-p rulebase
                            (read-prolog-term "alpha:not(value(beta)).")))))
 
-(deftest qualified-builtin-rejects-unknown-module ()
-  (signals-error
-    (query-prolog (make-rulebase)
-                  (read-prolog-term "ghost:true."))))
-
 (deftest qualified-module-variable-resolves-through-bindings ()
   (let ((rulebase (make-rulebase)))
     (consult-prolog
@@ -227,13 +222,13 @@
       (prolog-succeeds-p rulebase
                          (read-prolog-term "value(local).")))))
 
-(deftest module-directive-must-be-the-unique-first-source-term ()
-  (signals-error
-    (consult-prolog "already_seen. :- module(late, []).")))
-
-(deftest module-consult-rejects-an-undefined-export ()
-  (signals-error
-    (consult-prolog ":- module(under_defined, [missing/1]).")))
+(deftest-table module-system-rejects-invalid-modules ()
+  (:signals (query-prolog (make-rulebase) (read-prolog-term "ghost:true."))
+            "A qualified builtin must reject an unknown module")
+  (:signals (consult-prolog "already_seen. :- module(late, []).")
+            "A module directive must be the unique first source term")
+  (:signals (consult-prolog ":- module(under_defined, [missing/1]).")
+            "A module consult must reject an undefined export"))
 
 (deftest dynamic-assertion-rejects-import-redefinition ()
   (let ((rulebase (make-rulebase)))

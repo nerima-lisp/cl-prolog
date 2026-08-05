@@ -80,28 +80,24 @@ on success.  Returns without emitting on failure."
       (t (%raise-type-error "CHAR_TYPE" type environment operation
                             "char_type/2 type must be an atom or compound")))))
 
-(define-builtin (char_type char type) (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "CHAR_TYPE"))
-         (value (logic-substitute char environment)))
-    (unless (%character-atom-p value)
-      (if (logic-var-p value)
-          (%raise-instantiation-error environment operation
-                                      "char_type/2 char must be instantiated")
-          (%raise-type-error "CHARACTER" value environment operation
-                             "char_type/2 expects a one-character atom")))
-    (%char-type-holds-p (char (%atom-text value) 0)
-                        (logic-substitute type environment)
-                        nil environment operation emit environment)))
+(define-iso-builtin (char_type char (type :raw)) "CHAR_TYPE"
+  (unless (%character-atom-p resolved-char)
+    (if (logic-var-p resolved-char)
+        (%raise-instantiation-error environment operation
+                                    "char_type/2 char must be instantiated")
+        (%raise-type-error "CHARACTER" resolved-char environment operation
+                           "char_type/2 expects a one-character atom")))
+  (%char-type-holds-p (char (%atom-text resolved-char) 0)
+                      (logic-substitute type environment)
+                      nil environment operation emit environment))
 
-(define-builtin (code_type code type) (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "CODE_TYPE"))
-         (value (logic-substitute code environment)))
-    (when (logic-var-p value)
-      (%raise-instantiation-error environment operation
-                                  "code_type/2 code must be instantiated"))
-    (%char-type-holds-p (%code-character value environment operation)
-                        (logic-substitute type environment)
-                        t environment operation emit environment)))
+(define-iso-builtin (code_type code (type :raw)) "CODE_TYPE"
+  (when (logic-var-p resolved-code)
+    (%raise-instantiation-error environment operation
+                                "code_type/2 code must be instantiated"))
+  (%char-type-holds-p (%code-character resolved-code environment operation)
+                      (logic-substitute type environment)
+                      t environment operation emit environment))
 
 ;;; upcase_atom/2, downcase_atom/2
 

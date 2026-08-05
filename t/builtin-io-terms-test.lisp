@@ -28,17 +28,22 @@
                                          ((cl-prolog::quoted maybe)))
                   :signals)))
 
-(deftest io-read-term-current-stream-reports-variables ()
-  (with-io-rulebase (rulebase input output) "pair(X, X, Y)."
-    (assert-query
-     rulebase
-     (cl-prolog::read_term
-      ?term ((cl-prolog::variables ?variables)
-             (cl-prolog::variable_names ?names)))
-     :ordered (((?term . (cl-prolog::pair cl-prolog::?x cl-prolog::?x cl-prolog::?y))
-          (?variables . (cl-prolog::?x cl-prolog::?y))
-          (?names . ((cl-prolog::= #.(cl-prolog:prolog-atom "X") cl-prolog::?x)
-                     (cl-prolog::= #.(cl-prolog:prolog-atom "Y") cl-prolog::?y))))))))
+(deftest-io-queries io-read-term-handles-options ()
+  ("reports variables and variable_names for the current stream"
+   "pair(X, X, Y)."
+   (cl-prolog::read_term
+    ?term ((cl-prolog::variables ?variables)
+           (cl-prolog::variable_names ?names)))
+   :ordered (((?term . (cl-prolog::pair cl-prolog::?x cl-prolog::?x cl-prolog::?y))
+              (?variables . (cl-prolog::?x cl-prolog::?y))
+              (?names . ((cl-prolog::= #.(cl-prolog:prolog-atom "X") cl-prolog::?x)
+                         (cl-prolog::= #.(cl-prolog:prolog-atom "Y") cl-prolog::?y))))))
+  ("rejects an unsupported option"
+   "ok." (cl-prolog::read_term ?term ((cl-prolog::bogus value))) :signals)
+  ("rejects a non-list options argument"
+   "ok." (cl-prolog::read_term ?term cl-prolog::not_a_list) :signals)
+  ("rejects a malformed option shape"
+   "ok." (cl-prolog::read_term ?term (cl-prolog::malformed_shape)) :signals))
 (deftest io-read-term-preserves-quoted-question-atoms ()
   (with-io-rulebase (rulebase input output) "'?x'."
     (with-single-query-solution
@@ -79,25 +84,6 @@
     (assert-query rulebase
                   (cl-prolog::read_term
                    ?term ((cl-prolog::syntax_errors unsupported)))
-                  :signals)))
-
-(deftest io-read-term-rejects-unsupported-options ()
-  (with-io-rulebase (rulebase input output) "ok."
-    (assert-query rulebase
-                  (cl-prolog::read_term
-                   ?term ((cl-prolog::bogus value)))
-                  :signals)))
-
-(deftest io-read-term-rejects-a-non-list-options-argument ()
-  (with-io-rulebase (rulebase input output) "ok."
-    (assert-query rulebase
-                  (cl-prolog::read_term ?term cl-prolog::not_a_list)
-                  :signals)))
-
-(deftest io-read-term-rejects-a-malformed-option-shape ()
-  (with-io-rulebase (rulebase input output) "ok."
-    (assert-query rulebase
-                  (cl-prolog::read_term ?term (cl-prolog::malformed_shape))
                   :signals)))
 
 (deftest io-read-term-syntax-errors-are-catchable-iso-errors ()

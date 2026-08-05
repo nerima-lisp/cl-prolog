@@ -207,7 +207,27 @@
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
           (term-builtin-error-summary '(cl-prolog::|=..| ?term (?head value))))
   (:equal '(prolog-type-error ("TYPE_ERROR" "ATOM" 7))
-          (term-builtin-error-summary '(cl-prolog::|=..| ?term (7 value)))))
+          (term-builtin-error-summary '(cl-prolog::|=..| ?term (7 value))))
+  ;; A ratio is a host value that is no Prolog term at all (see
+  ;; HOST-ONLY-NUMBERS-ARE-NOT-PROLOG-NUMBERS), so it is neither decomposable
+  ;; nor usable as a one-element list's atomic term.  Only the Lisp API can
+  ;; present one; Prolog source has no syntax for it.
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 3/2))
+          (term-builtin-error-summary '(cl-prolog::functor 3/2 ?name ?arity)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 3/2))
+          (term-builtin-error-summary '(cl-prolog::|=..| 3/2 ?list)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "ATOMIC" 3/2))
+          (term-builtin-error-summary '(cl-prolog::|=..| ?term (3/2)))))
+
+(deftest atom-order-ranks-a-prefix-before-its-extension ()
+  "ISO 13211-1 7.2.3 compares atoms character by character and then by length,
+so an atom that is a proper prefix of another precedes it in both directions."
+  (is (= -1 (cl-prolog::%compare-terms (quote cl-prolog::ab) (quote cl-prolog::abc))))
+  (is (= 1 (cl-prolog::%compare-terms (quote cl-prolog::abc) (quote cl-prolog::ab))))
+  (is (= -1 (cl-prolog::%compare-atom-texts (quote cl-prolog::ab) (quote cl-prolog::abc))))
+  (is (= 1 (cl-prolog::%compare-atom-texts (quote cl-prolog::abc) (quote cl-prolog::ab))))
+  (is (= 0 (cl-prolog::%compare-atom-texts (quote cl-prolog::abc)
+                                           (prolog-atom "abc")))))
 
 (deftest term-order-properties ()
   (cl-prolog::%with-logic-variable-order
@@ -283,6 +303,43 @@ names would give."
     (is (= 1 (cl-prolog::%compare-terms lower upper)))
     (is (not (= 0 (cl-prolog::%compare-terms (prolog-atom "ABC")
                                              'cl-prolog::abc))))))
+
+(deftest term-order-compares-improper-terms-by-their-tails ()
+  "An improper term is compared element-wise like any other cons, so a pair
+whose cars are one atom is decided by its cdrs."
+  (let ((left (cons (quote cl-prolog::a) (quote cl-prolog::b)))
+        (right (cons (quote cl-prolog::a) (quote cl-prolog::c))))
+    (is (= -1 (cl-prolog::%compare-terms left right)))
+    (is (= 1 (cl-prolog::%compare-terms right left)))))
+
+(deftest term-order-ranks-strings-in-both-directions ()
+  (is (= -1 (cl-prolog::%compare-terms "a" "b")))
+  (is (= 1 (cl-prolog::%compare-terms "b" "a")))
+  (is (= 0 (cl-prolog::%compare-terms "a" (copy-seq "a")))))
+
+(deftest term-order-separates-numerically-equal-floats-of-different-types ()
+  "1.0f0 and 1.0d0 are = but not EQL, so neither the value comparison nor the
+float/integer rule can separate them; the standard order still has to be a
+total order, so they fall back to their printed text -- antisymmetric and
+never 0, whatever *READ-DEFAULT-FLOAT-FORMAT* makes that text."
+  (let ((forward (cl-prolog::%compare-terms 1.0f0 1.0d0))
+        (reverse (cl-prolog::%compare-terms 1.0d0 1.0f0)))
+    (is (member forward (quote (-1 1))))
+    (is (= forward (- reverse)))))
+
+(deftest term-order-rejects-two-host-only-terms ()
+  "A ratio is not a Prolog term (see HOST-ONLY-NUMBERS-ARE-NOT-PROLOG-NUMBERS);
+two of them share an order class no ordering rule covers, so comparing them is
+an error rather than a silent arbitrary answer."
+  (signals-error (cl-prolog::%compare-terms 3/2 1/2))
+  (signals-error (cl-prolog::%compare-terms (complex 1 2) (complex 3 4))))
+
+(deftest term-variant-rejects-a-variable-against-a-non-variable ()
+  "The mirror of TERM-VARIANT-REJECTS-MISMATCHED-SHAPES: a variable on the
+left is no more a variant of a non-variable than one on the right."
+  (is (not (cl-prolog::%term-variant-p (quote ?x) (quote cl-prolog::foo))))
+  (is (not (cl-prolog::%term-variant-p (quote (cl-prolog::pair ?x))
+                                       (quote (cl-prolog::pair cl-prolog::foo))))))
 
 (deftest term-order-uses-variable-creation-order ()
   (cl-prolog::%with-logic-variable-order
