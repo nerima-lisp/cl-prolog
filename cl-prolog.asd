@@ -18,7 +18,7 @@
   ;; Single source of truth for the version. flake.nix parses this exact form
   ;; (first match wins) and release.yml refuses to publish a tag that
   ;; disagrees with it, so a release edits this one line.
-  :version "1.4.2"
+  :version "1.4.3"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -99,7 +99,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.4.2"
+  :version "1.4.3"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -118,7 +118,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.4.2"
+  :version "1.4.3"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -183,7 +183,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.4.2"
+  :version "1.4.3"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -205,7 +205,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.4.2"
+  :version "1.4.3"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
@@ -229,7 +229,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.4.2"
+  :version "1.4.3"
   :homepage "https://github.com/nerima-lisp/cl-prolog"
   :bug-tracker "https://github.com/nerima-lisp/cl-prolog/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-prolog.git")
