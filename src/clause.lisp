@@ -91,9 +91,7 @@
              (compile-body (body)
                (cond
                  ((null body)
-                  (return-from compile-body #()))
-                 ((not (consp body))
-                  (return-from %compile-rule-program nil)))
+                  (return-from compile-body #())))
                (let ((instructions (make-array 4 :adjustable t :fill-pointer 0))
                      (cursor body))
                  (loop

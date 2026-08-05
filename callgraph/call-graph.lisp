@@ -26,7 +26,7 @@
 
 (in-package #:cl-prolog/callgraph)
 
-(defstruct call-graph
+(defstruct (call-graph (:predicate nil))
   "A cl-prolog rulebase together with the set of function names it describes."
   (rulebase nil)
   (defined nil :type list)
