@@ -48,7 +48,7 @@ as a flake input:
 ```nix
 # flake.nix
 inputs.cl-prolog = {
-  url = "github:nerima-lisp/cl-prolog/v1.4.2";
+  url = "github:nerima-lisp/cl-prolog/v1.4.3";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
