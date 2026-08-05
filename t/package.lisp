@@ -11,6 +11,7 @@
   (:export #:deftest
            #:deftest-table
            #:deftest-io-variants
+           #:deftest-io-queries
            #:deftest-queries
            #:assert-query
            #:with-single-query-solution
@@ -18,6 +19,7 @@
            #:is-equal
            #:is-same-set
            #:signals-error
+           #:signals-prolog-condition
            #:make-family-rulebase))
 
 (in-package #:cl-prolog.tests)

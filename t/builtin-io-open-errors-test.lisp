@@ -17,44 +17,43 @@
       (declare (ignore condition))
       (is t "An unbound boolean option must raise an instantiation error"))))
 
-(deftest io-read-term-rejects-an-unbound-syntax-errors-value ()
-  (with-io-rulebase (rulebase input output) "ok."
-    (assert-query rulebase
-                  (cl-prolog::read_term ?term ((cl-prolog::syntax_errors ?policy)))
-                  :signals)))
+(deftest-io-queries io-builtins-reject-malformed-option-values ()
+  ("read_term rejects an unbound syntax_errors value"
+   "ok." (cl-prolog::read_term ?term ((cl-prolog::syntax_errors ?policy)))
+   :signals)
+  ("read_term rejects a non-symbol syntax_errors value"
+   "ok." (cl-prolog::read_term ?term ((cl-prolog::syntax_errors 123)))
+   :signals)
+  ("the boolean option rejects a non-symbol value"
+   "" (cl-prolog::write_term hello ((cl-prolog::quoted 5)))
+   :signals)
+  ("put_char rejects a multi-character atom"
+   "" (cl-prolog::put_char cl-prolog::ab)
+   :signals)
+  ("put_char rejects a non-symbol character"
+   "" (cl-prolog::put_char 123)
+   :signals)
+  ("open rejects a non-symbol type option"
+   "" (cl-prolog::open cl-prolog::whatever cl-prolog.user-atoms::read ?stream
+                       ((cl-prolog::type 123)))
+   :signals))
 
-(deftest io-open-rejects-a-non-atom-source ()
-  (with-io-rulebase (rulebase input output) ""
-    (signals-prolog-condition prolog-type-error
-      (prolog-succeeds-p
-       rulebase
-       (quote (cl-prolog::open 123 cl-prolog.user-atoms::read ?stream))))))
-
-(deftest io-open-reports-existence-error-for-a-missing-unquoted-source ()
-  (with-io-rulebase (rulebase input output) ""
-    (signals-prolog-condition prolog-existence-error
-      (prolog-succeeds-p
-       rulebase
-       (quote (cl-prolog::open cl-prolog::nonexistent_io_open_test_source_xyz
-                               cl-prolog.user-atoms::read ?stream))))))
-
-(deftest io-open-rejects-an-unsupported-type-option ()
-  (with-io-rulebase (rulebase input output) ""
-    (signals-prolog-condition prolog-domain-error
-      (prolog-succeeds-p
-       rulebase
-       (quote (cl-prolog::open cl-prolog::whatever cl-prolog.user-atoms::read
-                               ?stream
-                               ((cl-prolog::type cl-prolog::bogus))))))))
-
-(deftest io-open-rejects-a-non-atom-alias ()
-  (with-io-rulebase (rulebase input output) ""
-    (signals-prolog-condition prolog-type-error
-      (prolog-succeeds-p
-       rulebase
-       (quote (cl-prolog::open cl-prolog::whatever cl-prolog.user-atoms::read
-                               ?stream
-                               ((cl-prolog::alias 123))))))))
+(deftest-io-queries io-open-rejects-malformed-arguments ()
+  ("open rejects a non-atom source"
+   "" (cl-prolog::open 123 cl-prolog.user-atoms::read ?stream)
+   :signals prolog-type-error)
+  ("open reports an existence error for a missing unquoted source"
+   "" (cl-prolog::open cl-prolog::nonexistent_io_open_test_source_xyz
+                       cl-prolog.user-atoms::read ?stream)
+   :signals prolog-existence-error)
+  ("open rejects an unsupported type option"
+   "" (cl-prolog::open cl-prolog::whatever cl-prolog.user-atoms::read ?stream
+                       ((cl-prolog::type cl-prolog::bogus)))
+   :signals prolog-domain-error)
+  ("open rejects a non-atom alias"
+   "" (cl-prolog::open cl-prolog::whatever cl-prolog.user-atoms::read ?stream
+                       ((cl-prolog::alias 123)))
+   :signals prolog-type-error))
 
 (deftest io-open-reports-existence-error-for-a-missing-parent-directory ()
   (with-io-rulebase (rulebase input output) ""
@@ -86,10 +85,6 @@
               (%read-prolog-query rulebase "open('~A', read, wrong_designator)."
                                    (namestring path))))
         (is (not (prolog-succeeds-p rulebase query)))))))
-
-(deftest io-put-char-rejects-a-multi-character-atom ()
-  (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase (cl-prolog::put_char cl-prolog::ab) :signals)))
 
 (defclass unseekable-binary-input-stream (sb-gray:fundamental-binary-input-stream)
   ((bytes :initarg :bytes :accessor unseekable-binary-input-stream-bytes))
@@ -123,30 +118,6 @@ peek_byte/1's fallback when a stream cannot save and restore its position."))
                     (cl-prolog::set_stream_position
                      cl-prolog::unseekable_input2 0)
                     :signals))))
-
-(deftest io-boolean-option-rejects-a-non-symbol-value ()
-  (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase
-                  (cl-prolog::write_term hello ((cl-prolog::quoted 5)))
-                  :signals)))
-
-(deftest io-read-term-rejects-a-non-symbol-syntax-errors-value ()
-  (with-io-rulebase (rulebase input output) "ok."
-    (assert-query rulebase
-                  (cl-prolog::read_term ?term ((cl-prolog::syntax_errors 123)))
-                  :signals)))
-
-(deftest io-put-char-rejects-a-non-symbol-character ()
-  (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase (cl-prolog::put_char 123) :signals)))
-
-(deftest io-open-rejects-a-non-symbol-type-option ()
-  (with-io-rulebase (rulebase input output) ""
-    (assert-query rulebase
-                  (cl-prolog::open
-                   cl-prolog::whatever cl-prolog.user-atoms::read ?stream
-                   ((cl-prolog::type 123)))
-                  :signals)))
 
 (defclass unseekable-character-input-stream
     (sb-gray:fundamental-character-input-stream)

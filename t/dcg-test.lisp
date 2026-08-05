@@ -83,15 +83,15 @@
     (dolist (goal (quote ((dcg-error-recovery ?input ?rest)
                          (dcg-error-recovery (:noise . ?tail) ?rest)
                          (dcg-error-recovery (:t-rparen . ?tail) ?rest))))
-      (signals-condition prolog-instantiation-error
+      (signals-prolog-condition prolog-instantiation-error
         (query-prolog rulebase goal)))
     (dolist (goal (quote ((dcg-error-recovery atom ?rest)
                          (dcg-error-recovery (:noise . tail) ?rest))))
-      (signals-condition prolog-type-error
+      (signals-prolog-condition prolog-type-error
         (query-prolog rulebase goal)))
     (let ((cyclic (list :noise :t-rparen)))
       (setf (cddr cyclic) cyclic)
-      (signals-condition prolog-type-error
+      (signals-prolog-condition prolog-type-error
         (query-prolog rulebase
                       (list (quote dcg-error-recovery) cyclic (quote ?rest)))))))
 

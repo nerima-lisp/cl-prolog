@@ -243,8 +243,7 @@
     (is-equal (quote (nil))
               (query-prolog rulebase (quote (dispatch alpha extra))))))
 
-(progn
-  (deftest predicate-index-bound-cyclic-root-keeps-full-snapshot-order ()
+(deftest predicate-index-bound-cyclic-root-keeps-full-snapshot-order ()
   (let* ((cycle (list (quote root)))
          (environment (list (cons (quote ?value) cycle)))
          (rulebase
@@ -319,7 +318,7 @@
               (cl-prolog::%proof-predicate-entries (quote (indexed ?value)) state)))
         (is (not (eq first-snapshot next-snapshot)))
         (is-equal (quote ((indexed original) (indexed added)))
-                  (stored-clause-heads next-snapshot))))))
+                  (stored-clause-heads next-snapshot)))))
 
 (deftest ordinary-predicates-are-not-replayed-for-tabling ()
   (let ((rulebase (prolog
@@ -368,7 +367,7 @@
              (query-prolog rb '(call_with_depth_limit (two-deep) 2 ?result)))
            (result (logic-substitute '?result (first solutions))))
       (is (eq (cl-prolog::%iso-atom "DEPTH_LIMIT_EXCEEDED") result)))
-    (signals-condition prolog-depth-limit-exceeded
+    (signals-prolog-condition prolog-depth-limit-exceeded
       (query-prolog rb '(call_with_depth_limit (one-deep) 5 ?result)
                     :max-depth 0))))
 
@@ -415,9 +414,7 @@
           (= ?side ok))
      :ordered (((?depth . 1) (?side . ok))))))
 
-(progn
-(progn
-  (deftest finite-proofs-are-unbounded-by-default ()
+(deftest finite-proofs-are-unbounded-by-default ()
     (let ((rb (make-rulebase))
           (chain-length 20))
       (labels ((predicate-at (index)
@@ -568,7 +565,7 @@
       (quote
        ((tabled-source ?first)
         (tabled-source ?first)
-        (= ?pair (?first ?first)))))))))
+        (= ?pair (?first ?first))))))))
 
 (deftest predicate-descriptors-copy-on-write-every-mutation ()
   (let ((rulebase (make-rulebase))
@@ -695,8 +692,7 @@
            (hash-table-count symbols)
            (hash-table-count atoms)))))
 
-(progn
-  (deftest predicate-descriptor-high-cardinality-keys-preserve-order ()
+(deftest predicate-descriptor-high-cardinality-keys-preserve-order ()
     (let* ((key-count 512)
            (target 257)
            (rulebase
@@ -744,7 +740,7 @@
          (alias-index exact-after exact-after))
        (stored-clause-heads
         (cl-prolog::%proof-predicate-entries
-         '(alias-index ?outer ?result) state))))))
+         '(alias-index ?outer ?result) state)))))
 
 (deftest predicate-descriptor-canonicalizes-symbol-atoms-and-indexes-eql-atoms ()
   (let* ((package-a
@@ -917,10 +913,8 @@
          (quote ((replace-source value)))
          (stored-clause-heads
           (cl-prolog::%predicate-descriptor-entries copy-descriptor)))))))
-)
 
-(progn
-  (deftest table-answer-replay-reuses-ground-answer-across-consumers ()
+(deftest table-answer-replay-reuses-ground-answer-across-consumers ()
     (let ((rulebase (prolog ((tabled-ground alpha)))))
       (cl-prolog::%add-rulebase-table-declaration!
        rulebase (quote tabled-ground) 1 :test)
@@ -957,4 +951,76 @@
           (is-equal (quote alpha)
                     (logic-substitute (quote ?first) environment))
           (is-equal (quote beta)
-                    (logic-substitute (quote ?second) environment)))))))
+                    (logic-substitute (quote ?second) environment))))))
+
+(defun retract-assert-cycle (rulebase count)
+  "Retract counter/1 and reassert it with the next value, COUNT times.
+
+Each half is its own top-level call, so *PROLOG-ACTIVE-TOP-LEVEL-CALLS*
+returns to 0 between them and dead-entry compaction gets its chance to run."
+  (dotimes (index count)
+    (query-prolog rulebase
+                  (list (quote cl-prolog::retract)
+                        (list (quote cl-prolog::counter) index)))
+    (query-prolog rulebase
+                  (list (quote cl-prolog::assertz)
+                        (list (quote cl-prolog::counter) (1+ index))))))
+
+(deftest dead-entries-survive-below-the-compaction-threshold (:timeout 60)
+  "Retracted clauses stay physically present until the backlog reaches
+*RULEBASE-COMPACTION-THRESHOLD*, which is what keeps
+%RULEBASE-PREDICATE-ENTRIES-AT-REVISION able to answer for an old revision."
+  (let* ((rulebase (make-rulebase))
+         (threshold cl-prolog::*rulebase-compaction-threshold*))
+    (assert-query rulebase (assertz (cl-prolog::counter 0)) :succeeds)
+    (retract-assert-cycle rulebase (1- threshold))
+    (is-equal (1- threshold) (cl-prolog::rulebase-dead-entries rulebase))
+    (is-equal threshold (length (cl-prolog::rulebase-entries rulebase)))
+    (is-equal (list (list (cons (quote ?value) (1- threshold))))
+              (query-prolog rulebase (quote (cl-prolog::counter ?value))))))
+
+(deftest compaction-rebuilds-the-index-from-the-surviving-entries (:timeout 60)
+  "Reaching the threshold physically drops every dead entry from
+RULEBASE-ENTRIES and rebuilds RULEBASE-PREDICATE-INDEX/-TAILS from what is
+left: the churning predicate loses its bucket outright while the untouched one
+keeps its clause, its bucket and a tail that still points into that bucket."
+  (let* ((rulebase (make-rulebase))
+         (threshold cl-prolog::*rulebase-compaction-threshold*)
+         (counter-key
+           (list cl-prolog::+default-prolog-module+ (quote cl-prolog::counter) 1))
+         (stable-key
+           (list cl-prolog::+default-prolog-module+ (quote cl-prolog::stable) 1))
+         (stable-head (list (quote cl-prolog::stable) (quote cl-prolog::kept))))
+    (assert-query rulebase (assertz (cl-prolog::stable cl-prolog::kept)) :succeeds)
+    (assert-query rulebase (assertz (cl-prolog::counter 0)) :succeeds)
+    (retract-assert-cycle rulebase (1- threshold))
+    ;; One more retract takes the backlog to the threshold, so compaction runs
+    ;; while counter/1 has no live clause at all.
+    (query-prolog rulebase
+                  (list (quote cl-prolog::retract)
+                        (list (quote cl-prolog::counter) (1- threshold))))
+    (is-equal 0 (cl-prolog::rulebase-dead-entries rulebase))
+    (let ((entries (cl-prolog::rulebase-entries rulebase)))
+      (is-equal (list stable-head) (stored-clause-heads entries))
+      (is (eq (last entries) (cl-prolog::rulebase-entries-tail rulebase))))
+    (let ((bucket (gethash stable-key
+                           (cl-prolog::rulebase-predicate-index rulebase))))
+      (is-equal (list stable-head) (stored-clause-heads bucket))
+      (is (eq (last bucket)
+              (gethash stable-key
+                       (cl-prolog::rulebase-predicate-tails rulebase)))))
+    (is (null (gethash counter-key
+                       (cl-prolog::rulebase-predicate-index rulebase))))
+    (is-equal (list (list (cons (quote ?value) (quote cl-prolog::kept))))
+              (query-prolog rulebase (quote (cl-prolog::stable ?value))))
+    (is (null (query-prolog rulebase (quote (cl-prolog::counter ?value)))))))
+
+(deftest compaction-is-a-no-op-without-dead-entries ()
+  (let* ((rulebase (make-rulebase)))
+    (assert-query rulebase (assertz (cl-prolog::counter 0)) :succeeds)
+    (let ((entries (cl-prolog::rulebase-entries rulebase))
+          (index (cl-prolog::rulebase-predicate-index rulebase)))
+      (is-equal 0 (cl-prolog::rulebase-dead-entries rulebase))
+      (is (eq rulebase (cl-prolog::%compact-rulebase! rulebase)))
+      (is (eq entries (cl-prolog::rulebase-entries rulebase)))
+      (is (eq index (cl-prolog::rulebase-predicate-index rulebase))))))

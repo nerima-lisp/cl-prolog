@@ -110,6 +110,38 @@ current-output equals EXPECTED."
     (assert-query rulebase (cl-prolog::format ?f ()) :signals)
     (assert-query rulebase (cl-prolog::format 42 ()) :signals)))
 
+(defun format-goal-error-summary (goal)
+  "Summarize the ISO error GOAL raises, with the output stream discarded."
+  (with-io-rulebase (rulebase input output) ""
+    (query-error-summary rulebase goal :with-data t)))
+
+(deftest-table format-directive-argument-errors-name-their-culprit ()
+  ;; The column argument of ~* and the value of ~D/~r must each be an integer,
+  ;; and the error has to name the offending term rather than just failing.
+  (:equal '(prolog-type-error ("TYPE_ERROR" "INTEGER" "FOO"))
+          (format-goal-error-summary '(cl-prolog::format "~*|" (foo))))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "INTEGER" "FOO"))
+          (format-goal-error-summary '(cl-prolog::format "~D" (foo))))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "INTEGER" "FOO"))
+          (format-goal-error-summary '(cl-prolog::format "~r" (foo))))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "INTEGER" 1.5))
+          (format-goal-error-summary '(cl-prolog::tab 1.5)))
+  ;; A fill directive cut short by the end of the format string is a malformed
+  ;; format string, not a truncated-directive-in-general error.
+  (:equal '(prolog-domain-error ("DOMAIN_ERROR" "FORMAT_STRING" "~`"))
+          (format-goal-error-summary '(cl-prolog::format "~`" ()))))
+
+(deftest format-renders-negative-grouped-integers ()
+  (assert-format-output "~D" (-1234567) "-1,234,567")
+  (assert-format-output "~D" (-1) "-1"))
+
+(deftest format-treats-a-non-list-argument-term-as-one-argument ()
+  "format/2's second argument is a list of arguments, but SWI also accepts a
+bare term as the single argument -- so `format(\"~w\", hello)' prints hello
+rather than raising."
+  (assert-format-output "~w" cl-prolog::hello "hello")
+  (assert-format-output "~w" 42 "42"))
+
 (deftest format-resource-limits-are-catchable ()
   (with-io-rulebase (rulebase input output) ""
     (assert-query rulebase (cl-prolog::format "~999999999c" (65)) :signals)

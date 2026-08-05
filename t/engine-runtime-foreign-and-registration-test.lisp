@@ -85,17 +85,17 @@
           (is-equal limit (type-error-datum condition))
           (is-equal (quote (or null (integer 1 *)))
                     (type-error-expected-type condition))))
-      (signals-condition
+      (signals-prolog-condition
        type-error
        (map-prolog-solutions (lambda (solution) (declare (ignore solution)))
                              rb (quote (ancestor tom ?who)) :limit limit)))
-    (signals-condition
+    (signals-prolog-condition
      type-error
      (query-prolog-first rb (quote (ancestor tom ?who)) :limit 0))
-    (signals-condition
+    (signals-prolog-condition
      program-error
      (query-prolog rb (quote (ancestor tom ?who)) :limti 1))
-    (signals-condition
+    (signals-prolog-condition
      program-error
      (query-prolog rb (quote (ancestor tom ?who)) :limit))
     (is-equal (quote (((?who . bob)) t))
@@ -221,8 +221,7 @@
                           (quote (declare (cl:ignorable rulebase environment
                                                         depth emit)))))))
 
-(progn
-  (defvar *observed-builtin-dispatch-argument* nil)
+(defvar *observed-builtin-dispatch-argument* nil)
 
   (cl-prolog::define-builtin (test-observe-builtin argument)
       (rulebase environment depth emit)
@@ -252,4 +251,4 @@
            (quote ((= ?argument resolved)
                    (test-observe-foreign ?argument)))))
       (is (eq (quote resolved)
-              *observed-foreign-dispatch-argument*)))))
+              *observed-foreign-dispatch-argument*))))

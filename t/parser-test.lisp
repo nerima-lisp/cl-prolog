@@ -138,7 +138,6 @@ would split `===' into `==' and `='."
           (is (member lexeme (cl-prolog::%symbolic-token-lexemes)
                       :test #'string=))))))
 
-(progn
 (deftest operator-lexeme-generation-does-not-mutate-delimiters ()
   (dotimes (index 20)
     (declare (ignorable index))
@@ -164,7 +163,7 @@ would split `===' into `==' and `='."
          (other-query (read-prolog-term "p(a).")))
     (is-equal '(nil) (query-prolog rulebase atom-query))
     (is (prolog-succeeds-p rulebase atom-query))
-    (is (not (prolog-succeeds-p rulebase other-query))))))
+    (is (not (prolog-succeeds-p rulebase other-query)))))
 
 (deftest quoted-atoms-decode-escape-sequences ()
   "ISO 13211-1 6.4.2.1: a `\\'-escape in a quoted token denotes the character it
@@ -232,7 +231,6 @@ their evaluable functors have no written form."
               (with-input-from-string (stream text)
                 (cl-prolog::%read-prolog-term-source stream)))))
 
-(progn
 (deftest prolog-source-parser-and-consult ()
   (let* ((source (format nil "% family~% parent(tom,bob). /* rule */~% child(X) :- parent(tom,X).~% ?- child(X)."))
          (forms (parse-prolog source)))
@@ -273,8 +271,7 @@ against its :OBSERVED/:LIMIT/:POSITION, which vary per resource kind."
     (cl-prolog::prolog-parse-error ()
       t)))
 
-(progn
-  (defun %prolog-parse-error-condition (thunk)
+(defun %prolog-parse-error-condition (thunk)
     (handler-case
         (progn
           (funcall thunk)
@@ -334,7 +331,7 @@ against its :OBSERVED/:LIMIT/:POSITION, which vary per resource kind."
   (deftest prolog-parse-error-report-writes-its-description ()
     (let ((condition (make-condition 'cl-prolog::prolog-parse-error
                                      :description "unexpected end of input")))
-      (is-equal "unexpected end of input" (princ-to-string condition)))))
+      (is-equal "unexpected end of input" (princ-to-string condition))))
 
 (deftest prolog-parser-resource-error-report-includes-every-slot ()
   (let* ((*max-prolog-source-characters* 1)
@@ -482,4 +479,4 @@ against its :OBSERVED/:LIMIT/:POSITION, which vary per resource kind."
     (cl-prolog::%operator-table-lexemes
      cl-prolog::*standard-operator-table*)
     (is-equal 1
-              (hash-table-count cl-prolog::*operator-lexeme-cache*)))))
+              (hash-table-count cl-prolog::*operator-lexeme-cache*))))

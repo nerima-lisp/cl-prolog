@@ -2,8 +2,7 @@
 
 (in-package #:cl-prolog.tests)
 
-(progn
-  (deftest arithmetic-rejects-host-only-ratio-input ()
+(deftest arithmetic-rejects-host-only-ratio-input ()
     (signals-error
       (query-prolog (make-rulebase) (list 'is '?result 1/2))))
 
@@ -21,25 +20,25 @@
                                "CL-PROLOG-INVALID-ARITHMETIC-~D" index)
             for operator = (make-symbol name)
             do (is (null (find-symbol name :keyword)))
-               (signals-condition prolog-type-error
+               (signals-prolog-condition prolog-type-error
                  (cl-prolog::%require-arithmetic-function
                   operator 1 (list operator 1) nil))
-               (signals-condition prolog-type-error
+               (signals-prolog-condition prolog-type-error
                  (cl-prolog::%evaluate-arithmetic-expression operator nil))
                (is (null (find-symbol name :keyword))))
       (is-equal before (package-owned-symbol-count :keyword))))
 
   (deftest arithmetic-power-rejects-an-oversized-exponent-or-result ()
-    (signals-condition prolog-resource-error
+    (signals-prolog-condition prolog-resource-error
       (query-prolog (make-rulebase) (list 'is '?result (list '** 2 5000))))
     ;; `**' is ISO 9.3.1's float power, so an oversized result overflows the
     ;; float rather than the integer bound -- either way it must be catchable.
-    (signals-condition prolog-evaluation-error
+    (signals-prolog-condition prolog-evaluation-error
       (query-prolog (make-rulebase)
                     (list 'is '?result
                           (list '** (list '** 2 1000) 20))))
     ;; `^' keeps integers, so the integer size bound is what stops it.
-    (signals-condition prolog-resource-error
+    (signals-prolog-condition prolog-resource-error
       (query-prolog (make-rulebase)
                     (list 'is '?result
                           (list 'cl-prolog::^ (list 'cl-prolog::^ 2 1000) 20)))))
@@ -54,8 +53,8 @@
                             (list 'is '?result (list 'cl-prolog::^ 5 0)))))
 
   (deftest arithmetic-rejects-an-improper-expression-list ()
-    (signals-condition prolog-type-error
-      (cl-prolog::%evaluate-arithmetic-expression (list* '+ 1 2) nil))))
+    (signals-prolog-condition prolog-type-error
+      (cl-prolog::%evaluate-arithmetic-expression (list* '+ 1 2) nil)))
 
 (defun arithmetic-type-error-formal (expression)
   (handler-case
@@ -80,7 +79,16 @@
    (list (cl-prolog::%iso-atom "TYPE_ERROR")
          (cl-prolog::%iso-atom "EVALUABLE")
          (cl-prolog::%iso-term "/" 'unknown 1))
-   (arithmetic-type-error-formal '(unknown ?unbound))))
+   (arithmetic-type-error-formal '(unknown ?unbound)))
+  ;; ISO 13211-1 7.12.2 (b) spells the culprit as Name/Arity only when there is
+  ;; a name to spell: an atomic non-atom has no indicator, so it is reported as
+  ;; itself.  A string reaches the evaluator only from the Lisp API, since
+  ;; double_quotes=codes makes Prolog source text a code list.
+  (:equal
+   (list (cl-prolog::%iso-atom "TYPE_ERROR")
+         (cl-prolog::%iso-atom "EVALUABLE")
+         "not an expression")
+   (arithmetic-type-error-formal "not an expression")))
 
 (deftest-queries prolog-flag-builtins ((make-rulebase))
   ((cl-prolog::current_prolog_flag bounded ?value) :ordered (((?value . cl-prolog:false))))

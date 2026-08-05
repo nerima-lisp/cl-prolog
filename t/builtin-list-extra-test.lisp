@@ -39,7 +39,7 @@
 
 (deftest numlist-obeys-builtin-output-length-limit ()
   (let ((cl-prolog:*max-prolog-builtin-output-length* 1))
-    (signals-condition prolog-resource-error
+    (signals-prolog-condition prolog-resource-error
       (query-prolog (make-rulebase)
                     (quote (cl-prolog::numlist 1 2 ?list)))))
   (let ((cl-prolog:*max-prolog-builtin-output-length* nil))

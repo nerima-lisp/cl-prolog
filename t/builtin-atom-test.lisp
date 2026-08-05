@@ -152,60 +152,34 @@ The macro expands each case into two DEFTEST-QUERIES specs."
   (:equal 'prolog-domain-error
           (number-output-error-type 1/2)))
 
-(deftest atom-list-conversion-rejects-cycles ()
-  (let ((cycle (list (cl-prolog::%text-atom "a"))))
-    (setf (cdr cycle) cycle)
-    (handler-case
-        (progn
-          (cl-prolog::%character-list-text
-           cycle nil (cl-prolog::%iso-atom "ATOM_CHARS"))
-          (error "Expected cyclic list rejection"))
-      (prolog-type-error (condition)
-        (declare (ignore condition))
-        (is t "Cyclic lists must raise a Prolog type error")))))
-
-(deftest atom-list-conversion-rejects-a-variable-tail ()
-  (handler-case
-      (progn
-        (cl-prolog::%character-list-text
-         (cons (cl-prolog::%text-atom "a") '?tail)
-         nil (cl-prolog::%iso-atom "ATOM_CHARS"))
-        (error "Expected a variable tail to be rejected"))
-    (prolog-instantiation-error (condition)
-      (declare (ignore condition))
-      (is t "A variable list tail must raise an instantiation error"))))
-
-(deftest atom-list-conversion-rejects-an-improper-tail ()
-  (handler-case
-      (progn
-        (cl-prolog::%character-list-text
-         (cons (cl-prolog::%text-atom "a") (cl-prolog::%text-atom "b"))
-         nil (cl-prolog::%iso-atom "ATOM_CHARS"))
-        (error "Expected an improper tail to be rejected"))
-    (prolog-type-error (condition)
-      (declare (ignore condition))
-      (is t "A non-cons, non-nil tail must raise a type error"))))
-
-(deftest atom-list-conversion-rejects-a-variable-element ()
-  (handler-case
-      (progn
-        (cl-prolog::%character-list-text
-         (list (cl-prolog::%text-atom "a") '?element)
-         nil (cl-prolog::%iso-atom "ATOM_CHARS"))
-        (error "Expected a variable element to be rejected"))
-    (prolog-instantiation-error (condition)
-      (declare (ignore condition))
-      (is t "An unbound list element must raise an instantiation error"))))
+(deftest-table atom-list-conversion-rejects-malformed-lists ()
+  (:signals-condition prolog-type-error
+   (let ((cycle (list (cl-prolog::%text-atom "a"))))
+     (setf (cdr cycle) cycle)
+     (cl-prolog::%character-list-text
+      cycle nil (cl-prolog::%iso-atom "ATOM_CHARS")))
+   "Cyclic lists must raise a Prolog type error")
+  (:signals-condition prolog-instantiation-error
+   (cl-prolog::%character-list-text
+    (cons (cl-prolog::%text-atom "a") '?tail)
+    nil (cl-prolog::%iso-atom "ATOM_CHARS"))
+   "A variable list tail must raise an instantiation error")
+  (:signals-condition prolog-type-error
+   (cl-prolog::%character-list-text
+    (cons (cl-prolog::%text-atom "a") (cl-prolog::%text-atom "b"))
+    nil (cl-prolog::%iso-atom "ATOM_CHARS"))
+   "A non-cons, non-nil tail must raise a type error")
+  (:signals-condition prolog-instantiation-error
+   (cl-prolog::%character-list-text
+    (list (cl-prolog::%text-atom "a") '?element)
+    nil (cl-prolog::%iso-atom "ATOM_CHARS"))
+   "An unbound list element must raise an instantiation error"))
 
 (deftest resource-limit-check-rejects-values-past-the-configured-limit ()
-  (handler-case
-      (progn
-        (cl-prolog::%check-resource-limit
-         5 3 "TEST_RESOURCE" nil (cl-prolog::%iso-atom "TEST") "over limit")
-        (error "Expected the over-limit value to be rejected"))
-    (prolog-resource-error (condition)
-      (declare (ignore condition))
-      (is t "A value past the configured limit must raise a resource error"))))
+  (signals-prolog-condition prolog-resource-error
+    (cl-prolog::%check-resource-limit
+     5 3 "TEST_RESOURCE" nil (cl-prolog::%iso-atom "TEST") "over limit")
+    "A value past the configured limit must raise a resource error"))
 
 (defun atom-builtin-error-summary (goal)
   (query-error-summary (make-rulebase) goal :with-data t))
@@ -254,4 +228,33 @@ The macro expands each case into two DEFTEST-QUERIES specs."
   (:equal '(prolog-type-error ("TYPE_ERROR" "NUMBER" "ATOM"))
           (atom-builtin-error-summary '(cl-prolog::atom_number ?atom atom)))
   (:equal '(prolog-domain-error ("DOMAIN_ERROR" "PROLOG_NUMBER" 1/2))
-          (atom-builtin-error-summary '(cl-prolog::atom_number ?atom 1/2))))
+          (atom-builtin-error-summary '(cl-prolog::atom_number ?atom 1/2)))
+  ;; A short text can still demand an enormous float.  The exponent bound is
+  ;; checked before the reader sees the text, in two steps: too many exponent
+  ;; digits to be worth parsing, then a parsed exponent past the limit.
+  (:equal '(prolog-resource-error ("RESOURCE_ERROR" "EXPONENT_MAGNITUDE"))
+          (atom-builtin-error-summary
+           (list 'cl-prolog::atom_number (prolog-atom "1.0e5000") '?number)))
+  (:equal '(prolog-resource-error ("RESOURCE_ERROR" "EXPONENT_MAGNITUDE"))
+          (atom-builtin-error-summary
+           (list 'cl-prolog::atom_number (prolog-atom "1.0e500000") '?number))))
+
+(deftest number-text-rejects-a-number-that-is-not-real ()
+  "%NUMBER-TEXT is the single place a number becomes its Prolog text.  Its
+callers all screen their argument first, so the two rejections below are only
+reachable from Lisp -- but they are what makes the function total: a ratio is a
+number that is not a Prolog one (domain), while a complex is not even a real
+number to begin with (type)."
+  (flet ((summary (number)
+           (handler-case
+               (progn (cl-prolog::%number-text
+                       number nil (cl-prolog::%io-operation "NUMBER_TEXT"))
+                      nil)
+             (prolog-runtime-error (condition)
+               (list (type-of condition)
+                     (normalize-error-data
+                      (second (prolog-exception-term condition))))))))
+    (is-equal '(prolog-domain-error ("DOMAIN_ERROR" "PROLOG_NUMBER" 3/2))
+              (summary 3/2))
+    (is-equal '(prolog-type-error ("TYPE_ERROR" "NUMBER" #C(1 2)))
+              (summary (complex 1 2)))))

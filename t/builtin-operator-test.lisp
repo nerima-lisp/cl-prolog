@@ -27,8 +27,7 @@
                   (cl-prolog::current_op 450 cl-prolog::yfx valid-name)
                   :fails)))
 
-(progn
-  (deftest current-op-enumerates-with-cps-backtracking ()
+(deftest current-op-enumerates-with-cps-backtracking ()
     (let* ((rulebase (make-rulebase))
            (expected (length (cl-prolog::%operator-table-current
                               (cl-prolog::rulebase-operator-table rulebase))))
@@ -49,11 +48,11 @@
             for name = (format nil
                                "CL-PROLOG-INVALID-SPECIFIER-~D" index)
             do (is (null (find-symbol name :keyword)))
-               (signals-condition prolog-domain-error
+               (signals-prolog-condition prolog-domain-error
                  (cl-prolog::%operator-specifier
                   (make-symbol name) nil operation))
                (is (null (find-symbol name :keyword))))
-      (is-equal before (package-owned-symbol-count :keyword)))))
+      (is-equal before (package-owned-symbol-count :keyword))))
 
 (deftest-table operator-builtins-report-iso-errors ()
   (:equal 'prolog-instantiation-error
