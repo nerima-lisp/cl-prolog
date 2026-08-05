@@ -15,47 +15,41 @@
 
 ;;; atom_string/2, string_to_atom/2, number_string/2
 
-(define-builtin (atom_string atom string) (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "ATOM_STRING"))
-         (atom-value (logic-substitute atom environment)))
-    (if (logic-var-p atom-value)
-        ;; string → atom
-        (%unify-emit atom (%text-atom (%text-of (logic-substitute string environment)
-                                                environment operation))
-                     environment emit)
-        ;; atom (or any text) → string
-        (%unify-emit string (%text-of atom-value environment operation)
-                     environment emit))))
+(define-iso-builtin (atom_string atom (string :raw)) "ATOM_STRING"
+  (if (logic-var-p resolved-atom)
+      ;; string → atom
+      (%unify-emit atom (%text-atom (%text-of (logic-substitute string environment)
+                                              environment operation))
+                   environment emit)
+      ;; atom (or any text) → string
+      (%unify-emit string (%text-of resolved-atom environment operation)
+                   environment emit)))
 
-(define-builtin (string_to_atom string atom) (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "STRING_TO_ATOM"))
-         (string-value (logic-substitute string environment)))
-    (if (logic-var-p string-value)
-        ;; atom → string
-        (%unify-emit string (%text-of (logic-substitute atom environment)
-                                      environment operation)
-                     environment emit)
-        ;; string → atom
-        (%unify-emit atom (%text-atom (%text-of string-value environment operation))
-                     environment emit))))
+(define-iso-builtin (string_to_atom string (atom :raw)) "STRING_TO_ATOM"
+  (if (logic-var-p resolved-string)
+      ;; atom → string
+      (%unify-emit string (%text-of (logic-substitute atom environment)
+                                    environment operation)
+                   environment emit)
+      ;; string → atom
+      (%unify-emit atom (%text-atom (%text-of resolved-string environment operation))
+                   environment emit)))
 
-(define-builtin (number_string number string) (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "NUMBER_STRING"))
-         (number-value (logic-substitute number environment)))
-    (if (logic-var-p number-value)
-        ;; string → number
-        (%unify-emit number
-                     (%text-number (string-trim '(#\Space #\Tab #\Newline)
-                                                (%text-of (logic-substitute string environment)
-                                                          environment operation))
-                                   environment operation)
-                     environment emit)
-        (progn
-          (unless (or (integerp number-value) (floatp number-value))
-            (%raise-type-error "NUMBER" number-value environment operation
-                               "number_string/2 first argument must be a number"))
-          (%unify-emit string (%number-text number-value environment operation)
-                       environment emit)))))
+(define-iso-builtin (number_string number (string :raw)) "NUMBER_STRING"
+  (if (logic-var-p resolved-number)
+      ;; string → number
+      (%unify-emit number
+                   (%text-number (string-trim '(#\Space #\Tab #\Newline)
+                                              (%text-of (logic-substitute string environment)
+                                                        environment operation))
+                                 environment operation)
+                   environment emit)
+      (progn
+        (unless (or (integerp resolved-number) (floatp resolved-number))
+          (%raise-type-error "NUMBER" resolved-number environment operation
+                             "number_string/2 first argument must be a number"))
+        (%unify-emit string (%number-text resolved-number environment operation)
+                     environment emit))))
 
 ;;; string_chars/2, string_codes/2
 
@@ -85,17 +79,15 @@
 
 ;;; term_string/2
 
-(define-builtin (term_string term string) (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "TERM_STRING"))
-         (resolved-term (logic-substitute term environment)))
-    (if (logic-var-p resolved-term)
-        (%unify-emit term
-                     (%parse-term-from-text
-                      (%text-of (logic-substitute string environment)
-                                environment operation)
-                      rulebase environment operation)
-                     environment emit)
-        (%unify-emit string (prolog-term-string resolved-term) environment emit))))
+(define-iso-builtin (term_string term (string :raw)) "TERM_STRING"
+  (if (logic-var-p resolved-term)
+      (%unify-emit term
+                   (%parse-term-from-text
+                    (%text-of (logic-substitute string environment)
+                              environment operation)
+                    rulebase environment operation)
+                   environment emit)
+      (%unify-emit string (prolog-term-string resolved-term) environment emit)))
 
 ;;; string_concat/3 and text_concat/3
 
@@ -160,14 +152,9 @@ MAKE-RESULT wraps a CL string as the emitted term (string or atom)."
 
 ;;; sub_string/5 -- like sub_atom/5 but the sub-term is a string.
 
-(define-builtin (sub_string string before length after sub)
-    (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "SUB_STRING"))
-         (text (%text-of (logic-substitute string environment) environment operation))
-         (total (length text))
-         (before-value (logic-substitute before environment))
-         (length-value (logic-substitute length environment))
-         (sub-value (logic-substitute sub environment)))
+(define-iso-builtin (sub_string string before length (after :raw) sub) "SUB_STRING"
+  (let* ((text (%text-of resolved-string environment operation))
+         (total (length text)))
     (flet ((emit-slice (b l)
              (let ((piece (subseq text b (+ b l))))
                (%term-unify-sequence
@@ -176,23 +163,23 @@ MAKE-RESULT wraps a CL string as the emitted term (string or atom)."
                 environment emit))))
       (cond
         ;; sub given as text: find all occurrences.
-        ((and (logic-var-p before-value) (not (logic-var-p sub-value)))
-         (let* ((piece (%text-of sub-value environment operation))
+        ((and (logic-var-p resolved-before) (not (logic-var-p resolved-sub)))
+         (let* ((piece (%text-of resolved-sub environment operation))
                 (l (length piece)))
            (loop for b from 0 to (- total l)
                  when (string= piece text :start2 b :end2 (+ b l))
                    do (emit-slice b l))))
         ;; before and length both known.
-        ((and (integerp before-value) (integerp length-value))
-         (when (and (<= 0 before-value) (<= 0 length-value)
-                    (<= (+ before-value length-value) total))
-           (emit-slice before-value length-value)))
+        ((and (integerp resolved-before) (integerp resolved-length))
+         (when (and (<= 0 resolved-before) (<= 0 resolved-length)
+                    (<= (+ resolved-before resolved-length) total))
+           (emit-slice resolved-before resolved-length)))
         ;; otherwise enumerate all (before, length) slices.
         (t
          (loop for b from 0 to total
-               when (or (not (integerp before-value)) (= b before-value))
+               when (or (not (integerp resolved-before)) (= b resolved-before))
                  do (loop for l from 0 to (- total b)
-                          when (or (not (integerp length-value)) (= l length-value))
+                          when (or (not (integerp resolved-length)) (= l resolved-length))
                             do (emit-slice b l))))))))
 
 ;;; split_string/4
@@ -210,12 +197,10 @@ yields the whole TEXT as a single field."
         (push (subseq text start) fields)
         (nreverse fields))))
 
-(define-builtin (split_string string separators pad parts)
-    (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "SPLIT_STRING"))
-         (text (%text-of (logic-substitute string environment) environment operation))
-         (sep (%text-of (logic-substitute separators environment) environment operation))
-         (pad (%text-of (logic-substitute pad environment) environment operation))
+(define-iso-builtin (split_string string separators pad (parts :raw)) "SPLIT_STRING"
+  (let* ((text (%text-of resolved-string environment operation))
+         (sep (%text-of resolved-separators environment operation))
+         (pad (%text-of resolved-pad environment operation))
          (pad-bag (coerce pad 'list))
          (fields (mapcar (lambda (field) (string-trim pad-bag field))
                          (%split-string-fields text sep))))

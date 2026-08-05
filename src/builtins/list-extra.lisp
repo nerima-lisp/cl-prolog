@@ -58,25 +58,22 @@ format builtins to cap attacker-controlled allocation."
 
 ;;; numlist/3
 
-(define-builtin (numlist low high list-term) (rulebase environment depth emit)
-  (let ((operation (%iso-atom "NUMLIST"))
-        (low-value (logic-substitute low environment))
-        (high-value (logic-substitute high environment)))
-    (dolist (bound (list low-value high-value))
-      (cond
-        ((logic-var-p bound)
-         (%raise-instantiation-error environment operation
-                                     "numlist/3 bounds must be instantiated"))
-        ((not (integerp bound))
-         (%raise-type-error "INTEGER" bound environment operation
-                            "numlist/3 bounds must be integers"))))
-    (when (<= low-value high-value)
-      (%check-builtin-output-length
-       (1+ (- high-value low-value)) "LIST_LENGTH" environment operation
-       "numlist/3 range exceeds the configured length limit")
-      (%unify-emit list-term
-                   (loop for n from low-value to high-value collect n)
-                   environment emit))))
+(define-iso-builtin (numlist low high (list-term :raw)) "NUMLIST"
+  (dolist (bound (list resolved-low resolved-high))
+    (cond
+      ((logic-var-p bound)
+       (%raise-instantiation-error environment operation
+                                   "numlist/3 bounds must be instantiated"))
+      ((not (integerp bound))
+       (%raise-type-error "INTEGER" bound environment operation
+                          "numlist/3 bounds must be integers"))))
+  (when (<= resolved-low resolved-high)
+    (%check-builtin-output-length
+     (1+ (- resolved-high resolved-low)) "LIST_LENGTH" environment operation
+     "numlist/3 range exceeds the configured length limit")
+    (%unify-emit list-term
+                 (loop for n from resolved-low to resolved-high collect n)
+                 environment emit)))
 
 ;;; list_to_set/2 -- deduplicate under standard order of terms (==),
 ;;; preserving first-occurrence order.  O(n log n): tag each element with its
@@ -146,29 +143,26 @@ format builtins to cap attacker-controlled allocation."
 ;;; permutation/2 -- nondeterministic; enumerates permutations of the
 ;;; instantiated list argument.
 
-(define-builtin (permutation list-term permuted) (rulebase environment depth emit)
-  (let* ((operation (%iso-atom "PERMUTATION"))
-         (source (logic-substitute list-term environment))
-         (target (logic-substitute permuted environment)))
-    (multiple-value-bind (elements result-variable)
-        (cond
-          ((%proper-list-p source) (values source permuted))
-          ((%proper-list-p target) (values target list-term))
-          (t (%raise-instantiation-error
-              environment operation
-              "permutation/2 requires one proper-list argument")))
-      (labels ((permute (remaining accumulator current-environment)
-                 (if (null remaining)
-                     (%unify-emit result-variable (reverse accumulator)
-                                  current-environment emit)
-                     ;; Select each position in a single pass: SKIPPED holds
-                     ;; the already-passed elements (reversed), so the rest is
-                     ;; built with one REVAPPEND instead of NTH + two SUBSEQs.
-                     ;; Handles duplicate and numeric elements without EQ.
-                     (let ((skipped '()))
-                       (loop for cell on remaining
-                             do (permute (revappend skipped (cdr cell))
-                                         (cons (car cell) accumulator)
-                                         current-environment)
-                                (push (car cell) skipped))))))
-        (permute elements '() environment)))))
+(define-iso-builtin (permutation list-term permuted) "PERMUTATION"
+  (multiple-value-bind (elements result-variable)
+      (cond
+        ((%proper-list-p resolved-list-term) (values resolved-list-term permuted))
+        ((%proper-list-p resolved-permuted) (values resolved-permuted list-term))
+        (t (%raise-instantiation-error
+            environment operation
+            "permutation/2 requires one proper-list argument")))
+    (labels ((permute (remaining accumulator current-environment)
+               (if (null remaining)
+                   (%unify-emit result-variable (reverse accumulator)
+                                current-environment emit)
+                   ;; Select each position in a single pass: SKIPPED holds
+                   ;; the already-passed elements (reversed), so the rest is
+                   ;; built with one REVAPPEND instead of NTH + two SUBSEQs.
+                   ;; Handles duplicate and numeric elements without EQ.
+                   (let ((skipped '()))
+                     (loop for cell on remaining
+                           do (permute (revappend skipped (cdr cell))
+                                       (cons (car cell) accumulator)
+                                       current-environment)
+                              (push (car cell) skipped))))))
+      (permute elements '() environment))))
